@@ -87,10 +87,13 @@ export function evaluateDoc(cfg, o, ctx = {}) {
   };
   const fire = (id, sev, en, ar, extra) => firings.push({ id, sev, en: resolve(en, { ...p, ...extra }), ar: resolve(ar, { ...p, ...extra }) });
 
-  // eligibility — the legal receiver-rejection window, from the received timestamp
+  // eligibility — the legal receiver-rejection window, from the received timestamp. The window
+  // comes from the per-document-type resolver (window.js service) when injected; cfg.windowDays
+  // stays the user-editable fallback so behavior without the service is unchanged.
   const rec = Date.parse(receivedAt(o) || '');
   const ageDays = Number.isFinite(rec) ? (now - rec) / 86400000 : null;
-  const eligible = ageDays != null && ageDays >= 0 && ageDays <= cfg.windowDays;
+  const wd = num(ctx.resolveWindow ? ctx.resolveWindow(o) : null) ?? cfg.windowDays;
+  const eligible = ageDays != null && ageDays >= 0 && ageDays <= wd;
 
   if (!o?.uuid || num(o?.totalAmount) == null || !digits(o?.issuer?.id)) {
     fire('DATA-MISSING', 'flag',
@@ -143,5 +146,5 @@ export function evaluateDoc(cfg, o, ctx = {}) {
   }
 
   const verdict = firings.some((f) => f.sev === 'reject') ? 'reject' : firings.length ? 'flag' : 'pass';
-  return { verdict, eligible, ageDays, dupKey, firings };
+  return { verdict, eligible, ageDays, windowDays: wd, dupKey, firings };
 }
