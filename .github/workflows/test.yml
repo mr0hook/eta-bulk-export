@@ -1,0 +1,22 @@
+name: test
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    env:
+      # The chunker uses Cairo-local day boundaries (src/core/time.js). Pin the runner's
+      # timezone so day-split invariants match the browser's Cairo environment. tz.test.mjs
+      # also asserts this and fails loudly if it drifts. (npm test pins it again via cross-env.)
+      TZ: Africa/Cairo
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm ci
+      - run: npm test
+      - run: npm run build

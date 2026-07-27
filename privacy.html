@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacy Policy — ETA Bulk Export</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { max-width: 760px; margin: 40px auto; padding: 0 20px; line-height: 1.6;
+    font-family: system-ui, -apple-system, Segoe UI, sans-serif; color: #1f2937; background: #fff; }
+  @media (prefers-color-scheme: dark){ body{ color:#e5e7eb; background:#0f1115 } a{ color:#e3a552 } code{ background:#1b222c } .lead{ background:#151a21; border-color:#28303c } th,td{ border-color:#28303c } }
+  h1 { font-size: 26px; margin: 0 0 4px; } .date { color: #6b7280; font-size: 13px; margin-bottom: 24px; }
+  h2 { font-size: 17px; margin: 28px 0 8px; }
+  .lead { background: #f8fafc; border: 1px solid #e5e7eb; border-radius: 10px; padding: 14px 16px; font-weight: 500; }
+  code { background: #f1f5f9; padding: 1px 5px; border-radius: 4px; font-size: 90%; }
+  ul { padding-left: 20px; } li { margin: 4px 0; }
+  table { border-collapse: collapse; width: 100%; margin: 8px 0; }
+  th, td { border: 1px solid #e5e7eb; padding: 8px 10px; text-align: left; vertical-align: top; font-size: 14px; }
+  a { color: #2563eb; }
+  .tag { display:inline-block; font: 600 11px ui-monospace; padding: 2px 8px; border-radius: 999px; background:#e6f5ee; color:#177d54; border:1px solid #bfe3d1; }
+</style>
+</head>
+<body>
+  <h1>Privacy Policy — ETA Bulk Export</h1>
+  <div class="date">Last updated: 11 July 2026 · Data controller: Omar Soliman</div>
+
+  <p class="lead">ETA Bulk Export handles data in <b>two independent flows</b>: (1) your invoice &amp; receipt
+  content, which stays on your device and is never sent to us; and (2) the registration &amp; account data you
+  provide to unlock the tool, which is sent to the developer's backend. Both are described below. The
+  always-current version of this policy is served at
+  <code>https://eta-bulk-leads.omsoliman95.workers.dev/privacy</code>.</p>
+
+  <h2>1. Your invoice &amp; receipt data — stays on your device <span class="tag">not sent to us</span></h2>
+  <p>When you use it on <code>https://invoicing.eta.gov.eg</code>, the extension:</p>
+  <ul>
+    <li>reads the access token the ETA portal already stored in your browser (<code>localStorage.USER_DATA</code>),</li>
+    <li>uses it to call the ETA API (<code>https://api-portal.invoicing.eta.gov.eg</code>) to download <b>your own</b> e-invoices / e-receipts (the same data the portal shows you), and</li>
+    <li>writes the resulting Excel/JSON files to a folder <b>you</b> pick.</li>
+  </ul>
+  <p>This content is attached only to requests to <code>api-portal.invoicing.eta.gov.eg</code> (enforced by an
+  origin check in code) and written only to your chosen local folder. It is <b>never</b> transmitted to the
+  developer, to the backend below, or to any third party.</p>
+
+  <h2>2. Registration &amp; account data — sent to the backend</h2>
+  <p>Bulk export requires a free, one-time registration. The following is sent to the developer's backend at
+  <code>eta-bulk-leads.omsoliman95.workers.dev</code> (hosted on Cloudflare):</p>
+  <table>
+    <tr><th>When</th><th>Data</th><th>Why</th></tr>
+    <tr><td>On registration</td><td>Name, email, phone, company (typed by you); your <b>tax registration number (RIN)</b> and <b>taxpayer legal name</b> (read automatically from the ETA portal); a random device identifier; the extension version.</td><td>Create your account, bind it to your RIN, and contact you about the tool.</td></tr>
+    <tr><td>Automatically by the server</td><td>Your <b>IP address</b> and derived <b>country</b> (via Cloudflare); the result of an email-deliverability check (via a third-party service, Disify).</td><td>Abuse prevention and rejecting invalid/disposable emails.</td></tr>
+    <tr><td>On each licence check-in</td><td>Your <b>RIN</b> and extension version are re-sent periodically.</td><td>Enforce access controls (lock, disable, version, voided RIN).</td></tr>
+    <tr><td>If you submit a bug report</td><td>The <b>message you type</b> and your browser <b>user-agent</b>.</td><td>Diagnose and fix the issue.</td></tr>
+  </table>
+  <p>You explicitly consent via the checkbox on the registration form before anything is sent. This data is
+  <b>not sold</b> and is processed only by the operator and the named providers (Cloudflare; Disify).</p>
+
+  <h2>What is stored on your device</h2>
+  <ul>
+    <li><code>localStorage</code> — export run state (so you can resume); your registration credentials (device id, a per-device key, the last licence verdict).</li>
+    <li><code>IndexedDB</code> — a handle to the output folder you granted, so it can be reused.</li>
+    <li>The exported files — in the folder you chose.</li>
+  </ul>
+
+  <h2>Retention</h2>
+  <p>Account records are kept until you request deletion or the operator removes the account. Admin action logs
+  auto-expire after 180 days; anti-abuse counters expire within hours.</p>
+
+  <h2>Permissions and why</h2>
+  <ul>
+    <li><b><code>invoicing.eta.gov.eg</code> and <code>api-portal.invoicing.eta.gov.eg</code></b> — run on the portal and read your invoice/receipt data from the ETA API.</li>
+    <li><b><code>eta-bulk-leads.omsoliman95.workers.dev</code></b> — the registration / licence backend (section 2).</li>
+    <li>The output-folder picker uses the File System Access API (explicit selection each time; no separate permission).</li>
+  </ul>
+
+  <h2>Your choices &amp; rights</h2>
+  <p>Registration is required only for bulk export. You can stop using the extension and request access to,
+  correction of, or deletion of your data at any time by emailing the developer at
+  <a href="mailto:omsoliman95@gmail.com">omsoliman95@gmail.com</a>. Uninstalling stops all further data
+  collection.</p>
+
+  <h2>Contact</h2>
+  <p>Omar Soliman (data controller) — <a href="mailto:omsoliman95@gmail.com">omsoliman95@gmail.com</a></p>
+</body>
+</html>

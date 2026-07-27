@@ -1,0 +1,29 @@
+// ISOLATED-world bridge (runs at document_start, before the MAIN-world bundle).
+//
+// The MAIN-world bundle can't touch chrome.* APIs, and its own fetch() to the backend is CSP-blocked.
+// So it posts a window message here; we relay to the background service worker (which does the real
+// cross-origin fetch) and post the reply back. MAIN and ISOLATED worlds share the same `window`, so
+// window.postMessage is the channel between them.
+//
+// Trust model: this content script only runs on the ETA portal origin, which the whole tool already
+// trusts (it reads the portal's own auth token from the page). Messages are correlated by id.
+(function () {
+  window.addEventListener('message', function (e) {
+    if (e.source !== window) return;                 // same-frame only
+    var d = e.data;
+    if (!d || d.__eta !== 'req' || !d.id) return;
+    if (d.kind === 'lead-fetch') {
+      try {
+        chrome.runtime.sendMessage(
+          { type: 'eta-lead-fetch', url: d.url, method: d.method, headers: d.headers, body: d.body },
+          function (resp) {
+            var err = chrome.runtime.lastError;
+            window.postMessage({ __eta: 'res', id: d.id, result: err ? { ok: false, status: 0, error: err.message } : (resp || { ok: false, status: 0, error: 'no response' }) }, location.origin);
+          }
+        );
+      } catch (ex) {
+        window.postMessage({ __eta: 'res', id: d.id, result: { ok: false, status: 0, error: String((ex && ex.message) || ex) } }, location.origin);
+      }
+    }
+  });
+})();

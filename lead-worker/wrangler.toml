@@ -1,0 +1,39 @@
+name = "eta-bulk-leads"
+main = "worker.js"
+# Keep this recent — Cloudflare's Workers best-practices guide (Feb 2026) recommends setting it to
+# ~today's date so you get current runtime behavior. nodejs_compat is inert here (we use only web APIs)
+# but is the documented default and future-proofs the Worker.
+compatibility_date = "2026-07-09"
+compatibility_flags = ["nodejs_compat"]
+
+# KV namespace "ETA_BULK_LEADS" — already created in your account (id below), bound as LEADS.
+kv_namespaces = [
+  { binding = "LEADS", id = "7d039a655c434302a5e8fcae6a5450d0" }
+]
+
+# Durable Object "Locks" — strongly-consistent, single-threaded coordination for ATOMIC RIN-ownership claims
+# and rate limiting (Cloudflare KV has no compare-and-set). Available on the Workers Free plan. The migration
+# below creates the SQLite-backed class on first `wrangler deploy`. The Worker code falls back to KV if the
+# binding is ever absent, so it still runs without this.
+[[durable_objects.bindings]]
+name = "LOCKS"
+class_name = "Locks"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["Locks"]
+
+# Daily analytics snapshot at 02:00 UTC (~04-05:00 Cairo, off-peak) — scheduled() writes one snap:<date>
+# KV record per day (120-day TTL) feeding the dashboard's Trend chart. Free plan supports cron triggers.
+[triggers]
+crons = ["0 2 * * *"]
+
+# Workers Logs: ingest + index logs for 7 days so you can debug register/session/admin traffic and 4xx/5xx.
+[observability]
+enabled = true
+
+  [observability.logs]
+  invocation_logs = true
+
+# ADMIN_TOKEN guards /admin, /api/*, and /export (via the Authorization: Bearer header). Set it once with:
+#   wrangler secret put ADMIN_TOKEN

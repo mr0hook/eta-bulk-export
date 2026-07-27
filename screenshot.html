@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=1280, initial-scale=1">
+<title>ETA Bulk Export</title>
+<style>
+  html,body{ margin:0; height:100%; font-family:system-ui,Segoe UI,sans-serif; background:#eef1f5; color:#334155; }
+  .top{ height:56px; background:#fff; border-bottom:1px solid #e2e8f0; display:flex; align-items:center; gap:14px; padding:0 28px; }
+  .top .logo{ width:30px;height:30px;border-radius:7px;background:linear-gradient(135deg,#0ea5e9,#2563eb); }
+  .top .t{ font-weight:700; font-size:15px; color:#0f172a; } .top .sp{ flex:1 }
+  .top .tab{ font-size:13px; color:#64748b; padding:6px 12px; border-radius:7px } .top .tab.on{ background:#eff6ff; color:#2563eb; font-weight:600 }
+  .wrap{ padding:26px 28px; max-width:940px; }
+  h1{ font-size:20px; margin:0 0 4px; color:#0f172a } .sub{ color:#64748b; font-size:13px; margin-bottom:20px }
+  .filters{ display:flex; gap:10px; margin-bottom:18px } .filters .f{ height:36px; width:150px; background:#fff; border:1px solid #e2e8f0; border-radius:8px }
+  table{ width:100%; border-collapse:collapse; background:#fff; border:1px solid #e2e8f0; border-radius:10px; overflow:hidden; font-size:13px }
+  th,td{ text-align:left; padding:11px 14px; border-bottom:1px solid #f1f5f9; color:#475569 } th{ background:#f8fafc; color:#64748b; font-weight:600 }
+  td .pill{ font-size:11px; padding:3px 8px; border-radius:999px; background:#dcfce7; color:#166534 }
+</style>
+</head>
+<body>
+  <div class="top"><div class="logo"></div><div class="t">eInvoicing</div><div class="sp"></div>
+    <div class="tab on">Documents</div><div class="tab">Recent</div><div class="tab">Search</div></div>
+  <div class="wrap">
+    <h1>Search All Documents</h1>
+    <div class="sub">2,847 documents · Jan – Dec 2025</div>
+    <div class="filters"><div class="f"></div><div class="f"></div><div class="f"></div></div>
+    <table>
+      <thead><tr><th>Internal ID</th><th>Type</th><th>Issue date</th><th>Total</th><th>Status</th></tr></thead>
+      <tbody>
+        <tr><td>INV-0091432</td><td>Invoice</td><td>2025-12-31</td><td>9,239.99</td><td><span class="pill">Valid</span></td></tr>
+        <tr><td>INV-0091431</td><td>Invoice</td><td>2025-12-31</td><td>1,140.00</td><td><span class="pill">Valid</span></td></tr>
+        <tr><td>INV-0091430</td><td>Credit Note</td><td>2025-12-30</td><td>560.00</td><td><span class="pill">Valid</span></td></tr>
+        <tr><td>INV-0091429</td><td>Invoice</td><td>2025-12-30</td><td>3,410.50</td><td><span class="pill">Valid</span></td></tr>
+        <tr><td>INV-0091428</td><td>Invoice</td><td>2025-12-29</td><td>7,880.00</td><td><span class="pill">Valid</span></td></tr>
+        <tr><td>INV-0091427</td><td>Invoice</td><td>2025-12-29</td><td>612.00</td><td><span class="pill">Valid</span></td></tr>
+      </tbody>
+    </table>
+  </div>
+  <!-- load ONLY the built bundle (no ExcelJS on this page → fast screenshots) -->
+  <script src="dist/etaBulk.js"></script>
+  <script>
+    // Auto-populate a realistic "running" state for store screenshots.
+    // Open screenshot.html for the Configure/Plan view, or screenshot.html#run for the Run/counter view.
+    // Capture at 1280x800. Re-paints on an interval so the live token-refresh can't revert the demo state.
+    function paint() {
+      const host = document.getElementById('eta-bulk-host');
+      if (!host || !host.shadowRoot) return;
+      const r = host.shadowRoot, $ = (id) => r.querySelector('#' + id);
+      $('drawer').classList.add('on'); $('scrim').classList.add('on');
+      if (location.hash === '#gate') { const g = $('gate'); if (g) { g.hidden = false; if ($('main')) $('main').hidden = true; if ($('srcrow')) $('srcrow').style.display = 'none'; if ($('gate-form')) $('gate-form').hidden = false; if ($('gate-blocked')) $('gate-blocked').hidden = true; } }   // preview the full-screen registration page
+      $('s-chunks').textContent = '128'; $('s-rows').textContent = '312,899'; $('s-big').textContent = '2,974'; $('s-eta').textContent = '6h 12m';
+      $('t-done').textContent = '19'; $('t-fail').textContent = '0'; $('t-left').textContent = '109';
+      $('procN').textContent = '45,230'; $('procT').textContent = '312,899'; $('bar').style.width = '14.5%'; $('procLabel').textContent = 'invoices fetched';
+      $('folder').textContent = 'Raya_2025_Exports/';
+      $('start').disabled = true; $('pause').disabled = false;
+      $('ckLabel').textContent = 'chunk 20/128 · fetching details'; $('ckCur').textContent = '1,840 / 2,974'; $('chunkbar').style.width = '62%';
+      $('log').textContent = '▶ Chunk 20/128 (2025-03-21→2025-03-28) fetching 1,840/2,974…\n▶ Chunk 20/128 fetching details (2,974)…\n▶ Chunk 20/128 building xlsx → folder';
+      const ft = $('ft'); ft.className = 'ft run'; $('ftmsg').textContent = 'Running · chunk 20/128 · 45,230 rows written';
+      const tok = $('tok'); tok.className = 'chip ok'; tok.querySelector('.num').textContent = '12m';
+      if (location.hash === '#run') { const rc = $('procN').closest('.card'); r.querySelector('.body').scrollTop = rc.offsetTop - 64; }
+    }
+    setInterval(paint, 400);
+    window.addEventListener('load', () => setTimeout(paint, 300));
+  </script>
+</body>
+</html>

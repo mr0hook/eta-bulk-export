@@ -1,0 +1,22 @@
+{
+  "name": "eta-bulk-export",
+  "version": "0.3.0",
+  "private": true,
+  "type": "module",
+  "description": "Bulk-export your own Egyptian Tax Authority e-invoices and e-receipts to Excel/JSON, past the portal's per-search caps. Clean-room, no third-party gated code.",
+  "scripts": {
+    "build": "node build.mjs",
+    "icons": "node icons/gen-icons.mjs",
+    "test": "cross-env TZ=Africa/Cairo node --test",
+    "package": "node build.mjs && node package-ext.mjs",
+    "package:source": "node package-source.mjs"
+  },
+  "devDependencies": {
+    "cross-env": "^10.1.0",
+    "esbuild": "^0.23.1",
+    "exceljs": "^4.4.0"
+  },
+  "dependencies": {
+    "jszip": "^3.10.1"
+  }
+}

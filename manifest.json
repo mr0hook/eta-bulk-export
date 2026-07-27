@@ -1,0 +1,32 @@
+{
+  "manifest_version": 3,
+  "name": "ETA Bulk Export",
+  "version": "0.3.0",
+  "description": "Bulk-export your own Egyptian Tax Authority e-invoices and e-receipts to Excel/JSON, past the portal's per-search caps.",
+  "minimum_chrome_version": "111",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "host_permissions": [
+    "https://invoicing.eta.gov.eg/*",
+    "https://api-portal.invoicing.eta.gov.eg/*",
+    "https://eta-bulk-leads.omsoliman95.workers.dev/*"
+  ],
+  "background": { "service_worker": "bg.js" },
+  "content_scripts": [
+    {
+      "matches": ["https://invoicing.eta.gov.eg/*"],
+      "js": ["bridge.js"],
+      "run_at": "document_start",
+      "world": "ISOLATED"
+    },
+    {
+      "matches": ["https://invoicing.eta.gov.eg/*"],
+      "js": ["csp-shim.js", "vendor/exceljs.min.js", "dist/etaBulk.js"],
+      "run_at": "document_idle",
+      "world": "MAIN"
+    }
+  ]
+}

@@ -1,0 +1,5627 @@
+{
+ "_source": "https://sdk.invoicing.eta.gov.eg (official ETA eInvoicing/eReceipt SDK)",
+ "_fetched": "2026-06 (public reference data)",
+ "taxTypes": [
+  {
+   "code": "T1",
+   "en": "Value added tax",
+   "ar": "ضريبه القيمه المضافه"
+  },
+  {
+   "code": "T2",
+   "en": "Table tax (percentage)",
+   "ar": "ضريبه الجدول (نسبيه)"
+  },
+  {
+   "code": "T3",
+   "en": "Table tax (Fixed Amount)",
+   "ar": "ضريبه الجدول (قطعيه)"
+  },
+  {
+   "code": "T4",
+   "en": "Withholding tax (WHT)",
+   "ar": "الخصم تحت حساب الضريبه"
+  },
+  {
+   "code": "T5",
+   "en": "Stamping tax (percentage)",
+   "ar": "ضريبه الدمغه (نسبيه)"
+  },
+  {
+   "code": "T6",
+   "en": "Stamping Tax (amount)",
+   "ar": "ضريبه الدمغه (قطعيه بمقدار ثابت )"
+  },
+  {
+   "code": "T7",
+   "en": "Entertainment tax",
+   "ar": "ضريبة الملاهى"
+  },
+  {
+   "code": "T8",
+   "en": "Resource development fee",
+   "ar": "رسم تنميه الموارد"
+  },
+  {
+   "code": "T9",
+   "en": "Table tax (percentage)",
+   "ar": "رسم خدمة"
+  },
+  {
+   "code": "T10",
+   "en": "Municipality Fees",
+   "ar": "رسم المحليات"
+  },
+  {
+   "code": "T11",
+   "en": "Medical insurance fee",
+   "ar": "رسم التامين الصحى"
+  },
+  {
+   "code": "T12",
+   "en": "Other fees",
+   "ar": "رسوم أخري"
+  }
+ ],
+ "nonTaxableTaxTypes": [
+  {
+   "code": "T13",
+   "en": "Stamping tax (percentage)",
+   "ar": "ضريبه الدمغه (نسبيه)"
+  },
+  {
+   "code": "T14",
+   "en": "Stamping Tax (amount)",
+   "ar": "ضريبه الدمغه (قطعيه بمقدار ثابت )"
+  },
+  {
+   "code": "T15",
+   "en": "Entertainment tax",
+   "ar": "ضريبة الملاهى"
+  },
+  {
+   "code": "T16",
+   "en": "Resource development fee",
+   "ar": "رسم تنميه الموارد"
+  },
+  {
+   "code": "T17",
+   "en": "Table tax (percentage)",
+   "ar": "رسم خدمة"
+  },
+  {
+   "code": "T18",
+   "en": "Municipality Fees",
+   "ar": "رسم المحليات"
+  },
+  {
+   "code": "T19",
+   "en": "Medical insurance fee",
+   "ar": "رسم التامين الصحى"
+  },
+  {
+   "code": "T20",
+   "en": "Other fees",
+   "ar": "رسوم أخرى"
+  }
+ ],
+ "taxSubtypes": [
+  {
+   "code": "V001",
+   "en": "Export",
+   "ar": "تصدير للخارج",
+   "taxType": "T1"
+  },
+  {
+   "code": "V002",
+   "en": "Export to free areas and other areas",
+   "ar": "تصدير مناطق حرة وأخرى",
+   "taxType": "T1"
+  },
+  {
+   "code": "V003",
+   "en": "Exempted good or service",
+   "ar": "سلعة أو خدمة معفاة",
+   "taxType": "T1"
+  },
+  {
+   "code": "V004",
+   "en": "A non-taxable good or service",
+   "ar": "سلعة أو خدمة غير خاضعة للضريبة",
+   "taxType": "T1"
+  },
+  {
+   "code": "V005",
+   "en": "Exemptions for diplomats, consulates and embassies",
+   "ar": "إعفاءات دبلوماسين والقنصليات والسفارات",
+   "taxType": "T1"
+  },
+  {
+   "code": "V006",
+   "en": "Defence and National security Exemptions",
+   "ar": "إعفاءات الدفاع والأمن القومى",
+   "taxType": "T1"
+  },
+  {
+   "code": "V007",
+   "en": "Agreements exemptions",
+   "ar": "إعفاءات اتفاقيات",
+   "taxType": "T1"
+  },
+  {
+   "code": "V008",
+   "en": "Special Exemptios and other reasons",
+   "ar": "إعفاءات خاصة و أخرى",
+   "taxType": "T1"
+  },
+  {
+   "code": "V009",
+   "en": "General Item sales",
+   "ar": "سلع عامة",
+   "taxType": "T1"
+  },
+  {
+   "code": "V010",
+   "en": "Other Rates",
+   "ar": "نسب ضريبة أخرى",
+   "taxType": "T1"
+  },
+  {
+   "code": "Tbl01",
+   "en": "Table tax (percentage)",
+   "ar": "ضريبه الجدول (نسبيه)",
+   "taxType": "T2"
+  },
+  {
+   "code": "Tbl02",
+   "en": "Table tax (Fixed Amount)",
+   "ar": "ضريبه الجدول (النوعية)",
+   "taxType": "T3"
+  },
+  {
+   "code": "W001",
+   "en": "Contracting",
+   "ar": "المقاولات",
+   "taxType": "T4"
+  },
+  {
+   "code": "W002",
+   "en": "Supplies",
+   "ar": "التوريدات",
+   "taxType": "T4"
+  },
+  {
+   "code": "W003",
+   "en": "Purachases",
+   "ar": "المشتريات",
+   "taxType": "T4"
+  },
+  {
+   "code": "W004",
+   "en": "Services",
+   "ar": "الخدمات",
+   "taxType": "T4"
+  },
+  {
+   "code": "W005",
+   "en": "Sumspaid by the cooperative societies for car transportation to their members",
+   "ar": "المبالغالتي تدفعها الجميعات التعاونية للنقل بالسيارات لاعضائها",
+   "taxType": "T4"
+  },
+  {
+   "code": "W006",
+   "en": "Commissionagency & brokerage",
+   "ar": "الوكالةبالعمولة والسمسرة",
+   "taxType": "T4"
+  },
+  {
+   "code": "W007",
+   "en": "Discounts& grants & additional exceptional incentives granted by smoke &cement companies",
+   "ar": "الخصوماتوالمنح والحوافز الاستثنائية ةالاضافية التي تمنحها شركات الدخان والاسمنت ",
+   "taxType": "T4"
+  },
+  {
+   "code": "W008",
+   "en": "Alldiscounts & grants & commissions granted by petroleum &telecommunications & other companies",
+   "ar": "جميعالخصومات والمنح والعمولات  التيتمنحها  شركات البترول والاتصالات ...وغيرها من الشركات المخاطبة بنظام الخصم",
+   "taxType": "T4"
+  },
+  {
+   "code": "W009",
+   "en": "Supporting export subsidies",
+   "ar": "مساندة دعم الصادرات التي يمنحها صندوق تنمية الصادرات ",
+   "taxType": "T4"
+  },
+  {
+   "code": "W010",
+   "en": "Professional fees",
+   "ar": "اتعاب مهنية",
+   "taxType": "T4"
+  },
+  {
+   "code": "W011",
+   "en": "Commission & brokerage _A_57",
+   "ar": "العمولة والسمسرة _م_57",
+   "taxType": "T4"
+  },
+  {
+   "code": "W012",
+   "en": "Hospitals collecting from doctors",
+   "ar": "تحصيل المستشفيات من الاطباء",
+   "taxType": "T4"
+  },
+  {
+   "code": "W013",
+   "en": "Royalties",
+   "ar": "الاتاوات",
+   "taxType": "T4"
+  },
+  {
+   "code": "W014",
+   "en": "Customs clearance",
+   "ar": "تخليص جمركي ",
+   "taxType": "T4"
+  },
+  {
+   "code": "W015",
+   "en": "Exemption",
+   "ar": "أعفاء",
+   "taxType": "T4"
+  },
+  {
+   "code": "W016",
+   "en": "advance payments",
+   "ar": "دفعات مقدمه",
+   "taxType": "T4"
+  },
+  {
+   "code": "ST01",
+   "en": "Stamping tax (percentage)",
+   "ar": "ضريبه الدمغه (نسبيه)",
+   "taxType": "T5"
+  },
+  {
+   "code": "ST02",
+   "en": "Stamping Tax (amount)",
+   "ar": "ضريبه الدمغه (قطعيه بمقدار ثابت)",
+   "taxType": "T6"
+  },
+  {
+   "code": "Ent01",
+   "en": "Entertainment tax (rate)",
+   "ar": "ضريبة الملاهى (نسبة)",
+   "taxType": "T7"
+  },
+  {
+   "code": "Ent02",
+   "en": "Entertainment tax (amount)",
+   "ar": "ضريبة الملاهى (قطعية)",
+   "taxType": "T7"
+  },
+  {
+   "code": "RD01",
+   "en": "Resource development fee (rate)",
+   "ar": "رسم تنميه الموارد (نسبة)",
+   "taxType": "T8"
+  },
+  {
+   "code": "RD02",
+   "en": "Resource development fee (amount)",
+   "ar": "رسم تنميه الموارد (قطعية)",
+   "taxType": "T8"
+  },
+  {
+   "code": "SC01",
+   "en": "Service charges (rate)",
+   "ar": "رسم خدمة (نسبة)",
+   "taxType": "T9"
+  },
+  {
+   "code": "SC02",
+   "en": "Service charges (amount)",
+   "ar": "رسم خدمة (قطعية)",
+   "taxType": "T9"
+  },
+  {
+   "code": "Mn01",
+   "en": "Municipality Fees (rate)",
+   "ar": "رسم المحليات (نسبة)",
+   "taxType": "T10"
+  },
+  {
+   "code": "Mn02",
+   "en": "Municipality Fees (amount)",
+   "ar": "رسم المحليات (قطعية)",
+   "taxType": "T10"
+  },
+  {
+   "code": "MI01",
+   "en": "Medical insurance fee (rate)",
+   "ar": "رسم التامين الصحى (نسبة)",
+   "taxType": "T11"
+  },
+  {
+   "code": "MI02",
+   "en": "Medical insurance fee (amount)",
+   "ar": "رسم التامين الصحى (قطعية)",
+   "taxType": "T11"
+  },
+  {
+   "code": "OF01",
+   "en": "Other fees (rate)",
+   "ar": "رسوم أخرى (نسبة)",
+   "taxType": "T12"
+  },
+  {
+   "code": "OF02",
+   "en": "Other fees (amount)",
+   "ar": "رسوم أخرى (قطعية)",
+   "taxType": "T12"
+  },
+  {
+   "code": "ST03",
+   "en": "Stamping tax (percentage)",
+   "ar": "ضريبه الدمغه (نسبيه)",
+   "taxType": "T13"
+  },
+  {
+   "code": "ST04",
+   "en": "Stamping Tax (amount)",
+   "ar": "ضريبه الدمغه (قطعيه بمقدار ثابت)",
+   "taxType": "T14"
+  },
+  {
+   "code": "Ent03",
+   "en": "Entertainment tax (rate)",
+   "ar": "ضريبة الملاهى (نسبة)",
+   "taxType": "T15"
+  },
+  {
+   "code": "Ent04",
+   "en": "Entertainment tax (amount)",
+   "ar": "ضريبة الملاهى (قطعية)",
+   "taxType": "T15"
+  },
+  {
+   "code": "RD03",
+   "en": "Resource development fee (rate)",
+   "ar": "رسم تنميه الموارد (نسبة)",
+   "taxType": "T16"
+  },
+  {
+   "code": "RD04",
+   "en": "Resource development fee (amount)",
+   "ar": "رسم تنميه الموارد (قطعية)",
+   "taxType": "T16"
+  },
+  {
+   "code": "SC03",
+   "en": "Service charges (rate)",
+   "ar": "رسم خدمة (نسبة)",
+   "taxType": "T17"
+  },
+  {
+   "code": "SC04",
+   "en": "Service charges (amount)",
+   "ar": "رسم خدمة (قطعية)",
+   "taxType": "T17"
+  },
+  {
+   "code": "Mn03",
+   "en": "Municipality Fees (rate)",
+   "ar": "رسم المحليات (نسبة)",
+   "taxType": "T18"
+  },
+  {
+   "code": "Mn04",
+   "en": "Municipality Fees (amount)",
+   "ar": "رسم المحليات (قطعية)",
+   "taxType": "T18"
+  },
+  {
+   "code": "MI03",
+   "en": "Medical insurance fee (rate)",
+   "ar": "رسم التامين الصحى (نسبة)",
+   "taxType": "T19"
+  },
+  {
+   "code": "MI04",
+   "en": "Medical insurance fee (amount)",
+   "ar": "رسم التامين الصحى (قطعية)",
+   "taxType": "T19"
+  },
+  {
+   "code": "OF03",
+   "en": "Other fees (rate)",
+   "ar": "رسوم أخرى (نسبة)",
+   "taxType": "T20"
+  },
+  {
+   "code": "OF04",
+   "en": "Other fees (amount)",
+   "ar": "رسوم أخرى (قطعية)",
+   "taxType": "T20"
+  }
+ ],
+ "unitTypes": [
+  {
+   "code": "2Z",
+   "en": "Millivolt ( mV )",
+   "ar": ""
+  },
+  {
+   "code": "4K",
+   "en": "Milliampere ( mA )",
+   "ar": ""
+  },
+  {
+   "code": "4O",
+   "en": "Microfarad ( microF )",
+   "ar": ""
+  },
+  {
+   "code": "A87",
+   "en": "Gigaohm ( GOhm )",
+   "ar": ""
+  },
+  {
+   "code": "A93",
+   "en": "Gram/Cubic meter ( g/m3 )",
+   "ar": ""
+  },
+  {
+   "code": "A94",
+   "en": "Gram/cubic centimeter ( g/cm3 )",
+   "ar": ""
+  },
+  {
+   "code": "AMP",
+   "en": "Ampere ( A )",
+   "ar": ""
+  },
+  {
+   "code": "ANN",
+   "en": "Years ( yr )",
+   "ar": ""
+  },
+  {
+   "code": "B22",
+   "en": "Kiloampere ( kA )",
+   "ar": ""
+  },
+  {
+   "code": "B49",
+   "en": "Kiloohm ( kOhm )",
+   "ar": ""
+  },
+  {
+   "code": "B75",
+   "en": "Megohm ( MOhm )",
+   "ar": ""
+  },
+  {
+   "code": "B78",
+   "en": "Megavolt ( MV )",
+   "ar": ""
+  },
+  {
+   "code": "B84",
+   "en": "Microampere ( microA )",
+   "ar": ""
+  },
+  {
+   "code": "BAR",
+   "en": "bar ( bar )",
+   "ar": ""
+  },
+  {
+   "code": "BBL",
+   "en": "Barrel (oil 42 gal.)",
+   "ar": "برميل"
+  },
+  {
+   "code": "BG",
+   "en": "Bag ( Bag )",
+   "ar": ""
+  },
+  {
+   "code": "BO",
+   "en": "Bottle ( Bt. )",
+   "ar": ""
+  },
+  {
+   "code": "BOX",
+   "en": "Box",
+   "ar": "صندوق"
+  },
+  {
+   "code": "C10",
+   "en": "Millifarad ( mF )",
+   "ar": ""
+  },
+  {
+   "code": "C39",
+   "en": "Nanoampere ( nA )",
+   "ar": ""
+  },
+  {
+   "code": "C41",
+   "en": "Nanofarad ( nF )",
+   "ar": ""
+  },
+  {
+   "code": "C45",
+   "en": "Nanometer ( nm )",
+   "ar": ""
+  },
+  {
+   "code": "C62",
+   "en": "Activity unit ( AU )",
+   "ar": ""
+  },
+  {
+   "code": "CA",
+   "en": "Canister ( Can )",
+   "ar": ""
+  },
+  {
+   "code": "CMK",
+   "en": "Square centimeter ( cm2 )",
+   "ar": ""
+  },
+  {
+   "code": "CMQ",
+   "en": "Cubic centimeter ( cm3 )",
+   "ar": ""
+  },
+  {
+   "code": "CMT",
+   "en": "Centimeter ( cm )",
+   "ar": ""
+  },
+  {
+   "code": "CS",
+   "en": "Case ( Case )",
+   "ar": ""
+  },
+  {
+   "code": "CT",
+   "en": "Carton ( Car )",
+   "ar": ""
+  },
+  {
+   "code": "CTL",
+   "en": "Centiliter ( Cl )",
+   "ar": ""
+  },
+  {
+   "code": "D10",
+   "en": "Siemens per meter ( S/m )",
+   "ar": ""
+  },
+  {
+   "code": "D33",
+   "en": "Tesla ( D )",
+   "ar": ""
+  },
+  {
+   "code": "D41",
+   "en": "Ton/Cubic meter ( t/m3 )",
+   "ar": ""
+  },
+  {
+   "code": "DAY",
+   "en": "Days ( d )",
+   "ar": ""
+  },
+  {
+   "code": "DMT",
+   "en": "Decimeter ( dm )",
+   "ar": ""
+  },
+  {
+   "code": "DRM",
+   "en": "DRUM",
+   "ar": "أسطوانة"
+  },
+  {
+   "code": "EA",
+   "en": "each (ST) ( ST )",
+   "ar": ""
+  },
+  {
+   "code": "FAR",
+   "en": "Farad ( F )",
+   "ar": ""
+  },
+  {
+   "code": "FOT",
+   "en": "Foot ( Foot )",
+   "ar": ""
+  },
+  {
+   "code": "FTK",
+   "en": "Square foot ( ft2 )",
+   "ar": ""
+  },
+  {
+   "code": "FTQ",
+   "en": "Cubic foot ( ft3 )",
+   "ar": ""
+  },
+  {
+   "code": "G42",
+   "en": "Microsiemens per centimeter ( microS/cm )",
+   "ar": ""
+  },
+  {
+   "code": "GL",
+   "en": "Gram/liter ( g/l )",
+   "ar": ""
+  },
+  {
+   "code": "GLL",
+   "en": "gallon ( gal )",
+   "ar": ""
+  },
+  {
+   "code": "GM",
+   "en": "Gram/square meter ( g/m2 )",
+   "ar": ""
+  },
+  {
+   "code": "GPT",
+   "en": "Gallon per thousand",
+   "ar": "جالون/الف"
+  },
+  {
+   "code": "GRM",
+   "en": "Gram ( g )",
+   "ar": ""
+  },
+  {
+   "code": "H63",
+   "en": "Milligram/Square centimeter ( mg/cm2 )",
+   "ar": ""
+  },
+  {
+   "code": "HHP",
+   "en": "Hydraulic Horse Power",
+   "ar": "قوة حصان هيدروليكي"
+  },
+  {
+   "code": "HLT",
+   "en": "Hectoliter ( hl )",
+   "ar": ""
+  },
+  {
+   "code": "HTZ",
+   "en": "Hertz (1/second) ( Hz )",
+   "ar": ""
+  },
+  {
+   "code": "HUR",
+   "en": "Hours ( hrs )",
+   "ar": ""
+  },
+  {
+   "code": "IE",
+   "en": "Number of Persons ( PRS )",
+   "ar": ""
+  },
+  {
+   "code": "INH",
+   "en": "Inch ( “” )",
+   "ar": ""
+  },
+  {
+   "code": "INK",
+   "en": "Square inch ( Inch2 )",
+   "ar": ""
+  },
+  {
+   "code": "JOB",
+   "en": "JOB",
+   "ar": "وظيفة"
+  },
+  {
+   "code": "KGM",
+   "en": "Kilogram ( KG )",
+   "ar": ""
+  },
+  {
+   "code": "KHZ",
+   "en": "Kilohertz ( kHz )",
+   "ar": ""
+  },
+  {
+   "code": "KMH",
+   "en": "Kilometer/hour ( km/h )",
+   "ar": ""
+  },
+  {
+   "code": "KMK",
+   "en": "Square kilometer ( km2 )",
+   "ar": ""
+  },
+  {
+   "code": "KMQ",
+   "en": "Kilogram/cubic meter ( kg/m3 )",
+   "ar": ""
+  },
+  {
+   "code": "KMT",
+   "en": "Kilometer ( km )",
+   "ar": ""
+  },
+  {
+   "code": "KSM",
+   "en": "Kilogram/Square meter ( kg/m2 )",
+   "ar": ""
+  },
+  {
+   "code": "KVT",
+   "en": "Kilovolt ( kV )",
+   "ar": ""
+  },
+  {
+   "code": "KWT",
+   "en": "Kilowatt ( KW )",
+   "ar": ""
+  },
+  {
+   "code": "LB",
+   "en": "pounds ",
+   "ar": "رطل"
+  },
+  {
+   "code": "LTR",
+   "en": "Liter ( l )",
+   "ar": ""
+  },
+  {
+   "code": "LVL",
+   "en": "Level",
+   "ar": "مستوي"
+  },
+  {
+   "code": "M",
+   "en": "Meter ( m )",
+   "ar": ""
+  },
+  {
+   "code": "MAN",
+   "en": "Man",
+   "ar": "رجل"
+  },
+  {
+   "code": "MAW",
+   "en": "Megawatt ( VA )",
+   "ar": ""
+  },
+  {
+   "code": "MGM",
+   "en": "Milligram ( mg )",
+   "ar": ""
+  },
+  {
+   "code": "MHZ",
+   "en": "Megahertz ( MHz )",
+   "ar": ""
+  },
+  {
+   "code": "MIN",
+   "en": "Minute ( min )",
+   "ar": ""
+  },
+  {
+   "code": "MMK",
+   "en": "Square millimeter ( mm2 )",
+   "ar": ""
+  },
+  {
+   "code": "MMQ",
+   "en": "Cubic millimeter ( mm3 )",
+   "ar": ""
+  },
+  {
+   "code": "MMT",
+   "en": "Millimeter ( mm )",
+   "ar": ""
+  },
+  {
+   "code": "MON",
+   "en": "Months ( Months )",
+   "ar": ""
+  },
+  {
+   "code": "MTK",
+   "en": "Square meter ( m2 )",
+   "ar": ""
+  },
+  {
+   "code": "MTQ",
+   "en": "Cubic meter ( m3 )",
+   "ar": ""
+  },
+  {
+   "code": "OHM",
+   "en": "Ohm ( Ohm )",
+   "ar": ""
+  },
+  {
+   "code": "ONZ",
+   "en": "Ounce ( oz )",
+   "ar": ""
+  },
+  {
+   "code": "PAL",
+   "en": "Pascal ( Pa )",
+   "ar": ""
+  },
+  {
+   "code": "PF",
+   "en": "Pallet ( PAL )",
+   "ar": ""
+  },
+  {
+   "code": "PK",
+   "en": "Pack ( PAK )",
+   "ar": ""
+  },
+  {
+   "code": "SK",
+   "en": "Sack",
+   "ar": "كيس"
+  },
+  {
+   "code": "SMI",
+   "en": "Mile ( mile )",
+   "ar": ""
+  },
+  {
+   "code": "ST",
+   "en": "Ton (short,2000 lb)",
+   "ar": "طن (قصير,2000)"
+  },
+  {
+   "code": "TNE",
+   "en": "Tonne ( t )",
+   "ar": ""
+  },
+  {
+   "code": "TON",
+   "en": "Ton (metric)",
+   "ar": "طن (متري)"
+  },
+  {
+   "code": "VLT",
+   "en": "Volt ( V )",
+   "ar": ""
+  },
+  {
+   "code": "WEE",
+   "en": "Weeks ( Weeks )",
+   "ar": ""
+  },
+  {
+   "code": "WTT",
+   "en": "Watt ( W )",
+   "ar": ""
+  },
+  {
+   "code": "X03",
+   "en": "Meter/Hour ( m/h )",
+   "ar": ""
+  },
+  {
+   "code": "YDQ",
+   "en": "Cubic yard ( yd3 )",
+   "ar": ""
+  },
+  {
+   "code": "YRD",
+   "en": "Yards ( yd )",
+   "ar": ""
+  },
+  {
+   "code": "NMP",
+   "en": "Number of packs",
+   "ar": ""
+  },
+  {
+   "code": "ST",
+   "en": "Sheet",
+   "ar": ""
+  },
+  {
+   "code": "5I",
+   "en": "Standard cubic foot",
+   "ar": ""
+  },
+  {
+   "code": "AE",
+   "en": "Ampere per metre",
+   "ar": ""
+  },
+  {
+   "code": "B4",
+   "en": "Barrel, Imperial",
+   "ar": ""
+  },
+  {
+   "code": "BB",
+   "en": "Base box",
+   "ar": ""
+  },
+  {
+   "code": "BD",
+   "en": "Board",
+   "ar": ""
+  },
+  {
+   "code": "BE",
+   "en": "Bundle",
+   "ar": ""
+  },
+  {
+   "code": "BK",
+   "en": "Basket",
+   "ar": ""
+  },
+  {
+   "code": "BL",
+   "en": "Bale",
+   "ar": ""
+  },
+  {
+   "code": "CH",
+   "en": "Container",
+   "ar": ""
+  },
+  {
+   "code": "CR",
+   "en": "Crate",
+   "ar": ""
+  },
+  {
+   "code": "DAA",
+   "en": "Decare",
+   "ar": ""
+  },
+  {
+   "code": "DTN",
+   "en": "Decitonne",
+   "ar": ""
+  },
+  {
+   "code": "DZN",
+   "en": "Dozen",
+   "ar": ""
+  },
+  {
+   "code": "FP",
+   "en": "Pound per square foot",
+   "ar": ""
+  },
+  {
+   "code": "HMT",
+   "en": "Hectometre",
+   "ar": ""
+  },
+  {
+   "code": "INQ",
+   "en": "Cubic inch",
+   "ar": ""
+  },
+  {
+   "code": "KG",
+   "en": "Keg",
+   "ar": ""
+  },
+  {
+   "code": "KTM",
+   "en": "Kilometre",
+   "ar": ""
+  },
+  {
+   "code": "LO",
+   "en": "Lot [unit of procurement]",
+   "ar": ""
+  },
+  {
+   "code": "MLT",
+   "en": "Millilitre",
+   "ar": ""
+  },
+  {
+   "code": "MT",
+   "en": "Mat",
+   "ar": ""
+  },
+  {
+   "code": "NA",
+   "en": "Milligram per kilogram",
+   "ar": ""
+  },
+  {
+   "code": "NAR",
+   "en": "Number of articles",
+   "ar": ""
+  },
+  {
+   "code": "NC",
+   "en": "Car",
+   "ar": ""
+  },
+  {
+   "code": "NE",
+   "en": "Net litre",
+   "ar": ""
+  },
+  {
+   "code": "NPL",
+   "en": "Number of parcels",
+   "ar": ""
+  },
+  {
+   "code": "NV",
+   "en": "Vehicle",
+   "ar": ""
+  },
+  {
+   "code": "PA",
+   "en": "Packet",
+   "ar": ""
+  },
+  {
+   "code": "PG",
+   "en": "Plate",
+   "ar": ""
+  },
+  {
+   "code": "PL",
+   "en": "Pail",
+   "ar": ""
+  },
+  {
+   "code": "PR",
+   "en": "Pair",
+   "ar": ""
+  },
+  {
+   "code": "PT",
+   "en": "Pint (US)",
+   "ar": ""
+  },
+  {
+   "code": "RL",
+   "en": "Reel",
+   "ar": ""
+  },
+  {
+   "code": "RO",
+   "en": "Roll",
+   "ar": ""
+  },
+  {
+   "code": "SET",
+   "en": "Set",
+   "ar": ""
+  },
+  {
+   "code": "STK",
+   "en": "Stick, Cigarette ",
+   "ar": ""
+  },
+  {
+   "code": "T3",
+   "en": "Thousand piece",
+   "ar": ""
+  },
+  {
+   "code": "TC",
+   "en": "Truckload",
+   "ar": ""
+  },
+  {
+   "code": "TK",
+   "en": "Tank, rectangular",
+   "ar": ""
+  },
+  {
+   "code": "TN",
+   "en": "Tin",
+   "ar": ""
+  },
+  {
+   "code": "TTS",
+   "en": "Ten thousand sticks",
+   "ar": ""
+  },
+  {
+   "code": "UC",
+   "en": "Telecommunication port ",
+   "ar": ""
+  },
+  {
+   "code": "VI",
+   "en": "Vial",
+   "ar": ""
+  },
+  {
+   "code": "VQ",
+   "en": "Bulk",
+   "ar": ""
+  },
+  {
+   "code": "YDK",
+   "en": "Square yard",
+   "ar": ""
+  },
+  {
+   "code": "Z3",
+   "en": "Cask",
+   "ar": ""
+  }
+ ],
+ "weightUnitTypes": [
+  {
+   "code": "GRM",
+   "en": "Gram ( g )",
+   "ar": "Gram ( g )"
+  },
+  {
+   "code": "KGM",
+   "en": "Kilogram ( KG )",
+   "ar": "Kilogram ( KG )"
+  },
+  {
+   "code": "LB",
+   "en": "pounds",
+   "ar": "pounds"
+  },
+  {
+   "code": "MGM",
+   "en": "Milligram ( mg )",
+   "ar": "Milligram ( mg )"
+  },
+  {
+   "code": "ONZ",
+   "en": "Ounce ( oz )",
+   "ar": "Ounce ( oz )"
+  },
+  {
+   "code": "ST",
+   "en": "Ton (short,2000 lb)",
+   "ar": "Ton (short,2000 lb)"
+  },
+  {
+   "code": "TNE",
+   "en": "Tonne ( t )",
+   "ar": "Tonne ( t )"
+  },
+  {
+   "code": "TON",
+   "en": "Ton (metric)",
+   "ar": "Ton (metric)"
+  },
+  {
+   "code": "KG",
+   "en": "Keg",
+   "ar": ""
+  }
+ ],
+ "currencies": [
+  {
+   "code": "AED",
+   "en": "UAE Dirham",
+   "ar": ""
+  },
+  {
+   "code": "AFN",
+   "en": "Afghani",
+   "ar": ""
+  },
+  {
+   "code": "ALL",
+   "en": "Lek",
+   "ar": ""
+  },
+  {
+   "code": "AMD",
+   "en": "Armenian Dram",
+   "ar": ""
+  },
+  {
+   "code": "ANG",
+   "en": "Netherlands Antillean Guilder",
+   "ar": ""
+  },
+  {
+   "code": "AOA",
+   "en": "Kwanza",
+   "ar": ""
+  },
+  {
+   "code": "ARS",
+   "en": "Argentine Peso",
+   "ar": ""
+  },
+  {
+   "code": "AUD",
+   "en": "Australian Dollar",
+   "ar": ""
+  },
+  {
+   "code": "AWG",
+   "en": "Aruban Florin",
+   "ar": ""
+  },
+  {
+   "code": "AZN",
+   "en": "Azerbaijan Manat",
+   "ar": ""
+  },
+  {
+   "code": "BAM",
+   "en": "Convertible Mark",
+   "ar": ""
+  },
+  {
+   "code": "BBD",
+   "en": "Barbados Dollar",
+   "ar": ""
+  },
+  {
+   "code": "BDT",
+   "en": "Taka",
+   "ar": ""
+  },
+  {
+   "code": "BGN",
+   "en": "Bulgarian Lev",
+   "ar": ""
+  },
+  {
+   "code": "BHD",
+   "en": "Bahraini Dinar",
+   "ar": ""
+  },
+  {
+   "code": "BIF",
+   "en": "Burundi Franc",
+   "ar": ""
+  },
+  {
+   "code": "BMD",
+   "en": "Bermudian Dollar",
+   "ar": ""
+  },
+  {
+   "code": "BND",
+   "en": "Brunei Dollar",
+   "ar": ""
+  },
+  {
+   "code": "BOB",
+   "en": "Boliviano",
+   "ar": ""
+  },
+  {
+   "code": "BOV",
+   "en": "Mvdol",
+   "ar": ""
+  },
+  {
+   "code": "BRL",
+   "en": "Brazilian Real",
+   "ar": ""
+  },
+  {
+   "code": "BSD",
+   "en": "Bahamian Dollar",
+   "ar": ""
+  },
+  {
+   "code": "BTN",
+   "en": "Ngultrum",
+   "ar": ""
+  },
+  {
+   "code": "BWP",
+   "en": "Pula",
+   "ar": ""
+  },
+  {
+   "code": "BYN",
+   "en": "Belarusian Ruble",
+   "ar": ""
+  },
+  {
+   "code": "BZD",
+   "en": "Belize Dollar",
+   "ar": ""
+  },
+  {
+   "code": "CAD",
+   "en": "Canadian Dollar",
+   "ar": ""
+  },
+  {
+   "code": "CDF",
+   "en": "Congolese Franc",
+   "ar": ""
+  },
+  {
+   "code": "CHE",
+   "en": "WIR Euro",
+   "ar": ""
+  },
+  {
+   "code": "CHF",
+   "en": "Swiss Franc",
+   "ar": ""
+  },
+  {
+   "code": "CHW",
+   "en": "WIR Franc",
+   "ar": ""
+  },
+  {
+   "code": "CLF",
+   "en": "Unidad de Fomento",
+   "ar": ""
+  },
+  {
+   "code": "CLP",
+   "en": "Chilean Peso",
+   "ar": ""
+  },
+  {
+   "code": "CNY",
+   "en": "Yuan Renminbi",
+   "ar": ""
+  },
+  {
+   "code": "COP",
+   "en": "Colombian Peso",
+   "ar": ""
+  },
+  {
+   "code": "COU",
+   "en": "Unidad de Valor Real",
+   "ar": ""
+  },
+  {
+   "code": "CRC",
+   "en": "Costa Rican Colon",
+   "ar": ""
+  },
+  {
+   "code": "CUC",
+   "en": "Peso Convertible",
+   "ar": ""
+  },
+  {
+   "code": "CUP",
+   "en": "Cuban Peso",
+   "ar": ""
+  },
+  {
+   "code": "CVE",
+   "en": "Cabo Verde Escudo",
+   "ar": ""
+  },
+  {
+   "code": "CZK",
+   "en": "Czech Koruna",
+   "ar": ""
+  },
+  {
+   "code": "DJF",
+   "en": "Djibouti Franc",
+   "ar": ""
+  },
+  {
+   "code": "DKK",
+   "en": "Danish Krone",
+   "ar": ""
+  },
+  {
+   "code": "DOP",
+   "en": "Dominican Peso",
+   "ar": ""
+  },
+  {
+   "code": "DZD",
+   "en": "Algerian Dinar",
+   "ar": ""
+  },
+  {
+   "code": "EGP",
+   "en": "Egyptian Pound",
+   "ar": ""
+  },
+  {
+   "code": "ERN",
+   "en": "Nakfa",
+   "ar": ""
+  },
+  {
+   "code": "ETB",
+   "en": "Ethiopian Birr",
+   "ar": ""
+  },
+  {
+   "code": "EUR",
+   "en": "Euro",
+   "ar": ""
+  },
+  {
+   "code": "FJD",
+   "en": "Fiji Dollar",
+   "ar": ""
+  },
+  {
+   "code": "FKP",
+   "en": "Falkland Islands Pound",
+   "ar": ""
+  },
+  {
+   "code": "GBP",
+   "en": "Pound Sterling",
+   "ar": ""
+  },
+  {
+   "code": "GEL",
+   "en": "Lari",
+   "ar": ""
+  },
+  {
+   "code": "GHS",
+   "en": "Ghana Cedi",
+   "ar": ""
+  },
+  {
+   "code": "GIP",
+   "en": "Gibraltar Pound",
+   "ar": ""
+  },
+  {
+   "code": "GMD",
+   "en": "Dalasi",
+   "ar": ""
+  },
+  {
+   "code": "GNF",
+   "en": "Guinean Franc",
+   "ar": ""
+  },
+  {
+   "code": "GTQ",
+   "en": "Quetzal",
+   "ar": ""
+  },
+  {
+   "code": "GYD",
+   "en": "Guyana Dollar",
+   "ar": ""
+  },
+  {
+   "code": "HKD",
+   "en": "Hong Kong Dollar",
+   "ar": ""
+  },
+  {
+   "code": "HNL",
+   "en": "Lempira",
+   "ar": ""
+  },
+  {
+   "code": "HRK",
+   "en": "Kuna",
+   "ar": ""
+  },
+  {
+   "code": "HTG",
+   "en": "Gourde",
+   "ar": ""
+  },
+  {
+   "code": "HUF",
+   "en": "Forint",
+   "ar": ""
+  },
+  {
+   "code": "IDR",
+   "en": "Rupiah",
+   "ar": ""
+  },
+  {
+   "code": "ILS",
+   "en": "New Israeli Sheqel",
+   "ar": ""
+  },
+  {
+   "code": "INR",
+   "en": "Indian Rupee",
+   "ar": ""
+  },
+  {
+   "code": "IQD",
+   "en": "Iraqi Dinar",
+   "ar": ""
+  },
+  {
+   "code": "IRR",
+   "en": "Iranian Rial",
+   "ar": ""
+  },
+  {
+   "code": "ISK",
+   "en": "Iceland Krona",
+   "ar": ""
+  },
+  {
+   "code": "JMD",
+   "en": "Jamaican Dollar",
+   "ar": ""
+  },
+  {
+   "code": "JOD",
+   "en": "Jordanian Dinar",
+   "ar": ""
+  },
+  {
+   "code": "JPY",
+   "en": "Yen",
+   "ar": ""
+  },
+  {
+   "code": "KES",
+   "en": "Kenyan Shilling",
+   "ar": ""
+  },
+  {
+   "code": "KGS",
+   "en": "Som",
+   "ar": ""
+  },
+  {
+   "code": "KHR",
+   "en": "Riel",
+   "ar": ""
+  },
+  {
+   "code": "KMF",
+   "en": "Comorian Franc",
+   "ar": ""
+  },
+  {
+   "code": "KPW",
+   "en": "North Korean Won",
+   "ar": ""
+  },
+  {
+   "code": "KRW",
+   "en": "Won",
+   "ar": ""
+  },
+  {
+   "code": "KWD",
+   "en": "Kuwaiti Dinar",
+   "ar": ""
+  },
+  {
+   "code": "KYD",
+   "en": "Cayman Islands Dollar",
+   "ar": ""
+  },
+  {
+   "code": "KZT",
+   "en": "Tenge",
+   "ar": ""
+  },
+  {
+   "code": "LAK",
+   "en": "Lao Kip",
+   "ar": ""
+  },
+  {
+   "code": "LBP",
+   "en": "Lebanese Pound",
+   "ar": ""
+  },
+  {
+   "code": "LKR",
+   "en": "Sri Lanka Rupee",
+   "ar": ""
+  },
+  {
+   "code": "LRD",
+   "en": "Liberian Dollar",
+   "ar": ""
+  },
+  {
+   "code": "LSL",
+   "en": "Loti",
+   "ar": ""
+  },
+  {
+   "code": "LYD",
+   "en": "Libyan Dinar",
+   "ar": ""
+  },
+  {
+   "code": "MAD",
+   "en": "Moroccan Dirham",
+   "ar": ""
+  },
+  {
+   "code": "MDL",
+   "en": "Moldovan Leu",
+   "ar": ""
+  },
+  {
+   "code": "MGA",
+   "en": "Malagasy Ariary",
+   "ar": ""
+  },
+  {
+   "code": "MKD",
+   "en": "Denar",
+   "ar": ""
+  },
+  {
+   "code": "MMK",
+   "en": "Kyat",
+   "ar": ""
+  },
+  {
+   "code": "MNT",
+   "en": "Tugrik",
+   "ar": ""
+  },
+  {
+   "code": "MOP",
+   "en": "Pataca",
+   "ar": ""
+  },
+  {
+   "code": "MRU",
+   "en": "Ouguiya",
+   "ar": ""
+  },
+  {
+   "code": "MUR",
+   "en": "Mauritius Rupee",
+   "ar": ""
+  },
+  {
+   "code": "MVR",
+   "en": "Rufiyaa",
+   "ar": ""
+  },
+  {
+   "code": "MWK",
+   "en": "Malawi Kwacha",
+   "ar": ""
+  },
+  {
+   "code": "MXN",
+   "en": "Mexican Peso",
+   "ar": ""
+  },
+  {
+   "code": "MXV",
+   "en": "Mexican Unidad de Inversion (UDI)",
+   "ar": ""
+  },
+  {
+   "code": "MYR",
+   "en": "Malaysian Ringgit",
+   "ar": ""
+  },
+  {
+   "code": "MZN",
+   "en": "Mozambique Metical",
+   "ar": ""
+  },
+  {
+   "code": "NAD",
+   "en": "Namibia Dollar",
+   "ar": ""
+  },
+  {
+   "code": "NGN",
+   "en": "Naira",
+   "ar": ""
+  },
+  {
+   "code": "NIO",
+   "en": "Cordoba Oro",
+   "ar": ""
+  },
+  {
+   "code": "NOK",
+   "en": "Norwegian Krone",
+   "ar": ""
+  },
+  {
+   "code": "NPR",
+   "en": "Nepalese Rupee",
+   "ar": ""
+  },
+  {
+   "code": "NZD",
+   "en": "New Zealand Dollar",
+   "ar": ""
+  },
+  {
+   "code": "OMR",
+   "en": "Rial Omani",
+   "ar": ""
+  },
+  {
+   "code": "PAB",
+   "en": "Balboa",
+   "ar": ""
+  },
+  {
+   "code": "PEN",
+   "en": "Sol",
+   "ar": ""
+  },
+  {
+   "code": "PGK",
+   "en": "Kina",
+   "ar": ""
+  },
+  {
+   "code": "PHP",
+   "en": "Philippine Peso",
+   "ar": ""
+  },
+  {
+   "code": "PKR",
+   "en": "Pakistan Rupee",
+   "ar": ""
+  },
+  {
+   "code": "PLN",
+   "en": "Zloty",
+   "ar": ""
+  },
+  {
+   "code": "PYG",
+   "en": "Guarani",
+   "ar": ""
+  },
+  {
+   "code": "QAR",
+   "en": "Qatari Rial",
+   "ar": ""
+  },
+  {
+   "code": "RON",
+   "en": "Romanian Leu",
+   "ar": ""
+  },
+  {
+   "code": "RSD",
+   "en": "Serbian Dinar",
+   "ar": ""
+  },
+  {
+   "code": "RUB",
+   "en": "Russian Ruble",
+   "ar": ""
+  },
+  {
+   "code": "RWF",
+   "en": "Rwanda Franc",
+   "ar": ""
+  },
+  {
+   "code": "SAR",
+   "en": "Saudi Riyal",
+   "ar": ""
+  },
+  {
+   "code": "SBD",
+   "en": "Solomon Islands Dollar",
+   "ar": ""
+  },
+  {
+   "code": "SCR",
+   "en": "Seychelles Rupee",
+   "ar": ""
+  },
+  {
+   "code": "SDG",
+   "en": "Sudanese Pound",
+   "ar": ""
+  },
+  {
+   "code": "SEK",
+   "en": "Swedish Krona",
+   "ar": ""
+  },
+  {
+   "code": "SGD",
+   "en": "Singapore Dollar",
+   "ar": ""
+  },
+  {
+   "code": "SHP",
+   "en": "Saint Helena Pound",
+   "ar": ""
+  },
+  {
+   "code": "SLL",
+   "en": "Leone",
+   "ar": ""
+  },
+  {
+   "code": "SOS",
+   "en": "Somali Shilling",
+   "ar": ""
+  },
+  {
+   "code": "SRD",
+   "en": "Surinam Dollar",
+   "ar": ""
+  },
+  {
+   "code": "SSP",
+   "en": "South Sudanese Pound",
+   "ar": ""
+  },
+  {
+   "code": "STN",
+   "en": "Dobra",
+   "ar": ""
+  },
+  {
+   "code": "SVC",
+   "en": "El Salvador Colon",
+   "ar": ""
+  },
+  {
+   "code": "SYP",
+   "en": "Syrian Pound",
+   "ar": ""
+  },
+  {
+   "code": "SZL",
+   "en": "Lilangeni",
+   "ar": ""
+  },
+  {
+   "code": "THB",
+   "en": "Baht",
+   "ar": ""
+  },
+  {
+   "code": "TJS",
+   "en": "Somoni",
+   "ar": ""
+  },
+  {
+   "code": "TMT",
+   "en": "Turkmenistan New Manat",
+   "ar": ""
+  },
+  {
+   "code": "TND",
+   "en": "Tunisian Dinar",
+   "ar": ""
+  },
+  {
+   "code": "TOP",
+   "en": "Pa’anga",
+   "ar": ""
+  },
+  {
+   "code": "TRY",
+   "en": "Turkish Lira",
+   "ar": ""
+  },
+  {
+   "code": "TTD",
+   "en": "Trinidad and Tobago Dollar",
+   "ar": ""
+  },
+  {
+   "code": "TWD",
+   "en": "New Taiwan Dollar",
+   "ar": ""
+  },
+  {
+   "code": "TZS",
+   "en": "Tanzanian Shilling",
+   "ar": ""
+  },
+  {
+   "code": "UAH",
+   "en": "Hryvnia",
+   "ar": ""
+  },
+  {
+   "code": "UGX",
+   "en": "Uganda Shilling",
+   "ar": ""
+  },
+  {
+   "code": "USD",
+   "en": "US Dollar",
+   "ar": ""
+  },
+  {
+   "code": "USN",
+   "en": "US Dollar (Next day)",
+   "ar": ""
+  },
+  {
+   "code": "UYI",
+   "en": "Uruguay Peso en Unidades Indexadas (UI)",
+   "ar": ""
+  },
+  {
+   "code": "UYU",
+   "en": "Peso Uruguayo",
+   "ar": ""
+  },
+  {
+   "code": "UYW",
+   "en": "Unidad Previsional",
+   "ar": ""
+  },
+  {
+   "code": "UZS",
+   "en": "Uzbekistan Sum",
+   "ar": ""
+  },
+  {
+   "code": "VED",
+   "en": "Bolívar Soberano",
+   "ar": ""
+  },
+  {
+   "code": "VES",
+   "en": "Bolívar Soberano",
+   "ar": ""
+  },
+  {
+   "code": "VND",
+   "en": "Dong",
+   "ar": ""
+  },
+  {
+   "code": "VUV",
+   "en": "Vatu",
+   "ar": ""
+  },
+  {
+   "code": "WST",
+   "en": "Tala",
+   "ar": ""
+  },
+  {
+   "code": "XAF",
+   "en": "CFA Franc BEAC",
+   "ar": ""
+  },
+  {
+   "code": "XAG",
+   "en": "Silver",
+   "ar": ""
+  },
+  {
+   "code": "XAU",
+   "en": "Gold",
+   "ar": ""
+  },
+  {
+   "code": "XBA",
+   "en": "Bond Markets Unit European Composite Unit (EURCO)",
+   "ar": ""
+  },
+  {
+   "code": "XBB",
+   "en": "Bond Markets Unit European Monetary Unit (E.M.U.-6)",
+   "ar": ""
+  },
+  {
+   "code": "XBC",
+   "en": "Bond Markets Unit European Unit of Account 9 (E.U.A.-9)",
+   "ar": ""
+  },
+  {
+   "code": "XBD",
+   "en": "Bond Markets Unit European Unit of Account 17 (E.U.A.-17)",
+   "ar": ""
+  },
+  {
+   "code": "XCD",
+   "en": "East Caribbean Dollar",
+   "ar": ""
+  },
+  {
+   "code": "XDR",
+   "en": "SDR (Special Drawing Right)",
+   "ar": ""
+  },
+  {
+   "code": "XOF",
+   "en": "CFA Franc BCEAO",
+   "ar": ""
+  },
+  {
+   "code": "XPD",
+   "en": "Palladium",
+   "ar": ""
+  },
+  {
+   "code": "XPF",
+   "en": "CFP Franc",
+   "ar": ""
+  },
+  {
+   "code": "XPT",
+   "en": "Platinum",
+   "ar": ""
+  },
+  {
+   "code": "XSU",
+   "en": "Sucre",
+   "ar": ""
+  },
+  {
+   "code": "XTS",
+   "en": "Codes specifically reserved for testing purposes",
+   "ar": ""
+  },
+  {
+   "code": "XUA",
+   "en": "ADB Unit of Account",
+   "ar": ""
+  },
+  {
+   "code": "XXX",
+   "en": "The codes assigned for transactions where no currency is involved",
+   "ar": ""
+  },
+  {
+   "code": "YER",
+   "en": "Yemeni Rial",
+   "ar": ""
+  },
+  {
+   "code": "ZAR",
+   "en": "Rand",
+   "ar": ""
+  },
+  {
+   "code": "ZMW",
+   "en": "Zambian Kwacha",
+   "ar": ""
+  },
+  {
+   "code": "ZWL",
+   "en": "Zimbabwe Dollar",
+   "ar": ""
+  }
+ ],
+ "countries": [
+  {
+   "code": "AD",
+   "en": "Andorra",
+   "ar": "أندورا"
+  },
+  {
+   "code": "AE",
+   "en": "United Arab Emirates",
+   "ar": "الامارات العربية المتحدة"
+  },
+  {
+   "code": "AF",
+   "en": "Afghanistan",
+   "ar": "أفغانستان"
+  },
+  {
+   "code": "AG",
+   "en": "Antigua and Barbuda",
+   "ar": "أنتيغوا وباربودا"
+  },
+  {
+   "code": "AI",
+   "en": "Anguilla",
+   "ar": "أنجويلا"
+  },
+  {
+   "code": "AL",
+   "en": "Albania",
+   "ar": "ألبانيا"
+  },
+  {
+   "code": "AM",
+   "en": "Armenia",
+   "ar": "أرمينيا"
+  },
+  {
+   "code": "AO",
+   "en": "Angola",
+   "ar": "أنجولا"
+  },
+  {
+   "code": "AQ",
+   "en": "Antarctica",
+   "ar": "القارة القطبية الجنوبية"
+  },
+  {
+   "code": "AR",
+   "en": "Argentina",
+   "ar": "الأرجنتين"
+  },
+  {
+   "code": "AS",
+   "en": "American Samoa",
+   "ar": "ساموا الأمريكية"
+  },
+  {
+   "code": "AT",
+   "en": "Austria",
+   "ar": "النمسا"
+  },
+  {
+   "code": "AU",
+   "en": "Australia",
+   "ar": "أستراليا"
+  },
+  {
+   "code": "AW",
+   "en": "Aruba",
+   "ar": "آروبا"
+  },
+  {
+   "code": "AX",
+   "en": "Åland Islands",
+   "ar": "جزر أولان"
+  },
+  {
+   "code": "AZ",
+   "en": "Azerbaijan",
+   "ar": "أذربيجان"
+  },
+  {
+   "code": "BA",
+   "en": "Bosnia and Herzegovina",
+   "ar": "البوسنة والهرسك"
+  },
+  {
+   "code": "BB",
+   "en": "Barbados",
+   "ar": "بربادوس"
+  },
+  {
+   "code": "BD",
+   "en": "Bangladesh",
+   "ar": "بنجلاديش"
+  },
+  {
+   "code": "BE",
+   "en": "Belgium",
+   "ar": "بلجيكا"
+  },
+  {
+   "code": "BF",
+   "en": "Burkina Faso",
+   "ar": "بوركينا فاسو"
+  },
+  {
+   "code": "BG",
+   "en": "Bulgaria",
+   "ar": "بلغاريا"
+  },
+  {
+   "code": "BH",
+   "en": "Bahrain",
+   "ar": "البحرين"
+  },
+  {
+   "code": "BI",
+   "en": "Burundi",
+   "ar": "بوروندي"
+  },
+  {
+   "code": "BJ",
+   "en": "Benin",
+   "ar": "بنين"
+  },
+  {
+   "code": "BL",
+   "en": "Saint Barthelemy",
+   "ar": "سان بارتيلمي"
+  },
+  {
+   "code": "BM",
+   "en": "Bermuda",
+   "ar": "برمودا"
+  },
+  {
+   "code": "BN",
+   "en": "Brunei Darussalam",
+   "ar": "بروناي"
+  },
+  {
+   "code": "BO",
+   "en": "Bolivia (Plurinational State of)",
+   "ar": "بوليفيا"
+  },
+  {
+   "code": "BQ",
+   "en": "Bonaire, Sint Eustatius and Saba",
+   "ar": "الجزر الكاريبية الهولندية"
+  },
+  {
+   "code": "BR",
+   "en": "Brazil",
+   "ar": "البرازيل"
+  },
+  {
+   "code": "BS",
+   "en": "Bahamas",
+   "ar": "الباهاما"
+  },
+  {
+   "code": "BT",
+   "en": "Bhutan",
+   "ar": "بوتان"
+  },
+  {
+   "code": "BV",
+   "en": "Bouvet Island",
+   "ar": "جزيرة بوفيه"
+  },
+  {
+   "code": "BW",
+   "en": "Botswana",
+   "ar": "بتسوانا"
+  },
+  {
+   "code": "BY",
+   "en": "Belarus",
+   "ar": "روسيا البيضاء"
+  },
+  {
+   "code": "BZ",
+   "en": "Belize",
+   "ar": "بليز"
+  },
+  {
+   "code": "CA",
+   "en": "Canada",
+   "ar": "كندا"
+  },
+  {
+   "code": "CC",
+   "en": "Cocos (Keeling) Islands",
+   "ar": "جزر كوكوس"
+  },
+  {
+   "code": "CD",
+   "en": "Congo (Democratic Republic of the)",
+   "ar": "جمهورية الكونغو الديمقراطية"
+  },
+  {
+   "code": "CF",
+   "en": "Central African Republic",
+   "ar": "جمهورية أفريقيا الوسطى"
+  },
+  {
+   "code": "CG",
+   "en": "Congo",
+   "ar": "جمهورية الكونغو"
+  },
+  {
+   "code": "CH",
+   "en": "Switzerland",
+   "ar": "سويسرا"
+  },
+  {
+   "code": "CI",
+   "en": "Cote d’Ivoire",
+   "ar": "ساحل العاج"
+  },
+  {
+   "code": "CK",
+   "en": "Cook Islands",
+   "ar": "جزر كوك"
+  },
+  {
+   "code": "CL",
+   "en": "Chile",
+   "ar": "شيلي"
+  },
+  {
+   "code": "CM",
+   "en": "Cameroon",
+   "ar": "الكاميرون"
+  },
+  {
+   "code": "CN",
+   "en": "China",
+   "ar": "الصين"
+  },
+  {
+   "code": "CO",
+   "en": "Colombia",
+   "ar": "كولومبيا"
+  },
+  {
+   "code": "CR",
+   "en": "Costa Rica",
+   "ar": "كوستاريكا"
+  },
+  {
+   "code": "CU",
+   "en": "Cuba",
+   "ar": "كوبا"
+  },
+  {
+   "code": "CV",
+   "en": "Cabo Verde",
+   "ar": "الرأس الأخضر"
+  },
+  {
+   "code": "CW",
+   "en": "Curaçao",
+   "ar": "كوراساو"
+  },
+  {
+   "code": "CX",
+   "en": "Christmas Island",
+   "ar": "جزيرة عيد الميلاد"
+  },
+  {
+   "code": "CY",
+   "en": "Cyprus",
+   "ar": "قبرص"
+  },
+  {
+   "code": "CZ",
+   "en": "Czechia",
+   "ar": "جمهورية التشيك"
+  },
+  {
+   "code": "DE",
+   "en": "Germany",
+   "ar": "ألمانيا"
+  },
+  {
+   "code": "DJ",
+   "en": "Djibouti",
+   "ar": "جيبوتي"
+  },
+  {
+   "code": "DK",
+   "en": "Denmark",
+   "ar": "الدانمرك"
+  },
+  {
+   "code": "DM",
+   "en": "Dominica",
+   "ar": "دومينيكا"
+  },
+  {
+   "code": "DO",
+   "en": "Dominican Republic",
+   "ar": "جمهورية الدومينيكان"
+  },
+  {
+   "code": "DZ",
+   "en": "Algeria",
+   "ar": "الجزائر"
+  },
+  {
+   "code": "EC",
+   "en": "Ecuador",
+   "ar": "الاكوادور"
+  },
+  {
+   "code": "EE",
+   "en": "Estonia",
+   "ar": "استونيا"
+  },
+  {
+   "code": "EG",
+   "en": "Egypt",
+   "ar": "مصر"
+  },
+  {
+   "code": "EH",
+   "en": "Western Sahara",
+   "ar": "الصحراء الغربية"
+  },
+  {
+   "code": "ER",
+   "en": "Eritrea",
+   "ar": "اريتريا"
+  },
+  {
+   "code": "ES",
+   "en": "Spain",
+   "ar": "أسبانيا"
+  },
+  {
+   "code": "ET",
+   "en": "Ethiopia",
+   "ar": "اثيوبيا"
+  },
+  {
+   "code": "FI",
+   "en": "Finland",
+   "ar": "فنلندا"
+  },
+  {
+   "code": "FJ",
+   "en": "Fiji",
+   "ar": "فيجي"
+  },
+  {
+   "code": "FK",
+   "en": "Falkland Islands (Malvinas)",
+   "ar": "جزر فوكلاند"
+  },
+  {
+   "code": "FM",
+   "en": "Micronesia (Federated States of)",
+   "ar": "ميكرونيزيا"
+  },
+  {
+   "code": "FO",
+   "en": "Faroe Islands",
+   "ar": "جزر فارو"
+  },
+  {
+   "code": "FR",
+   "en": "France",
+   "ar": "فرنسا"
+  },
+  {
+   "code": "GA",
+   "en": "Gabon",
+   "ar": "الجابون"
+  },
+  {
+   "code": "GB",
+   "en": "United Kingdom of Great Britain and Northern Ireland",
+   "ar": "المملكة المتحدة"
+  },
+  {
+   "code": "GD",
+   "en": "Grenada",
+   "ar": "جرينادا"
+  },
+  {
+   "code": "GE",
+   "en": "Georgia",
+   "ar": "جورجيا"
+  },
+  {
+   "code": "GF",
+   "en": "French Guiana",
+   "ar": "غويانا"
+  },
+  {
+   "code": "GG",
+   "en": "Guernsey",
+   "ar": "جيرنزي"
+  },
+  {
+   "code": "GH",
+   "en": "Ghana",
+   "ar": "غانا"
+  },
+  {
+   "code": "GI",
+   "en": "Gibraltar",
+   "ar": "جبل طارق"
+  },
+  {
+   "code": "GL",
+   "en": "Greenland",
+   "ar": "جرينلاند"
+  },
+  {
+   "code": "GM",
+   "en": "Gambia",
+   "ar": "غامبيا"
+  },
+  {
+   "code": "GN",
+   "en": "Guinea",
+   "ar": "غينيا"
+  },
+  {
+   "code": "GP",
+   "en": "Guadeloupe",
+   "ar": "جوادلوب"
+  },
+  {
+   "code": "GQ",
+   "en": "Equatorial Guinea",
+   "ar": "غينيا الاستوائية"
+  },
+  {
+   "code": "GR",
+   "en": "Greece",
+   "ar": "اليونان"
+  },
+  {
+   "code": "GS",
+   "en": "South Georgia and the South Sandwich Islands",
+   "ar": "جورجيا الجنوبية وجزر ساندويتش الجنوبية"
+  },
+  {
+   "code": "GT",
+   "en": "Guatemala",
+   "ar": "جواتيمالا"
+  },
+  {
+   "code": "GU",
+   "en": "Guam",
+   "ar": "جوام"
+  },
+  {
+   "code": "GW",
+   "en": "Guinea-Bissau",
+   "ar": "غينيا بيساو"
+  },
+  {
+   "code": "GY",
+   "en": "Guyana",
+   "ar": "غيانا"
+  },
+  {
+   "code": "HK",
+   "en": "Hong Kong",
+   "ar": "هونغ كونغ"
+  },
+  {
+   "code": "HM",
+   "en": "Heard Island and McDonald Islands",
+   "ar": "جزيرة هيرد وجزر ماكدونالد"
+  },
+  {
+   "code": "HN",
+   "en": "Honduras",
+   "ar": "هندوراس"
+  },
+  {
+   "code": "HR",
+   "en": "Croatia",
+   "ar": "كرواتيا"
+  },
+  {
+   "code": "HT",
+   "en": "Haiti",
+   "ar": "هايتي"
+  },
+  {
+   "code": "HU",
+   "en": "Hungary",
+   "ar": "المجر"
+  },
+  {
+   "code": "ID",
+   "en": "Indonesia",
+   "ar": "اندونيسيا"
+  },
+  {
+   "code": "IE",
+   "en": "Ireland",
+   "ar": "أيرلندا"
+  },
+  {
+   "code": "IL",
+   "en": "Israel",
+   "ar": "اسرائيل"
+  },
+  {
+   "code": "IM",
+   "en": "Isle of Man",
+   "ar": "جزيرة مان"
+  },
+  {
+   "code": "IN",
+   "en": "India",
+   "ar": "الهند"
+  },
+  {
+   "code": "IO",
+   "en": "British Indian Ocean Territory",
+   "ar": "إقليم المحيط الهندي البريطاني"
+  },
+  {
+   "code": "IQ",
+   "en": "Iraq",
+   "ar": "العراق"
+  },
+  {
+   "code": "IR",
+   "en": "Iran (Islamic Republic of)",
+   "ar": "ايران"
+  },
+  {
+   "code": "IS",
+   "en": "Iceland",
+   "ar": "أيسلندا"
+  },
+  {
+   "code": "IT",
+   "en": "Italy",
+   "ar": "ايطاليا"
+  },
+  {
+   "code": "JE",
+   "en": "Jersey",
+   "ar": "جيرسي"
+  },
+  {
+   "code": "JM",
+   "en": "Jamaica",
+   "ar": "جامايكا"
+  },
+  {
+   "code": "JO",
+   "en": "Jordan",
+   "ar": "الأردن"
+  },
+  {
+   "code": "JP",
+   "en": "Japan",
+   "ar": "اليابان"
+  },
+  {
+   "code": "KE",
+   "en": "Kenya",
+   "ar": "كينيا"
+  },
+  {
+   "code": "KG",
+   "en": "Kyrgyzstan",
+   "ar": "قرغيزستان"
+  },
+  {
+   "code": "KH",
+   "en": "Cambodia",
+   "ar": "كمبوديا"
+  },
+  {
+   "code": "KI",
+   "en": "Kiribati",
+   "ar": "كيريباتي"
+  },
+  {
+   "code": "KM",
+   "en": "Comoros",
+   "ar": "جزر القمر"
+  },
+  {
+   "code": "KN",
+   "en": "Saint Kitts and Nevis",
+   "ar": "سانت كيتس ونيفيس"
+  },
+  {
+   "code": "KP",
+   "en": "Korea (Democratic People’s Republic of)",
+   "ar": "كوريا الشمالية"
+  },
+  {
+   "code": "KR",
+   "en": "Korea (Republic of)",
+   "ar": "كوريا الجنوبية"
+  },
+  {
+   "code": "KS",
+   "en": "Kosovo",
+   "ar": "كوسوفو"
+  },
+  {
+   "code": "KW",
+   "en": "Kuwait",
+   "ar": "الكويت"
+  },
+  {
+   "code": "KY",
+   "en": "Cayman Islands",
+   "ar": "جزر كايمان"
+  },
+  {
+   "code": "KZ",
+   "en": "Kazakhstan",
+   "ar": "كازاخستان"
+  },
+  {
+   "code": "LA",
+   "en": "Lao People’s Democratic Republic",
+   "ar": "لاوس"
+  },
+  {
+   "code": "LB",
+   "en": "Lebanon",
+   "ar": "لبنان"
+  },
+  {
+   "code": "LC",
+   "en": "Saint Lucia",
+   "ar": "سانت لوسيا"
+  },
+  {
+   "code": "LI",
+   "en": "Liechtenstein",
+   "ar": "ليختنشتاين"
+  },
+  {
+   "code": "LK",
+   "en": "Sri Lanka",
+   "ar": "سريلانكا"
+  },
+  {
+   "code": "LR",
+   "en": "Liberia",
+   "ar": "ليبيريا"
+  },
+  {
+   "code": "LS",
+   "en": "Lesotho",
+   "ar": "ليسوتو"
+  },
+  {
+   "code": "LT",
+   "en": "Lithuania",
+   "ar": "ليتوانيا"
+  },
+  {
+   "code": "LU",
+   "en": "Luxembourg",
+   "ar": "لوكسمبورج"
+  },
+  {
+   "code": "LV",
+   "en": "Latvia",
+   "ar": "لاتفيا"
+  },
+  {
+   "code": "LY",
+   "en": "Libya",
+   "ar": "ليبيا"
+  },
+  {
+   "code": "MA",
+   "en": "Morocco",
+   "ar": "المغرب"
+  },
+  {
+   "code": "MC",
+   "en": "Monaco",
+   "ar": "موناكو"
+  },
+  {
+   "code": "MD",
+   "en": "Moldova (Republic of)",
+   "ar": "مولدافيا"
+  },
+  {
+   "code": "ME",
+   "en": "Montenegro",
+   "ar": "الجبل الأسود"
+  },
+  {
+   "code": "MF",
+   "en": "Saint Martin (French Part)",
+   "ar": "تجمع سان مارتين"
+  },
+  {
+   "code": "MG",
+   "en": "Madagascar",
+   "ar": "مدغشقر"
+  },
+  {
+   "code": "MH",
+   "en": "Marshall Islands",
+   "ar": "جزر مارشال"
+  },
+  {
+   "code": "MK",
+   "en": "North Macedonia",
+   "ar": "مقدونيا"
+  },
+  {
+   "code": "ML",
+   "en": "Mali",
+   "ar": "مالي"
+  },
+  {
+   "code": "MM",
+   "en": "Myanmar",
+   "ar": "ميانمار"
+  },
+  {
+   "code": "MN",
+   "en": "Mongolia",
+   "ar": "منغوليا"
+  },
+  {
+   "code": "MO",
+   "en": "Macao",
+   "ar": "ماكاو"
+  },
+  {
+   "code": "MP",
+   "en": "Northern Mariana Islands",
+   "ar": "جزر ماريانا الشمالية"
+  },
+  {
+   "code": "MQ",
+   "en": "Martinique",
+   "ar": "مارتينيك"
+  },
+  {
+   "code": "MR",
+   "en": "Mauritania",
+   "ar": "موريتانيا"
+  },
+  {
+   "code": "MS",
+   "en": "Montserrat",
+   "ar": "مونتسرات"
+  },
+  {
+   "code": "MT",
+   "en": "Malta",
+   "ar": "مالطا"
+  },
+  {
+   "code": "MU",
+   "en": "Mauritius",
+   "ar": "موريشيوس"
+  },
+  {
+   "code": "MV",
+   "en": "Maldives",
+   "ar": "جزر المالديف"
+  },
+  {
+   "code": "MW",
+   "en": "Malawi",
+   "ar": "ملاوي"
+  },
+  {
+   "code": "MX",
+   "en": "Mexico",
+   "ar": "المكسيك"
+  },
+  {
+   "code": "MY",
+   "en": "Malaysia",
+   "ar": "ماليزيا"
+  },
+  {
+   "code": "MZ",
+   "en": "Mozambique",
+   "ar": "موزمبيق"
+  },
+  {
+   "code": "NA",
+   "en": "Namibia",
+   "ar": "ناميبيا"
+  },
+  {
+   "code": "NC",
+   "en": "New Caledonia",
+   "ar": "كاليدونيا الجديدة"
+  },
+  {
+   "code": "NE",
+   "en": "Niger",
+   "ar": "النيجر"
+  },
+  {
+   "code": "NF",
+   "en": "Norfolk Island",
+   "ar": "جزيرة نورفولك"
+  },
+  {
+   "code": "NG",
+   "en": "Nigeria",
+   "ar": "نيجيريا"
+  },
+  {
+   "code": "NI",
+   "en": "Nicaragua",
+   "ar": "نيكاراجوا"
+  },
+  {
+   "code": "NL",
+   "en": "Netherlands",
+   "ar": "هولندا"
+  },
+  {
+   "code": "NN",
+   "en": "Other Countries",
+   "ar": "دول اخرى"
+  },
+  {
+   "code": "NO",
+   "en": "Norway",
+   "ar": "النرويج"
+  },
+  {
+   "code": "NP",
+   "en": "Nepal",
+   "ar": "نيبال"
+  },
+  {
+   "code": "NR",
+   "en": "Nauru",
+   "ar": "نورو"
+  },
+  {
+   "code": "NU",
+   "en": "Niue",
+   "ar": "نيوي"
+  },
+  {
+   "code": "NZ",
+   "en": "New Zealand",
+   "ar": "نيوزيلاندا"
+  },
+  {
+   "code": "OM",
+   "en": "Oman",
+   "ar": "عمان"
+  },
+  {
+   "code": "PA",
+   "en": "Panama",
+   "ar": "بنما"
+  },
+  {
+   "code": "PE",
+   "en": "Peru",
+   "ar": "بيرو"
+  },
+  {
+   "code": "PF",
+   "en": "French Polynesia",
+   "ar": "بولينزيا الفرنسية"
+  },
+  {
+   "code": "PG",
+   "en": "Papua New Guinea",
+   "ar": "بابوا غينيا الجديدة"
+  },
+  {
+   "code": "PH",
+   "en": "Philippines",
+   "ar": "الفيلبين"
+  },
+  {
+   "code": "PK",
+   "en": "Pakistan",
+   "ar": "باكستان"
+  },
+  {
+   "code": "PL",
+   "en": "Poland",
+   "ar": "بولندا"
+  },
+  {
+   "code": "PM",
+   "en": "Saint Pierre and Miquelon",
+   "ar": "سان بيير وميكلون"
+  },
+  {
+   "code": "PN",
+   "en": "Pitcairn",
+   "ar": "بتكايرن"
+  },
+  {
+   "code": "PR",
+   "en": "Puerto Rico",
+   "ar": "بورتوريكو"
+  },
+  {
+   "code": "PS",
+   "en": "Palestinian, State of",
+   "ar": "فلسطين"
+  },
+  {
+   "code": "PT",
+   "en": "Portugal",
+   "ar": "البرتغال"
+  },
+  {
+   "code": "PW",
+   "en": "Palau",
+   "ar": "بالاو"
+  },
+  {
+   "code": "PY",
+   "en": "Paraguay",
+   "ar": "باراجواي"
+  },
+  {
+   "code": "QA",
+   "en": "Qatar",
+   "ar": "قطر"
+  },
+  {
+   "code": "RE",
+   "en": "Réunion",
+   "ar": "روينيون"
+  },
+  {
+   "code": "RO",
+   "en": "Romania",
+   "ar": "رومانيا"
+  },
+  {
+   "code": "RS",
+   "en": "Serbia",
+   "ar": "صربيا"
+  },
+  {
+   "code": "RU",
+   "en": "Russian Federation",
+   "ar": "روسيا"
+  },
+  {
+   "code": "RW",
+   "en": "Rwanda",
+   "ar": "رواندا"
+  },
+  {
+   "code": "SA",
+   "en": "Saudi Arabia",
+   "ar": "السعودية"
+  },
+  {
+   "code": "SB",
+   "en": "Solomon Islands",
+   "ar": "جزر سليمان"
+  },
+  {
+   "code": "SC",
+   "en": "Seychelles",
+   "ar": "سيشل"
+  },
+  {
+   "code": "SD",
+   "en": "Sudan",
+   "ar": "السودان"
+  },
+  {
+   "code": "SE",
+   "en": "Sweden",
+   "ar": "السويد"
+  },
+  {
+   "code": "SG",
+   "en": "Singapore",
+   "ar": "سنغافورة"
+  },
+  {
+   "code": "SH",
+   "en": "Saint Helena, Ascension and Tristan da Cunha",
+   "ar": "سانت هيلينا وأسينشين وتريستان دا كونا"
+  },
+  {
+   "code": "SI",
+   "en": "Slovenia",
+   "ar": "سلوفينيا"
+  },
+  {
+   "code": "SJ",
+   "en": "Svalbard and Jan Mayen",
+   "ar": "سفالبارد ويان ماين"
+  },
+  {
+   "code": "SK",
+   "en": "Slovakia",
+   "ar": "سلوفاكيا"
+  },
+  {
+   "code": "SL",
+   "en": "Sierra Leone",
+   "ar": "سيراليون"
+  },
+  {
+   "code": "SM",
+   "en": "San Marino",
+   "ar": "سان مارينو"
+  },
+  {
+   "code": "SN",
+   "en": "Senegal",
+   "ar": "السنغال"
+  },
+  {
+   "code": "SO",
+   "en": "Somalia",
+   "ar": "الصومال"
+  },
+  {
+   "code": "SR",
+   "en": "Suriname",
+   "ar": "سورينام"
+  },
+  {
+   "code": "SS",
+   "en": "South Sudan",
+   "ar": "جنوب السودان"
+  },
+  {
+   "code": "ST",
+   "en": "Sao Tome and Principe",
+   "ar": "ساو تومي وبرينسيب"
+  },
+  {
+   "code": "SV",
+   "en": "El Salvador",
+   "ar": "السلفادور"
+  },
+  {
+   "code": "SX",
+   "en": "Sint Maarten (Dutch Part)",
+   "ar": "سينت مارتن"
+  },
+  {
+   "code": "SY",
+   "en": "Syrian Arab Republic",
+   "ar": "سوريا"
+  },
+  {
+   "code": "SZ",
+   "en": "Eswatini",
+   "ar": "سوازيلاند"
+  },
+  {
+   "code": "TC",
+   "en": "Turks and Caicos Islands",
+   "ar": "جزر توركس وكايكوس"
+  },
+  {
+   "code": "TD",
+   "en": "Chad",
+   "ar": "تشاد"
+  },
+  {
+   "code": "TF",
+   "en": "French Southern Territories",
+   "ar": "أراض فرنسية جنوبية وأنتارتيكية"
+  },
+  {
+   "code": "TG",
+   "en": "Togo",
+   "ar": "توجو"
+  },
+  {
+   "code": "TH",
+   "en": "Thailand",
+   "ar": "تايلند"
+  },
+  {
+   "code": "TJ",
+   "en": "Tajikistan",
+   "ar": "طاجكستان"
+  },
+  {
+   "code": "TK",
+   "en": "Tokelau",
+   "ar": "توكيلو"
+  },
+  {
+   "code": "TL",
+   "en": "Timor-Leste",
+   "ar": "تيمور الشرقية"
+  },
+  {
+   "code": "TM",
+   "en": "Turkmenistan",
+   "ar": "تركمانستان"
+  },
+  {
+   "code": "TN",
+   "en": "Tunisia",
+   "ar": "تونس"
+  },
+  {
+   "code": "TO",
+   "en": "Tonga",
+   "ar": "تونجا"
+  },
+  {
+   "code": "TR",
+   "en": "Turkey",
+   "ar": "تركيا"
+  },
+  {
+   "code": "TT",
+   "en": "Trinidad and Tobago",
+   "ar": "ترينيداد وتوباغو"
+  },
+  {
+   "code": "TV",
+   "en": "Tuvalu",
+   "ar": "توفالو"
+  },
+  {
+   "code": "TW",
+   "en": "Taiwan (Province of China)",
+   "ar": "تايوان"
+  },
+  {
+   "code": "TZ",
+   "en": "Tanzania, United Republic of",
+   "ar": "تانزانيا"
+  },
+  {
+   "code": "UA",
+   "en": "Ukraine",
+   "ar": "أوكرانيا"
+  },
+  {
+   "code": "UG",
+   "en": "Uganda",
+   "ar": "أوغندا"
+  },
+  {
+   "code": "UM",
+   "en": "United States Minor Outlying Islands",
+   "ar": "جزر الولايات المتحدة الصغيرة النائية"
+  },
+  {
+   "code": "US",
+   "en": "United States of America",
+   "ar": "الولايات المتحدة"
+  },
+  {
+   "code": "UY",
+   "en": "Uruguay",
+   "ar": "أورجواي"
+  },
+  {
+   "code": "UZ",
+   "en": "Uzbekistan",
+   "ar": "أوزبكستان"
+  },
+  {
+   "code": "VA",
+   "en": "Holy See",
+   "ar": "الفاتيكان"
+  },
+  {
+   "code": "VC",
+   "en": "Saint Vincent and the Grenadines",
+   "ar": "سانت فينسنت والغرينادين"
+  },
+  {
+   "code": "VE",
+   "en": "Venezuela (Bolivarian Republic of)",
+   "ar": "فنزويلا"
+  },
+  {
+   "code": "VG",
+   "en": "Virgin Islands (British)",
+   "ar": "جزر العذراء البريطانية"
+  },
+  {
+   "code": "VI",
+   "en": "Virgin Islands (U.S.)",
+   "ar": "جزر العذراء الأمريكية"
+  },
+  {
+   "code": "VN",
+   "en": "Viet Nam",
+   "ar": "فيتنام"
+  },
+  {
+   "code": "VU",
+   "en": "Vanuatu",
+   "ar": "فانواتو"
+  },
+  {
+   "code": "WF",
+   "en": "Wallis and Futuna",
+   "ar": "والس وفوتونا"
+  },
+  {
+   "code": "WS",
+   "en": "Samoa",
+   "ar": "ساموا"
+  },
+  {
+   "code": "YE",
+   "en": "Yemen",
+   "ar": "اليمن"
+  },
+  {
+   "code": "YT",
+   "en": "Mayotte",
+   "ar": "مايوت"
+  },
+  {
+   "code": "ZA",
+   "en": "South Africa",
+   "ar": "جنوب أفريقيا"
+  },
+  {
+   "code": "ZM",
+   "en": "Zambia",
+   "ar": "زامبيا"
+  },
+  {
+   "code": "ZW",
+   "en": "Zimbabwe",
+   "ar": "زيمبابوي"
+  }
+ ],
+ "paymentMethods": [
+  {
+   "code": "C",
+   "en": "Cash",
+   "ar": ""
+  },
+  {
+   "code": "V",
+   "en": "Visa",
+   "ar": ""
+  },
+  {
+   "code": "CC",
+   "en": "Cash with contractor",
+   "ar": ""
+  },
+  {
+   "code": "VC",
+   "en": "Visa with contractor",
+   "ar": ""
+  },
+  {
+   "code": "VO",
+   "en": "Vouchers",
+   "ar": ""
+  },
+  {
+   "code": "PR",
+   "en": "Promotion",
+   "ar": ""
+  },
+  {
+   "code": "GC",
+   "en": "Gift Card",
+   "ar": ""
+  },
+  {
+   "code": "P",
+   "en": "Points",
+   "ar": ""
+  },
+  {
+   "code": "O",
+   "en": "Others",
+   "ar": ""
+  }
+ ],
+ "orderDeliveryModes": [
+  {
+   "code": "FC",
+   "en": "From the company place",
+   "ar": ""
+  },
+  {
+   "code": "TO",
+   "en": "Transport by others",
+   "ar": ""
+  },
+  {
+   "code": "TC",
+   "en": "Transported by the company",
+   "ar": ""
+  }
+ ],
+ "returnWithNoReferenceReasons": [
+  {
+   "code": "I",
+   "en": "International return receipt",
+   "ar": ""
+  },
+  {
+   "code": "B",
+   "en": "Sales issued before adoption",
+   "ar": ""
+  }
+ ],
+ "activityCodes": [
+  {
+   "code": "0111",
+   "en": "Cultivation of grains and crops (except for rice), legumes and oilseeds",
+   "ar": "زراعة الحبوب والمحاصيل ( فيما عدا الارز ) والبقوليات والحبوب الزيتية"
+  },
+  {
+   "code": "0112",
+   "en": "Cultivation of rice",
+   "ar": "زراعة الارز"
+  },
+  {
+   "code": "0113",
+   "en": "Growing vegetables, melons, roots and tubers",
+   "ar": "زراعة الخضر ؤالبطيخ والجذور والدرنات"
+  },
+  {
+   "code": "0114",
+   "en": "Cultivation of sugar cane",
+   "ar": "زراعة قصب السكر"
+  },
+  {
+   "code": "0115",
+   "en": "Tobacco cultivation",
+   "ar": "زراعة التبغ"
+  },
+  {
+   "code": "0116",
+   "en": "Growing fiber crops",
+   "ar": "زراعة المحاصيل ذات الالياف"
+  },
+  {
+   "code": "0119",
+   "en": "Cultivation of other non-perennial crops",
+   "ar": "زراعة المحاصيل غير المعمرة الاخرى"
+  },
+  {
+   "code": "0121",
+   "en": "the cultivation of grapevines.",
+   "ar": "زراعة الكروم"
+  },
+  {
+   "code": "0122",
+   "en": "Growing tropical and subtropical fruits",
+   "ar": "زراعة الفواكه الاستوائية وشبه الاستوائية"
+  },
+  {
+   "code": "0123",
+   "en": "Cultivation of citrus fruits",
+   "ar": "زراعة الموالح"
+  },
+  {
+   "code": "0124",
+   "en": "Cultivation of fruit with Date kernel and from palm trees",
+   "ar": "زراعة الفواكة ذات النواة والناتجة عن انواع النخيل"
+  },
+  {
+   "code": "0125",
+   "en": "Plant fruit trees and shrubs and other nuts",
+   "ar": "زراعة أشجار وشجيرات الفواكهة والمكسرات الاخرى"
+  },
+  {
+   "code": "0126",
+   "en": "Growing oil fruits",
+   "ar": "زراعة الفواكهة الزيتية"
+  },
+  {
+   "code": "0127",
+   "en": "Cultivation of the crops from which drinks are extracted",
+   "ar": "زراعة المحاصيل التى تستخرج منها المشروبات"
+  },
+  {
+   "code": "0128",
+   "en": "Cultivation of spice crops, aromatics, medicine and pharmaceutical drugs",
+   "ar": "زراعة محاصيل التوابل والعطريات والادوية والعقاقير الصيدلانية"
+  },
+  {
+   "code": "0129",
+   "en": "Cultivation of other perennial crops",
+   "ar": "زراعة المحاصيل المعمرة الاخرى"
+  },
+  {
+   "code": "0130",
+   "en": "Crop breeding",
+   "ar": "تكاثر المحاصيل"
+  },
+  {
+   "code": "0141",
+   "en": "Breeding of cattle and buffalo",
+   "ar": "تربية الماشية والجواميس"
+  },
+  {
+   "code": "0142",
+   "en": "Breeding of horses and mare",
+   "ar": "تربية الخيول و الفرس"
+  },
+  {
+   "code": "0143",
+   "en": "Breeding of camels",
+   "ar": "تربية الجمال والهجن"
+  },
+  {
+   "code": "0144",
+   "en": "Breeding sheep and goats",
+   "ar": "تربية الخراف والماعز"
+  },
+  {
+   "code": "0145",
+   "en": "Breeding of Pig",
+   "ar": "تربية الحنازير"
+  },
+  {
+   "code": "0146",
+   "en": "Poultry farming",
+   "ar": "تربية الدواجن"
+  },
+  {
+   "code": "0149",
+   "en": "Breeding other animals",
+   "ar": "تربية الحيوانات الاخرى"
+  },
+  {
+   "code": "0150",
+   "en": "Mixed education",
+   "ar": "التربية المختلطة"
+  },
+  {
+   "code": "0161",
+   "en": "Support activities for crop production",
+   "ar": "الانشطة الداعمة لانتاج المحاصيل"
+  },
+  {
+   "code": "0162",
+   "en": "Activities in support of animal production",
+   "ar": "الانشطة الداعمة لانتاج الحيوانات"
+  },
+  {
+   "code": "0163",
+   "en": "Post-harvest activities",
+   "ar": "الانشطة اللاحقة لحصاد المحاصيل"
+  },
+  {
+   "code": "0164",
+   "en": "Preparing grains for reproduction",
+   "ar": "تجهيز الحبوب للتكاثر"
+  },
+  {
+   "code": "0170",
+   "en": "Hunting, erection, and related service activities",
+   "ar": "الصيد ونصب الاشراك وانشطة الخدمات ذات الصلة"
+  },
+  {
+   "code": "0210",
+   "en": "Forest care and forest-related activities",
+   "ar": "رعاية الغابات والانشطة المتصلة بالغابات"
+  },
+  {
+   "code": "0220",
+   "en": "Wood cutting",
+   "ar": "قطع الاخشاب"
+  },
+  {
+   "code": "0230",
+   "en": "Assembling non-wood forest products",
+   "ar": "تجميع المنتجات غير الخشبية بالغابات"
+  },
+  {
+   "code": "0240",
+   "en": "Forest support services",
+   "ar": "الخدمات الداعمة للغابات"
+  },
+  {
+   "code": "0311",
+   "en": "Fishing",
+   "ar": "الصيد البحرى"
+  },
+  {
+   "code": "0312",
+   "en": "River fishing",
+   "ar": "الصيد النهرى"
+  },
+  {
+   "code": "0321",
+   "en": "Marine farms",
+   "ar": "المزارع البحرية"
+  },
+  {
+   "code": "0322",
+   "en": "River farms",
+   "ar": "المزارع النهرية"
+  },
+  {
+   "code": "0411",
+   "en": "Earn a job",
+   "ar": "كسب عمل"
+  },
+  {
+   "code": "0412",
+   "en": "Income from government agencies salaries",
+   "ar": "ايرادات من مرتبات جهات حكوميه"
+  },
+  {
+   "code": "0413",
+   "en": "Income and salaries from the public business sector",
+   "ar": "إيرادات ومرتبات من قطاع الاعمال العام"
+  },
+  {
+   "code": "0414",
+   "en": "Income and salaries from the private sector",
+   "ar": "ايرادات ومرتبات من قطاع خاص"
+  },
+  {
+   "code": "0415",
+   "en": "Income and salary from non-subject entities",
+   "ar": "ايرادات ومرتبات من جهات غير خاضعه"
+  },
+  {
+   "code": "0416",
+   "en": "Inspection and sting",
+   "ar": "تفتيش ودمغة"
+  },
+  {
+   "code": "0441",
+   "en": "Income of agricultural lands",
+   "ar": "ايرادالاراضي الزراعيه"
+  },
+  {
+   "code": "0442",
+   "en": "Revenue from constructed real estate",
+   "ar": "ايراد العقارات المبنيه"
+  },
+  {
+   "code": "0444",
+   "en": "Income of real estate activities",
+   "ar": "ايراد الانشطه العقاريه"
+  },
+  {
+   "code": "0451",
+   "en": "Errand stamp",
+   "ar": "دمغة مأمورية"
+  },
+  {
+   "code": "0461",
+   "en": "Revenue from non-funders",
+   "ar": "ايرادات غير الممولين"
+  },
+  {
+   "code": "0462",
+   "en": "Revenue of transferred capital",
+   "ar": "إيراد رؤوس الأموال المنقولة"
+  },
+  {
+   "code": "0463",
+   "en": "Income earned from abroad",
+   "ar": "ايرادات محصله من الخارج"
+  },
+  {
+   "code": "0464",
+   "en": "Other categories / miscellaneous other income",
+   "ar": "فئات اخري/ ايرادات اخري متنوعه"
+  },
+  {
+   "code": "0471",
+   "en": "Free market revenue",
+   "ar": "ايرادات أسواق حرة"
+  },
+  {
+   "code": "0472",
+   "en": "Free Zones revenue",
+   "ar": "ايرادات مناطق حره"
+  },
+  {
+   "code": "0510",
+   "en": "Hard coal mining",
+   "ar": "تعدين الفحم الصلب"
+  },
+  {
+   "code": "0520",
+   "en": "Lignite mining",
+   "ar": "تعدين الليجنيت"
+  },
+  {
+   "code": "0610",
+   "en": "Extract the crude oil",
+   "ar": "استخرج البترول الخام"
+  },
+  {
+   "code": "0620",
+   "en": "Extract natural gas",
+   "ar": "استخرج االغاز الطبيعى"
+  },
+  {
+   "code": "0710",
+   "en": "Iron ore mining",
+   "ar": "تعدين الحديد الخام"
+  },
+  {
+   "code": "0721",
+   "en": "Uranium and raw thorium mining",
+   "ar": "تعدين اليورانيوم والثوريوم الخام"
+  },
+  {
+   "code": "0729",
+   "en": "Mining other non-ferrous metals",
+   "ar": "تعدين المعادن الخام الاخرى غير الحديدية"
+  },
+  {
+   "code": "0810",
+   "en": "Quarrying to extract stones, sand and shale",
+   "ar": "استغلال المحاجر لاستخراج الاحجار والرمال والطفل"
+  },
+  {
+   "code": "0891",
+   "en": "Chemical minerals and fertilizer extraction",
+   "ar": "استخراج المعادن الكيميائية والاسمدة"
+  },
+  {
+   "code": "0892",
+   "en": "Peat extraction",
+   "ar": "استخراج الخث"
+  },
+  {
+   "code": "0893",
+   "en": "Salt extraction",
+   "ar": "استخراج الملح"
+  },
+  {
+   "code": "0899",
+   "en": "Other mining and quarrying activities are not elsewhere classified",
+   "ar": "الانشطة الاخرى للتعدين واستغلال المحاجر غير مصنفة فى موضع اخر"
+  },
+  {
+   "code": "0910",
+   "en": "Service activities in support of oil and natural gas extraction",
+   "ar": "انشطة الخدمات الداعمة لاعمال استخراج البترول والغاز الطبيعى"
+  },
+  {
+   "code": "0990",
+   "en": "Service activities in support of other mining and quarrying activities",
+   "ar": "انشطة الخدمات الداعمة للاعمال الاخرى للتعدين واستغلال المحاجر"
+  },
+  {
+   "code": "1010",
+   "en": "Meat processing and preservation",
+   "ar": "تصنيع وحفظ اللحوم"
+  },
+  {
+   "code": "1020",
+   "en": "Manufacture and preservation of fish, crustaceans and mollusks",
+   "ar": "تصنيع وحفظ الاسماك والقشريات والرخويات"
+  },
+  {
+   "code": "1030",
+   "en": "Manufacturing and preserving fruits and vegetables",
+   "ar": "تصنيع وحفظ الفواكهة و الخضراوات"
+  },
+  {
+   "code": "1040",
+   "en": "Manufacture of vegetable and animal oils and fats",
+   "ar": "تصنيع الزيوت و الدهون الحيوانية والنباتية"
+  },
+  {
+   "code": "1050",
+   "en": "Dairy products manufacturing",
+   "ar": "تصنيع منتجات الالبان"
+  },
+  {
+   "code": "1061",
+   "en": "Manufacture of grain mill products",
+   "ar": "تصنيع منتجات طواحين الحبوب"
+  },
+  {
+   "code": "1062",
+   "en": "Manufacture of starch and starch products",
+   "ar": "تصنيع منتجات النشاء ومنتجات النشاء"
+  },
+  {
+   "code": "1071",
+   "en": "Manufacturing bakery products",
+   "ar": "تصنيع منتجات المخابز"
+  },
+  {
+   "code": "1072",
+   "en": "Sugar industry",
+   "ar": "صناعة السكر"
+  },
+  {
+   "code": "1073",
+   "en": "Manufacture of cocoa, chocolate and sugar confectionery",
+   "ar": "تصنيع الكاكاو والشيكولاتة والحلويات السكرية"
+  },
+  {
+   "code": "1074",
+   "en": "Manufacturing pasta, strips, couscous and similar starchy products",
+   "ar": "تصنيع المعكرونة وشرائطها والكسكسى والمنتجات النشوية المماثلة"
+  },
+  {
+   "code": "1075",
+   "en": "Meals and ready-made food industry",
+   "ar": "صناعة الوجبات و الاغذية الجاهزة"
+  },
+  {
+   "code": "1079",
+   "en": "Manufacture of other products not classified elsewhere",
+   "ar": "صناعة المنتجات الاخرى غير مصنفة فى موضع اخر"
+  },
+  {
+   "code": "1080",
+   "en": "Prepared animal food industry",
+   "ar": "صناعة الاغذية الحيوانية المجهزة"
+  },
+  {
+   "code": "1101",
+   "en": "Spirits distilled, refined and mixed",
+   "ar": "تقطير المشروبات الروحية وتكريرها وخلطها"
+  },
+  {
+   "code": "1102",
+   "en": "Winemaking",
+   "ar": "صناعة النبيذ"
+  },
+  {
+   "code": "1103",
+   "en": "The manufacture of alcoholic drinks derived from the molten and the manufacture of molten",
+   "ar": "صناعة المشروبات الكحولية المشتقة من المولت وصنع المولت"
+  },
+  {
+   "code": "1104",
+   "en": "Manufacturing soft drinks and producing mineral water",
+   "ar": "صناعة المشروبات المرطبة وانتاج المياة المعدنية"
+  },
+  {
+   "code": "1200",
+   "en": "Manufacture of tobacco products",
+   "ar": "صناعة منتجات التبغ"
+  },
+  {
+   "code": "1311",
+   "en": "Processing and spinning of textile fibers",
+   "ar": "تجهيز وغزل الياف المنسوجات"
+  },
+  {
+   "code": "1312",
+   "en": "Textile weave",
+   "ar": "نسج المنسوجات"
+  },
+  {
+   "code": "1313",
+   "en": "The textile industry",
+   "ar": "صناعة المنسوجات"
+  },
+  {
+   "code": "1391",
+   "en": "Manufacture of knitted and crocheted fabrics",
+   "ar": "صناعة الاقمشة التريكو والكروشية"
+  },
+  {
+   "code": "1392",
+   "en": "Manufacture of ready-made textile accessories, except garment wear",
+   "ar": "صناعة مستلزمات المنسوجات الجاهزة باستثناء ملابس الزينة"
+  },
+  {
+   "code": "1393",
+   "en": "Carpet and blanket industry",
+   "ar": "صناعة السجاد والبطاطين"
+  },
+  {
+   "code": "1394",
+   "en": "Manufacture of ropes, thick and double ropes and nets",
+   "ar": "صناعة الحبال والحبال الغليظة والمذدوجة والشباك"
+  },
+  {
+   "code": "1399",
+   "en": "Other textile industry not elsewhere classified",
+   "ar": "صناعة المنسوجات الاخرى غير مصنفة فى موضع اخر"
+  },
+  {
+   "code": "1410",
+   "en": "Manufacture of garment with the exception of fur",
+   "ar": "صناعة الملابس ذات الزينة باستثناء الفراء"
+  },
+  {
+   "code": "1420",
+   "en": "Fur accessories industry",
+   "ar": "صناعة مستلزمات الفراء"
+  },
+  {
+   "code": "1430",
+   "en": "The manufacture of clothing, knitted and crocheted",
+   "ar": "صناعة ملابس الزينة بالتريكو والكروشية"
+  },
+  {
+   "code": "1511",
+   "en": "Tanning and processing of leather, fillings and dyeing of fur",
+   "ar": "دبغ وتجهيز الجلود والحشوات وصباغة الفراء"
+  },
+  {
+   "code": "1512",
+   "en": "Luggage, handbags and similar industries, along with saddles and horse sets",
+   "ar": "صناعة حفائب الامتعة وحقائب اليد وما شابهة ذلك الى جانب السروج واطقم الجياد"
+  },
+  {
+   "code": "1520",
+   "en": "Shoe manufacturing",
+   "ar": "صناعة الاحذية"
+  },
+  {
+   "code": "1610",
+   "en": "Sawing wood and abrasion",
+   "ar": "نشر الخشب وسحجة"
+  },
+  {
+   "code": "1621",
+   "en": "Sheets made of wood veneer and wood-based panels",
+   "ar": "الصفائح من قشرة الخشب والالواح ذات الاساس الخشبى"
+  },
+  {
+   "code": "1622",
+   "en": "Manufacture of carpentry accessories intended for buildings and installations",
+   "ar": "صناعة مستلزمات النجارة المعدة للابنية والمنشات"
+  },
+  {
+   "code": "1623",
+   "en": "Wooden boxes industry",
+   "ar": "صناعة الصناديق الخشبية"
+  },
+  {
+   "code": "1629",
+   "en": "Manufacture of wood, wood products and cork, except furniture, and manufacture of articles produced from straw and sheets",
+   "ar": "صناعة الاخشاب والمنتجات الخشبية والفلين باستثناء الاثاث وصناعة الاصناف المنتجة من القش والصفائح"
+  },
+  {
+   "code": "1701",
+   "en": "Paper and carvatard pulp industry",
+   "ar": "صناعة عجائن الورق و الورق المقوى ( الكارتون )"
+  },
+  {
+   "code": "1702",
+   "en": "Manufacture of corrugated paper and paperboard and boxes made of paper and paperboard",
+   "ar": "صناعة الورق والورق المقوى المموج والصناديق المصنوعة من الورق والورق المقوى"
+  },
+  {
+   "code": "1709",
+   "en": "Manufacture of other articles of paper and paperboard",
+   "ar": "صناعة اصناف اخرى من الورق والورق المقوى"
+  },
+  {
+   "code": "1811",
+   "en": "printing",
+   "ar": "الطباعة"
+  },
+  {
+   "code": "1812",
+   "en": "Printing service activities",
+   "ar": "انشطة الخدمات المرتبطة بالطباعة"
+  },
+  {
+   "code": "1820",
+   "en": "Clone recorded media",
+   "ar": "استنساخ وسائل الاعلام المسجلة"
+  },
+  {
+   "code": "1910",
+   "en": "Coke oven products industry",
+   "ar": "صناعة منتجات افران الكوك"
+  },
+  {
+   "code": "1920",
+   "en": "Refined petroleum products",
+   "ar": "المنتجات النفطية المكررة"
+  },
+  {
+   "code": "2011",
+   "en": "Basic chemicals",
+   "ar": "المواد الكيميائية الاساسية"
+  },
+  {
+   "code": "2012",
+   "en": "Manufacture of fertilizers and nitrogen compounds",
+   "ar": "صناعة الاسمدة والمركبات الازوتية"
+  },
+  {
+   "code": "2013",
+   "en": "Plastics industry in its primary forms and synthetic rubber",
+   "ar": "صناعة اللادائن فى اشكالها الاولية والمطاط الصناعى"
+  },
+  {
+   "code": "2021",
+   "en": "Pesticide industry and other agricultural chemical products",
+   "ar": "صناعة مبيدات الافات والمنتجات الكيميائية الزراعية الاخرى"
+  },
+  {
+   "code": "2022",
+   "en": "Manufacture of paints, varnishes, and similar coatings, printing inks and molds",
+   "ar": "صناعة الدهانات والورنيش والطلاء المماثلة واحبار الطباعة والمصطكات"
+  },
+  {
+   "code": "2023",
+   "en": "Manufacture of soap, disinfectants, cleaning and polishing preparations, perfumes and cosmetics",
+   "ar": "صناعة الصابون والمطهرات ومستحضرات التنظيف والتلميع والعطور ومستحضرات التجميل"
+  },
+  {
+   "code": "2029",
+   "en": "Manufacture of other chemical products not classified elsewhere",
+   "ar": "صناعة المنتجات الكيميائية الاخرى غير المصنفة فى موضع اخر"
+  },
+  {
+   "code": "2030",
+   "en": "Industrial fiber industry",
+   "ar": "صناعة الالياف الصناعية"
+  },
+  {
+   "code": "2100",
+   "en": "Manufacture of pharmaceutical, chemical, and plant products",
+   "ar": "صناعة المستحضرات الصيدلانية والكيميائية الدواءية والمنتجات النباتية"
+  },
+  {
+   "code": "2211",
+   "en": "Manufacture of rubber tires and tubes, renewing and rebuilding the outer surfaces of rubber tires",
+   "ar": "صناعة الاطارات والانابيب المطاطية وتجديد الاسطح الخارجية للاطارات المطاطية واعادة بنائها"
+  },
+  {
+   "code": "2219",
+   "en": "Manufacture of other rubber products",
+   "ar": "صناعة المنتجات المطاطية الاخرى"
+  },
+  {
+   "code": "2220",
+   "en": "Plastics industry",
+   "ar": "صناعة منتجات اللادائن"
+  },
+  {
+   "code": "2310",
+   "en": "Glass and its products industry",
+   "ar": "صناعة الزجاج ومنتجاتة"
+  },
+  {
+   "code": "2391",
+   "en": "Manufacture of fusion products",
+   "ar": "صناعة المنتجات المقاومة للانصهار"
+  },
+  {
+   "code": "2392",
+   "en": "Manufacture of Shale products for Building",
+   "ar": "صناعة مواد الطفلة الخاصة بالبناء"
+  },
+  {
+   "code": "2393",
+   "en": "Manufacture of other Porcelain and ceramic products",
+   "ar": "صناعة منتجات البرسولين والسيراميك الاخرى"
+  },
+  {
+   "code": "2394",
+   "en": "Cement, lime and plaster industry",
+   "ar": "صناعة الاسمنت والجير والجص"
+  },
+  {
+   "code": "2395",
+   "en": "Manufacture of concrete products, cement and plaster",
+   "ar": "صناعة منتجات الخرسانة والاسمنت والجص"
+  },
+  {
+   "code": "2396",
+   "en": "Cutting, forming and completing the stone processing",
+   "ar": "قطع وتشكيل واتمام تجهيز الاحجار"
+  },
+  {
+   "code": "2399",
+   "en": "Manufacture of non-metallic minerals products not classified elsewhere",
+   "ar": "صناعة منتجات المعادن الافلزية الاخرى غير المصنفة فى مواضع اخرى"
+  },
+  {
+   "code": "2410",
+   "en": "The industry of basic iron and steel",
+   "ar": "صناعة الحديد والصلب القاعديين"
+  },
+  {
+   "code": "2420",
+   "en": "Manufacture of precious and non-ferrous basic metals",
+   "ar": "صناعة الفلزات الثمينة وغير الحديدية القاعدية"
+  },
+  {
+   "code": "2431",
+   "en": "Iron and steel casting",
+   "ar": "سبك الحديدوالصلب"
+  },
+  {
+   "code": "2432",
+   "en": "Non-ferrous metal casting",
+   "ar": "سبك المعادن غير الحديدية"
+  },
+  {
+   "code": "2511",
+   "en": "Structural metal products industry",
+   "ar": "صناعة المنتجات المعدنية الانشائية"
+  },
+  {
+   "code": "2512",
+   "en": "Industry of tanks and metal containers",
+   "ar": "صناعة الصهاريج والخزانات و الحاويات المعدنية"
+  },
+  {
+   "code": "2513",
+   "en": "Water vapor generators except for central heating boilers in hot water",
+   "ar": "مولدات بخار الماء باستثناء مراجل التدفئةالمركزية بالمياة الساخنة"
+  },
+  {
+   "code": "2520",
+   "en": "Arms and ammunition industry",
+   "ar": "صناعة الاسلحة والذخائر"
+  },
+  {
+   "code": "2591",
+   "en": "Forming metals by hammering, pressing, casting, rolling, and treatment of metal powders",
+   "ar": "تشكيل المعادن بالطرق والكبس و السبك والدلفنة ومعالجة مساحيق المعادن"
+  },
+  {
+   "code": "2592",
+   "en": "Metal processing and coating",
+   "ar": "معالجة وطلى المعادن"
+  },
+  {
+   "code": "2593",
+   "en": "Manufacture of cutting tools, hand tools and general metal tools",
+   "ar": "صناعة ادوات القطع والعدد اليدوية والادوات المعدنية العامة"
+  },
+  {
+   "code": "2599",
+   "en": "Manufacture of other fabricated metal products not classified elsewhere",
+   "ar": "صناعة منتجات المعادن المشكلة الاخرى غير المصنفة فى مواضع اخرى"
+  },
+  {
+   "code": "2610",
+   "en": "Electronic components and panels industry",
+   "ar": "صناعة المكونات والالواح الاليكترونية"
+  },
+  {
+   "code": "2620",
+   "en": "The manufacture of electronic computers and related devices",
+   "ar": "صناعة الحاسبات الاليكترونية و الاجهزة المتصلة بة"
+  },
+  {
+   "code": "2630",
+   "en": "Communications equipment industry",
+   "ar": "صناعة اجهزة الاتصالات"
+  },
+  {
+   "code": "2640",
+   "en": "Electronic devices industry",
+   "ar": "صناعة الاجهزة الاليكترونية"
+  },
+  {
+   "code": "2651",
+   "en": "Manufacturing measuring, testing, navigation and control devices",
+   "ar": "صناعة اجهزة القياس والاختبار و الملاحة والتحكم"
+  },
+  {
+   "code": "2652",
+   "en": "Watch and alarm clock industry",
+   "ar": "صناعة الساعات والمنبهات"
+  },
+  {
+   "code": "2660",
+   "en": "Radiation, medical and therapeutic electronic devices industry",
+   "ar": "صناعة الاجهزة الاشعاعية والطبية والعلاجية اللاليكترونية"
+  },
+  {
+   "code": "2670",
+   "en": "Optical equipment and imaging equipment industry",
+   "ar": "صناعة المعدات البصرية واجهزة التصوير"
+  },
+  {
+   "code": "2680",
+   "en": "Optical and magnetic conveyor industry",
+   "ar": "صناعة الوسائل الناقلة البصرية والمغنطيسية"
+  },
+  {
+   "code": "2710",
+   "en": "Manufacture of motors, generators, electrical transformers, devices and control panels for electricity distribution",
+   "ar": "صناعة المحركات والمولدات والمحولات الكهربائية واجهزة ولوحات التحكم فى توزيع الكهرباء"
+  },
+  {
+   "code": "2720",
+   "en": "Manufacture of dry and stored batteries",
+   "ar": "صناعة البطاريات الجافة والمختزنة"
+  },
+  {
+   "code": "2731",
+   "en": "Industrial fiber cable industry",
+   "ar": "صناعة كابلات الالياف الصناعية"
+  },
+  {
+   "code": "2732",
+   "en": "Other electrical and electronic wires and cables",
+   "ar": "صناعة الاسلاك الكهربائية والاليكترونية الاخرى والكابلات"
+  },
+  {
+   "code": "2733",
+   "en": "Wire devices industry",
+   "ar": "صناعة اجهزة الاسلاك"
+  },
+  {
+   "code": "2740",
+   "en": "Electrical lighting devices industry",
+   "ar": "صناعة اجهزة الانارة الكهربائية"
+  },
+  {
+   "code": "2750",
+   "en": "Home appliances industry",
+   "ar": "صناعة الاجهزة المنزلية"
+  },
+  {
+   "code": "2790",
+   "en": "Other electrical appliances industry",
+   "ar": "صناعة الاجهزة الكهربائية الاخرى"
+  },
+  {
+   "code": "2811",
+   "en": "Manufacture of generators and engines, with the exception of aircraft, vehicles and motorcycles",
+   "ar": "صناعة المولدات والمحركات باسقثناء الطائرات والمركبات ومحركات الموتيسيكلات"
+  },
+  {
+   "code": "2812",
+   "en": "Liquid power devices industry",
+   "ar": "صناعة اجهزة الطاقة السائلة"
+  },
+  {
+   "code": "2813",
+   "en": "Manufacture of pumps, compressors, tapes and other valves",
+   "ar": "صناعة المضخات والضواغط والاشرطة والصمامات الاخرى"
+  },
+  {
+   "code": "2814",
+   "en": "Gears, carriers and driving devices industry",
+   "ar": "صناعة التروس والحاملات واجهزة القيادة"
+  },
+  {
+   "code": "2815",
+   "en": "Manufacture of furnaces, furnaces and their incinerators",
+   "ar": "صناعة الافران و الاتونات ومحرقاتها"
+  },
+  {
+   "code": "2816",
+   "en": "The elevators and equipment needed for it",
+   "ar": "صناعة المصاعد والمعدات الازمة لها"
+  },
+  {
+   "code": "2817",
+   "en": "Manufacture of office equipment and equipment (excluding electronic computers and their accessories)",
+   "ar": "صناعة الاجهزة والمعدات المكتبية ( باستثناء الحاسبات الاليكترونية ومستلزماتها )"
+  },
+  {
+   "code": "2818",
+   "en": "Manufacture of manual power steering equipment",
+   "ar": "صناعة المعدات اليدوية لتوجية الطاقة"
+  },
+  {
+   "code": "2819",
+   "en": "Other equipment industry of various purposes",
+   "ar": "صناعة المعدات الاخرى ذات الاغراض المتنوعة"
+  },
+  {
+   "code": "2821",
+   "en": "Agricultural and forestry equipment industry",
+   "ar": "صناعة المعدات الزراعية والخاصة بالغابات"
+  },
+  {
+   "code": "2822",
+   "en": "Manufacture of equipment and machinery for forming metals",
+   "ar": "صناعة معدات واجهزة تشكيل المعادن"
+  },
+  {
+   "code": "2823",
+   "en": "Metal equipment industry",
+   "ar": "صناعة معدات المعادن"
+  },
+  {
+   "code": "2824",
+   "en": "Mining and quarrying and building equipment industry",
+   "ar": "صناعة معدات المناجم و المحاجر والبناء"
+  },
+  {
+   "code": "2825",
+   "en": "Manufacture of food, beverage and tobacco industries equipment",
+   "ar": "صناعة معدات الصناعات الغذائية والمشرؤبات والتبغ"
+  },
+  {
+   "code": "2826",
+   "en": "Manufacture of ready-made clothes, accessories, and leather production",
+   "ar": "صناعة معدات الملابس الجاهزة وهدوات الزينة وانتاج الجلود"
+  },
+  {
+   "code": "2829",
+   "en": "Manufacture of other special-purpose equipment",
+   "ar": "صناعة المعدات الاخرى ذات الاغراض الخاصة"
+  },
+  {
+   "code": "2910",
+   "en": "Manufacture of motor vehicles",
+   "ar": "صناعة المركبات ذات المحركات"
+  },
+  {
+   "code": "2920",
+   "en": "Manufacture of motor vehicle bodies and the manufacture of trailers and semi-trailers",
+   "ar": "صناعة هياكل المركبات ذات المحركات وصناعة المقطورات ونصف المقطورات"
+  },
+  {
+   "code": "2930",
+   "en": "Manufacture of accessories and spare parts for motor vehicles",
+   "ar": "صناعة مستلزمات وقطع غيار المركبات ذات المحركات"
+  },
+  {
+   "code": "3011",
+   "en": "Building ship hulls and rafts",
+   "ar": "بناء هياكل السفن و الطوافات"
+  },
+  {
+   "code": "3012",
+   "en": "Manufacture of pleasure boats and sport boats",
+   "ar": "صناعة قوارب النزهة والقوارب الرياضية"
+  },
+  {
+   "code": "3020",
+   "en": "Railroad locomotives and rolling stock industry",
+   "ar": "صناعة قاطرات السكك الحديدية والمعدات الدارجة على السكك الحديدية"
+  },
+  {
+   "code": "3030",
+   "en": "Air and spacecraft industry",
+   "ar": "صناعة المركبات الهوائية والفضائية"
+  },
+  {
+   "code": "3040",
+   "en": "Manufacture of military military vehicles",
+   "ar": "صناعة المركبات العسكرية الحربية"
+  },
+  {
+   "code": "3091",
+   "en": "Industry",
+   "ar": "صناعة"
+  },
+  {
+   "code": "3092",
+   "en": "Manufacture of ordinary bicycles and infirm vehicles",
+   "ar": "صناعة الدراجات العادية ومركبات العجزة"
+  },
+  {
+   "code": "3099",
+   "en": "Other transportation equipment industry not classified elsewhere",
+   "ar": "صناعة معدات النقل الاخرى غير المصنفة فى مواضع اخرى"
+  },
+  {
+   "code": "3100",
+   "en": "Furniture Industry",
+   "ar": "صناعة الاثاث"
+  },
+  {
+   "code": "3211",
+   "en": "Manufacture of jewelry and related items",
+   "ar": "صناعة المجوهرات والاصناف المتصلة بها"
+  },
+  {
+   "code": "3212",
+   "en": "Manufacture of imitation jewelry and related items",
+   "ar": "صناعة المجوهرات المقلدة والاصناف المتصلة بها"
+  },
+  {
+   "code": "3220",
+   "en": "Musical instrument industry",
+   "ar": "صناعة الالات الموسيقية"
+  },
+  {
+   "code": "3230",
+   "en": "Sports products industry",
+   "ar": "صناعة المنتجات الرياضية"
+  },
+  {
+   "code": "3240",
+   "en": "Make games and play",
+   "ar": "صناعة الالعاب واللعب"
+  },
+  {
+   "code": "3250",
+   "en": "Manufacturing of dental and medical equipment and tools",
+   "ar": "صناعة المعدات والادوات الطبية والخاصة بالاسنان"
+  },
+  {
+   "code": "3290",
+   "en": "Other industries not classified elsewhere",
+   "ar": "الصناعات الاخرى غير المصنفة فى مواضع اخرى"
+  },
+  {
+   "code": "3311",
+   "en": "Repair of manufactured metal products",
+   "ar": "اصلاح المنتجات المعدنية المصنعة"
+  },
+  {
+   "code": "3312",
+   "en": "Machinery repair",
+   "ar": "اصلاح الالات"
+  },
+  {
+   "code": "3313",
+   "en": "Repair of electronic and optical devices",
+   "ar": "اصلاح الاجهزة الاليكترونية و البصرية"
+  },
+  {
+   "code": "3314",
+   "en": "Electronic devices repair",
+   "ar": "اصلاح الاجهزة الاليكترونية"
+  },
+  {
+   "code": "3315",
+   "en": "Repair of transport devices, except for motor vehicles",
+   "ar": "اصلاح اجهزة النقل باستثناء المركبات ذات المحركات"
+  },
+  {
+   "code": "3319",
+   "en": "Repair other devices",
+   "ar": "اصلاح الاجهزة الاخرى"
+  },
+  {
+   "code": "3320",
+   "en": "Installation of industrial equipment and devices",
+   "ar": "تركيب المعدات و الاجهزة الصناعية"
+  },
+  {
+   "code": "3510",
+   "en": "Electric generators, transformers and power distributors",
+   "ar": "المولدات الكهربائية ومحولات وموزعات الكهرباء"
+  },
+  {
+   "code": "3520",
+   "en": "Manufacture of sulfur gas and distribution of gaseous fuels by means of main pipes",
+   "ar": "صناعة غاز الاستصباح وتوزيع انواع الوقود الغازية عن طريق مواسير رئيسية"
+  },
+  {
+   "code": "3530",
+   "en": "Steam supply and air conditioning",
+   "ar": "توريد البخار واجهزة تكييف الهواء"
+  },
+  {
+   "code": "3600",
+   "en": "Water collection, treatment and supply",
+   "ar": "تجميع ومعالجة وتوريد المياة"
+  },
+  {
+   "code": "3700",
+   "en": "Sewer",
+   "ar": "المجارى"
+  },
+  {
+   "code": "3811",
+   "en": "Collection of non-hazardous waste",
+   "ar": "تجميع المخلفات غير الخطرة"
+  },
+  {
+   "code": "3812",
+   "en": "Collection of hazardous waste",
+   "ar": "تجميع المخلفات الخطرة"
+  },
+  {
+   "code": "3821",
+   "en": "Treatment and disposal of non-hazardous waste",
+   "ar": "معالجة والتصرف فى المخلفات غير الخطرة"
+  },
+  {
+   "code": "3822",
+   "en": "Treatment and disposal of hazardous waste",
+   "ar": "معالجة والتصرف فى المخلفات الخطرة"
+  },
+  {
+   "code": "3830",
+   "en": "Material handling",
+   "ar": "معالجة المواد"
+  },
+  {
+   "code": "3900",
+   "en": "Recycling activities and services and the disposal of other waste",
+   "ar": "انشطة وخدمات اعادة التدوير والتصرف فى النفايات الاخرى"
+  },
+  {
+   "code": "4100",
+   "en": "Building constructions",
+   "ar": "انشاءات المبانى"
+  },
+  {
+   "code": "4210",
+   "en": "Road and railway constructions",
+   "ar": "الانشاءات الخاصة بالطرق والسكك الحديدية"
+  },
+  {
+   "code": "4220",
+   "en": "Construction for projects of public benefit",
+   "ar": "الانشاءات الخاصة بالمشاريع ذات المنفعة العامة"
+  },
+  {
+   "code": "4290",
+   "en": "Construction for other civil engineering projects",
+   "ar": "الانشاءات الخاصة بالمشاريع الهندسية المدنية الاخرى"
+  },
+  {
+   "code": "4311",
+   "en": "Remove the installations",
+   "ar": "ازالة المنشات"
+  },
+  {
+   "code": "4312",
+   "en": "Preparing sites",
+   "ar": "اعداد المواقع"
+  },
+  {
+   "code": "4321",
+   "en": "Electrical installations",
+   "ar": "التركيبات الكهربائية"
+  },
+  {
+   "code": "4322",
+   "en": "Plumbing, heating and air-conditioning installations",
+   "ar": "التركيبات الخاصة بالسباكة والتدفئة ومكيفات الهواء"
+  },
+  {
+   "code": "4329",
+   "en": "Other structural installations",
+   "ar": "التركيبات الانشائية الاخرى"
+  },
+  {
+   "code": "4330",
+   "en": "Completion and finishing of buildings",
+   "ar": "استكمال وتشطيب المبانى"
+  },
+  {
+   "code": "4390",
+   "en": "Other specialized construction activities",
+   "ar": "انشطة الانشاءات المتخصصة الاخرى"
+  },
+  {
+   "code": "4510",
+   "en": "Sale of motor vehicles",
+   "ar": "بيع المركبات ذات المحركات"
+  },
+  {
+   "code": "4520",
+   "en": "Maintenance and repair of motor vehicles",
+   "ar": "صيانة واصلاح المركبات ذات المحركات"
+  },
+  {
+   "code": "4530",
+   "en": "Sale of motor vehicle parts and accessories",
+   "ar": "بيع قطع غيار ومستلزمات المركبات ذات المحركات"
+  },
+  {
+   "code": "4540",
+   "en": "Sale, maintenance and repair of motorcycles, parts and accessories thereof",
+   "ar": "بيع وصيانة واصلاح الدراجات النارية وقطع الغيار والمستلزمات الخاصة بها"
+  },
+  {
+   "code": "4610",
+   "en": "Wholesale trade on the basis of a contract or a fee",
+   "ar": "تجارة الجملة على اساس عقد او نظير رسم"
+  },
+  {
+   "code": "4620",
+   "en": "Wholesale trade in agricultural raw materials and live animals",
+   "ar": "تجارة الجملة الخاصة بالمواد الاولية الزراعية والحيوانات الحية"
+  },
+  {
+   "code": "4630",
+   "en": "Wholesale trade of food, beverages and tobacco",
+   "ar": "تجارة الجملة الخاصة بالاغذية والمشرؤبات والتبغ"
+  },
+  {
+   "code": "4641",
+   "en": "Wholesale trade of clothes, fabrics and shoes",
+   "ar": "تجارة الجملة الخاصة بالملابس والاقمشة والاحذية"
+  },
+  {
+   "code": "4649",
+   "en": "Wholesale trade for other household appliances",
+   "ar": "تجارة الجملة الخاصة بالادوات المنزلية الاخرة"
+  },
+  {
+   "code": "4651",
+   "en": "Wholesale trade of computer hardware, accessories and computer software",
+   "ar": "تجارة الجملة الخاصة باجهزة الكمبيوتر ومستلزماتها وبرامج الكمبيوتر"
+  },
+  {
+   "code": "4652",
+   "en": "Wholesale trade of electronic devices, communications devices and accessories",
+   "ar": "تجارة الجملة الخاصة بالاجهزة الاليكترونية واجهزة الاتصالات ومستلزماتها"
+  },
+  {
+   "code": "4653",
+   "en": "Wholesale trade for agricultural equipment, machinery and supplies",
+   "ar": "تجارة الجملة الخاصة بالمعدات والالات والتوريدات الزراعية"
+  },
+  {
+   "code": "4659",
+   "en": "Wholesale trade of equipment and other devices",
+   "ar": "تجارة الجملة الخاصة بالمعدات والاجهزة الاخرى"
+  },
+  {
+   "code": "4661",
+   "en": "Wholesale trade of dry, liquid and gaseous fuels and related products",
+   "ar": "تجارة الجملة الخاصة بالوقود الجاف والسائل والغازى والمنتجات المرتبطة بذلك"
+  },
+  {
+   "code": "4662",
+   "en": "Wholesale trade in precious metals and minerals",
+   "ar": "تجارة الجملة الخاصة بالمعادن والمعادن النفيسة"
+  },
+  {
+   "code": "4663",
+   "en": "Wholesale trade, supplies and equipment for building materials, hardware, plumbing and heating appliances",
+   "ar": "تجارة الجملة والتوريدات والاجهزة الخاصة بمواد البناء والادوات المعدنية والسباكة واجهزة التدفئة"
+  },
+  {
+   "code": "4669",
+   "en": "Wholesale trade for waste, waste and other products not classified elsewhere",
+   "ar": "تجارة الجملة الخاصة بالنفايات والمخلفات والمنتجات الاخرى غير المصنفة فى مواضع اخرى"
+  },
+  {
+   "code": "4690",
+   "en": "Non-specialized wholesale trade",
+   "ar": "تجارة الجملة غير المتخصصة"
+  },
+  {
+   "code": "4711",
+   "en": "Retail sale in non-specialized stores of food, beverages or tobacco",
+   "ar": "البيع بالتجزئة بالمتاجر غير المتخصصة للاغذية والمشروبات اوالتبغ"
+  },
+  {
+   "code": "4719",
+   "en": "Other retail types in non-specialized stores",
+   "ar": "انواع البيع بالتجزئةالاخرى بالمتاجر غير المتخصصة"
+  },
+  {
+   "code": "4721",
+   "en": "Retail sale in specialized food stores",
+   "ar": "البيع بالتجزئة بالمتاجر المتخصصة للاغذية"
+  },
+  {
+   "code": "4722",
+   "en": "Retail sale in specialized stores for drinks",
+   "ar": "البيع بالتجزئة بالمتاجر المتخصصة للمشروبات"
+  },
+  {
+   "code": "4723",
+   "en": "Retail sale in specialized stores of tobacco products",
+   "ar": "البيع بالتجزئة بالمتاجر المتخصصة لمنتجات التبغ"
+  },
+  {
+   "code": "4730",
+   "en": "Retail sale of specialized vehicles for fuel",
+   "ar": "البيع بالتجزئة بالاماكن المتخصصة لوقود المركبات"
+  },
+  {
+   "code": "4741",
+   "en": "Retail sale in stores specialized in computer hardware, accessories, computer software, and communications equipment",
+   "ar": "البيع بالتجزئة بالمتاجر المتخصصة فى اجهزة الحاسب الالى ومستلزماتة وبرامج الكمبيوتر واجهزة الاتصالات"
+  },
+  {
+   "code": "4751",
+   "en": "Retail sale in clothing stores",
+   "ar": "البيع بالتجزئة بالمتاجر المتخصصة فى الملابس"
+  },
+  {
+   "code": "4752",
+   "en": "Retail sale in specialized stores of hardware, paint and glass",
+   "ar": "البيع بالتجزئة بالمتاجر المتخصصة للادوات المعدنية و الطلاء والزجاج"
+  },
+  {
+   "code": "4753",
+   "en": "Retail sale in specialized stores of carpets, blankets, wall and floor coverings",
+   "ar": "البيع بالتجزئة بالمتاجر المتخصصة للسجاد والبطاطين واغطية الحوائط والارضيات"
+  },
+  {
+   "code": "4759",
+   "en": "Retail sale in specialized stores of household electrical appliances, furniture, lighting equipment and other household appliances",
+   "ar": "البيع بالتجزئة بالمتاجر المتخصصة للاجهزة الكهربائية المنزلية والاثاث واجخزة الانارة والادوات المنزلية الاخرى"
+  },
+  {
+   "code": "4761",
+   "en": "Retail sale in specialized stores of books, newspapers, and stationery",
+   "ar": "البيع بالتجزئة بالمتاجر المتخصصة للكتب والصحف والادوات المكتبية"
+  },
+  {
+   "code": "4762",
+   "en": "Retail sale in specialized stores of music and video recordings",
+   "ar": "البيع بالتجزئة بالمتاجر المتخصصة للتسجيلاتالموسشيقية والمرئية"
+  },
+  {
+   "code": "4763",
+   "en": "Retail sale in specialized stores of sports equipment",
+   "ar": "البيع بالتجزئة بالمتاجر المتخصصة للادوات الرياضية"
+  },
+  {
+   "code": "4764",
+   "en": "Retail sale in specialized games and toys stores",
+   "ar": "البيع بالتجزئة بالمتاجر المتخصصة للالعاب واللعب"
+  },
+  {
+   "code": "4771",
+   "en": "Retail sale in specialized stores of shoes, clothing and leather products",
+   "ar": "البيع بالتجزئة بالمتاجر المتخصصة للاحذية والملابس والمنتجات الجلدية"
+  },
+  {
+   "code": "4772",
+   "en": "Retail sale in specialized stores of pharmaceutical, medical and pharmaceutical products, ornamental and cosmetic products",
+   "ar": "البيع بالتجزئة بالمتاجر المتخصصة للمنتجات والعقاقير الصيدلانية والطبية وادوات الزينة والمنتجات التجميلية"
+  },
+  {
+   "code": "4773",
+   "en": "Retail sale in specialized stores of other new products",
+   "ar": "البيع بالتجزئة بالمتاجر المتخصصة للمنتجات الجديدة الاخرى"
+  },
+  {
+   "code": "4774",
+   "en": "Retail sale of used products",
+   "ar": "البيع بالتجزئة للمنتجات المستعملة"
+  },
+  {
+   "code": "4781",
+   "en": "Retail sale through kiosks and markets of food, soft drinks and tobacco products",
+   "ar": "البيع بالتجزئة من خلال الاكشاك والاسواق للمواد الغذائية والمشروبات الخفيفة ومنتجات التبغ"
+  },
+  {
+   "code": "4782",
+   "en": "Retail sale through kiosks and markets of clothes, fabrics and shoes",
+   "ar": "البيع بالتجزئة من خلال الاكشاك والاسواق للملابس والاقمشة والاحذية"
+  },
+  {
+   "code": "4789",
+   "en": "Retail sale via stalls of other products",
+   "ar": "البيع بالتجزئة من خلال الاكشاك للمنتجات الاخرى"
+  },
+  {
+   "code": "4742",
+   "en": "Retail sale in stores specialized in audio-visual equipment",
+   "ar": "البيع بالتجزئة بالمتاجر المتخصصة فى الاجهزة السمعية والبصرية"
+  },
+  {
+   "code": "4791",
+   "en": "Retail sale via mail requests or through the Internet",
+   "ar": "البيع بالتجزئة عبر طلبات البريد او من خلال الانترنت"
+  },
+  {
+   "code": "4799",
+   "en": "Other types of retail sales that do not take place in stores, kiosks or markets",
+   "ar": "انواع البيع بالتجزئةالاخرى التى لاتتم بالنتاجر او الاكشاك او الاسواق"
+  },
+  {
+   "code": "4911",
+   "en": "Inland passenger transportation",
+   "ar": "النقل الداخلى للركاب"
+  },
+  {
+   "code": "4912",
+   "en": "Shipping by rail",
+   "ar": "الشحن عن طريق السكك الحديدية"
+  },
+  {
+   "code": "4921",
+   "en": "Transporting land passengers outside and inside cities",
+   "ar": "نقل الركاب البرى خارج وداخل المدن"
+  },
+  {
+   "code": "4922",
+   "en": "Other types of passenger transport by land",
+   "ar": "انواع نقل الركاب البرية الاخرى"
+  },
+  {
+   "code": "4923",
+   "en": "Land transportation of goods by bus",
+   "ar": "النقل البرى للبضائع عن طريق الحافلات"
+  },
+  {
+   "code": "4930",
+   "en": "Pipeline transportation",
+   "ar": "النقل عبر خطوط الانابيب"
+  },
+  {
+   "code": "5011",
+   "en": "Transportation of marine and coastal passengers",
+   "ar": "نقل الركاب البحرى والساحلى"
+  },
+  {
+   "code": "5012",
+   "en": "Marine and coastal cargo transportation",
+   "ar": "نقل البضائع البحرى والساحلى"
+  },
+  {
+   "code": "5021",
+   "en": "Inland passenger water transport",
+   "ar": "النقل الداخلى المائى للركاب"
+  },
+  {
+   "code": "5022",
+   "en": "Inland water transport of goods",
+   "ar": "النقل الداخلى المائى للبضائع"
+  },
+  {
+   "code": "5110",
+   "en": "Air transport of passengers",
+   "ar": "النقل الجوى للركاب"
+  },
+  {
+   "code": "5120",
+   "en": "Air freight transport",
+   "ar": "النقل الجوى للبضائع"
+  },
+  {
+   "code": "5210",
+   "en": "Keep and store",
+   "ar": "الاحتفاظ والتخزين"
+  },
+  {
+   "code": "5221",
+   "en": "Service activities related to road transport",
+   "ar": "انشطة الخدمات المتصلة بالنقل البرى"
+  },
+  {
+   "code": "5222",
+   "en": "Emergency service activities related to maritime transport",
+   "ar": "انشطة الخدمات الطارئة المتصلة بالنقل البحرى"
+  },
+  {
+   "code": "5223",
+   "en": "Emergency service activities related to air transport",
+   "ar": "انشطة الخدمات الطارئة المتصلة بالنقل الجوى"
+  },
+  {
+   "code": "5224",
+   "en": "Cargo handling",
+   "ar": "مناولة البضائع"
+  },
+  {
+   "code": "5229",
+   "en": "Other activities in support of the transfer",
+   "ar": "الانشطة الاخرى الداعمة للنقل"
+  },
+  {
+   "code": "5310",
+   "en": "Mail activities",
+   "ar": "انشطة البريد"
+  },
+  {
+   "code": "5320",
+   "en": "Parcel delivery activities",
+   "ar": "انشطة تسليم الطرود"
+  },
+  {
+   "code": "5510",
+   "en": "Short-term placement activities (rental - housing",
+   "ar": "انشطة التسكين قصيرة المدة"
+  },
+  {
+   "code": "5520",
+   "en": "Campgrounds, parking lots, and locomotives",
+   "ar": "اراضى المخيمات ومواقف مركبات التنزهة والقاطرات"
+  },
+  {
+   "code": "5590",
+   "en": "Other types of placement",
+   "ar": "انواع التسكين الاخرى"
+  },
+  {
+   "code": "5610",
+   "en": "Restaurant service and food delivery activities by mobile means",
+   "ar": "انشطة خدمات المطاعم وتوصيل الطعام بالوسائل المتحركة"
+  },
+  {
+   "code": "5621",
+   "en": "Event catering",
+   "ar": "تقديم الطعام بالمناسبات"
+  },
+  {
+   "code": "5629",
+   "en": "Other catering services activities",
+   "ar": "انشطة خدمات تقديم الطعام الاخرى"
+  },
+  {
+   "code": "5630",
+   "en": "Light beverage service activities",
+   "ar": "انشطة خدمات تقديم المشروبات الخفيفة"
+  },
+  {
+   "code": "5811",
+   "en": "Publishing books",
+   "ar": "نشر الكتب"
+  },
+  {
+   "code": "5812",
+   "en": "Publish the directory and address lists",
+   "ar": "نشر الدليل وقوائم العناوين"
+  },
+  {
+   "code": "5813",
+   "en": "Publishing newspapers, magazines and periodicals",
+   "ar": "نشر الصحف والمجلات والدوريات"
+  },
+  {
+   "code": "5819",
+   "en": "Other publishing activities",
+   "ar": "انشطة النشر الاخرى"
+  },
+  {
+   "code": "5820",
+   "en": "Computer Software Publishing",
+   "ar": "نشر برامج الحاسب الالى"
+  },
+  {
+   "code": "5911",
+   "en": "Film, video and television program production activities",
+   "ar": "انشطة انتاج الافلام السينمائية والفيديو وبرامج التليفزيون"
+  },
+  {
+   "code": "5912",
+   "en": "Subsequent activities for the production of movies, videos and television programs",
+   "ar": "الانشطة الاحقة لانتاج الافلام السينمائية والفيديو وبرامج التليفزيون"
+  },
+  {
+   "code": "5913",
+   "en": "Motion picture, video and television program distribution activities",
+   "ar": "انشطة توزيع الافلام السينمائية والفيديو وبرامج التليفزيون"
+  },
+  {
+   "code": "5914",
+   "en": "Film screening activities",
+   "ar": "انشطة عرض الافلام السينمائية"
+  },
+  {
+   "code": "5920",
+   "en": "Production and publishing of sound and music recordings",
+   "ar": "انشطة انتاج ونشر التسجيلات الصوتية والموسيقية"
+  },
+  {
+   "code": "6010",
+   "en": "Broadcasting over radio stations",
+   "ar": "البث عبر محطات الراديو"
+  },
+  {
+   "code": "6020",
+   "en": "Television program preparation and broadcast activities",
+   "ar": "انشطة اعداد برامج التليفزيون وبثها"
+  },
+  {
+   "code": "6110",
+   "en": "Wired telecommunications activities",
+   "ar": "انشطة الاتصالات السلكية"
+  },
+  {
+   "code": "6120",
+   "en": "Wireless communication activities",
+   "ar": "انشطة الاتصالات اللاسلكية"
+  },
+  {
+   "code": "6130",
+   "en": "Satellite communication activities",
+   "ar": "انشطة الاتصالات عبر الاقمار الصناعية"
+  },
+  {
+   "code": "6190",
+   "en": "Other telecommunications activities",
+   "ar": "انشطة الاتصالات السلكية و اللاسلكية الاخرى"
+  },
+  {
+   "code": "6201",
+   "en": "Computer program preparation activities",
+   "ar": "انشطة اعداد برامج الحاسب الالى"
+  },
+  {
+   "code": "6202",
+   "en": "Computer consultancy experience and facilities management activities related to computer fields",
+   "ar": "الخبرة الاستشارية فى مجال الحاسب الالى وانشطة ادارة التسهيلات المتصلة بمجالات الحاسب الالى"
+  },
+  {
+   "code": "6209",
+   "en": "Other activities related to information technology and computer services",
+   "ar": "الانشطة الاخرى المتصلة بتكنولوجيا المعلومات وخدمات الحاسب الالى"
+  },
+  {
+   "code": "6311",
+   "en": "Data processing, hosting and related activities",
+   "ar": "معالجة البيانات والاستضافة والانشطة المتصلة بذلك"
+  },
+  {
+   "code": "6312",
+   "en": "Electronic portals",
+   "ar": "البوابات الاليكترونية"
+  },
+  {
+   "code": "6391",
+   "en": "Activities of press agencies",
+   "ar": "انشطة الوكالات الصحفية"
+  },
+  {
+   "code": "6399",
+   "en": "Other activities for information services that are not classified in other locations",
+   "ar": "الانشطة الاخرى لخدمات تقديم المعلومات غير المصنفة فى مواقع اخرى"
+  },
+  {
+   "code": "6411",
+   "en": "Central banks",
+   "ar": "المصارف المركزية"
+  },
+  {
+   "code": "6419",
+   "en": "Other financial intermediaries",
+   "ar": "الوساطات المالية الاخرى"
+  },
+  {
+   "code": "6420",
+   "en": "Activities of holding companies",
+   "ar": "انشطة الشركات القابضة"
+  },
+  {
+   "code": "6430",
+   "en": "Credit activities, provision of credits, and similar financial entities",
+   "ar": "انشطةالائتمان وتوفير الاعتمادات والكيانات المالية المشابهة"
+  },
+  {
+   "code": "6491",
+   "en": "Financial leasing",
+   "ar": "التاجير المالى"
+  },
+  {
+   "code": "6492",
+   "en": "Other forms of loans granted",
+   "ar": "اشكال القروض الممنوحة الاخرى"
+  },
+  {
+   "code": "6499",
+   "en": "Other financial services activities, with the exception of insurance and credit provision activities for pensions not classified in other locations",
+   "ar": "انشطة الخدمات المالية الاخرى , باستثناء التامين وانشطة توفير الاعتمادات للمعاشات التقاعدية غير المصنفة فى مواقع اخرى"
+  },
+  {
+   "code": "6511",
+   "en": "life insurance",
+   "ar": "التامين على الحياة"
+  },
+  {
+   "code": "6512",
+   "en": "Non-life insurance",
+   "ar": "التامين على غير الحياة"
+  },
+  {
+   "code": "6520",
+   "en": "re Insurance",
+   "ar": "اعادة التامين"
+  },
+  {
+   "code": "6530",
+   "en": "Providing credits for pensions",
+   "ar": "توفير الاعتمادات للمعاشات التقاعدية"
+  },
+  {
+   "code": "6611",
+   "en": "Financial markets management",
+   "ar": "ادارة الاسواق المالية"
+  },
+  {
+   "code": "6612",
+   "en": "Security and commodity contracts brokerage",
+   "ar": "الامن وسمسرة عقود السلع"
+  },
+  {
+   "code": "6619",
+   "en": "Auxiliary activities for financial services",
+   "ar": "الانشطة المساعدة للخدمات المالية"
+  },
+  {
+   "code": "6621",
+   "en": "Risk and damage assessment",
+   "ar": "تقدير المخاطر والتلفيات"
+  },
+  {
+   "code": "6622",
+   "en": "Activities of insurance and brokerage agents",
+   "ar": "انشطة وكلاء التامين والسمسرة"
+  },
+  {
+   "code": "6629",
+   "en": "Other activities auxiliary to insurance and provision for pensions",
+   "ar": "الانشطة الاخرى المساعدة للتامين وتوفير الاعتمادات للمعاشات التقاعدية"
+  },
+  {
+   "code": "6630",
+   "en": "Financial credit management activities",
+   "ar": "انشطة ادارة الاعتمادات المالية"
+  },
+  {
+   "code": "6810",
+   "en": "Real estate activities with own or leased property",
+   "ar": "الانشطة العقارية فى الممتلكات المملوكة او المؤجرة"
+  },
+  {
+   "code": "6820",
+   "en": "Real estate activities on the basis of a contract or a fee",
+   "ar": "الانشطة العقارية على اساس عقد او نظير رسم"
+  },
+  {
+   "code": "6910",
+   "en": "Legal activities",
+   "ar": "الانشطة القانونية"
+  },
+  {
+   "code": "6920",
+   "en": "Accounting, auditing, bookkeeping and tax advice activities",
+   "ar": "الانشطة المحاسبية والمراجعة ومسك الدفاتر والاستشارات الضرائبية"
+  },
+  {
+   "code": "7010",
+   "en": "The main office activities",
+   "ar": "انشطة المكاتب الرئيسية"
+  },
+  {
+   "code": "7020",
+   "en": "Management consultancy activities",
+   "ar": "الانشطة الاستشارية الخاصة بالادارة"
+  },
+  {
+   "code": "7110",
+   "en": "Architectural and engineering activities and related technical consulting",
+   "ar": "الانشطة المعمارية والهندسية و الاستشارات الفنية المتصلة بذلك"
+  },
+  {
+   "code": "7120",
+   "en": "Technical tests and analyzes",
+   "ar": "الاختبارات والتحليلات الفنية"
+  },
+  {
+   "code": "7210",
+   "en": "Research and experimental development in the field of natural and engineering sciences",
+   "ar": "البحث والتطوير التجريبى فى مجال العلوم الطبيعية والهندسية"
+  },
+  {
+   "code": "7220",
+   "en": "Experimental research and development in the field of social and human sciences",
+   "ar": "البحث والتطوير التجريبى فى مجال العلوم الاجتماعية والانسانية"
+  },
+  {
+   "code": "7310",
+   "en": "Advertising",
+   "ar": "الاعلان"
+  },
+  {
+   "code": "7320",
+   "en": "Market studies and public opinion polls",
+   "ar": "دراسات السوق واستطلاعات الراى العام"
+  },
+  {
+   "code": "7410",
+   "en": "Specialized design activities",
+   "ar": "انشطة التصميمات المتخصصة"
+  },
+  {
+   "code": "7420",
+   "en": "Photographic activities",
+   "ar": "الانشطة الفوتوغرافية"
+  },
+  {
+   "code": "7490",
+   "en": "Other specialized, scientific and artistic activities not classified elsewhere",
+   "ar": "الانشطة الاخرى التخصصية والعلمية والفنية غير المصنفة فى مواضع اخرى"
+  },
+  {
+   "code": "7500",
+   "en": "Veterinary activities",
+   "ar": "الانشطة البيطرية"
+  },
+  {
+   "code": "7710",
+   "en": "Renting motor vehicles",
+   "ar": "تاجيرواستئجار المركبات ذات المحركات"
+  },
+  {
+   "code": "7721",
+   "en": "Renting and renting sports and leisure products and tools",
+   "ar": "تاجير واستئجار منتجات والادوات الرياضية والترفيهية"
+  },
+  {
+   "code": "7722",
+   "en": "Rental of video tapes and CDs",
+   "ar": "تاجير شرائط واسطوانات الفيديو"
+  },
+  {
+   "code": "7729",
+   "en": "Renting and renting other personal and household products",
+   "ar": "تاجيرواستئجار المنتجات الشخصية والمنزلية الاخرى"
+  },
+  {
+   "code": "7730",
+   "en": "Renting and leasing of other physical devices and equipment",
+   "ar": "تاجير واستئجار الاجهزة والمعدات المادية الاخرى"
+  },
+  {
+   "code": "7740",
+   "en": "Rent forms of intellectual property and similar products, except for copyright works",
+   "ar": "استئجار اشكال الملكية الفكرية والمنتجات المشابهة باستثناء اعمال حقوق المؤلف"
+  },
+  {
+   "code": "7810",
+   "en": "Activities of recruitment and appointment agencies",
+   "ar": "انشطة وكالات التوظيف والتعيين"
+  },
+  {
+   "code": "7820",
+   "en": "Activities of temporary employment agencies",
+   "ar": "انشطة وكالات التوظيف المؤقت"
+  },
+  {
+   "code": "7830",
+   "en": "Providing other human resources",
+   "ar": "توفير المصادر البشرية الاخرى"
+  },
+  {
+   "code": "7911",
+   "en": "Tourism agency services",
+   "ar": "خدمات وكالات السياحة"
+  },
+  {
+   "code": "7912",
+   "en": "Activities of tour guides",
+   "ar": "انشطة المرشدين السياحيين"
+  },
+  {
+   "code": "7990",
+   "en": "Other types of reservations and related activities",
+   "ar": "انواع الحجوزات الاخرى والانشط المتصلة بذلك"
+  },
+  {
+   "code": "8010",
+   "en": "Private security activities",
+   "ar": "انشطة الامن الخاص"
+  },
+  {
+   "code": "8020",
+   "en": "Security systems services activities",
+   "ar": "انشطة خدمات انظمة الامن"
+  },
+  {
+   "code": "8030",
+   "en": "Investigation activities",
+   "ar": "انشطة التحرى"
+  },
+  {
+   "code": "8110",
+   "en": "Support activities for joint facilities",
+   "ar": "انشطة دعم التسهيلات المشتركة"
+  },
+  {
+   "code": "8121",
+   "en": "General cleaning of buildings",
+   "ar": "النظافة العامة للمبانى"
+  },
+  {
+   "code": "8129",
+   "en": "Building cleaning activities and other industrial facilities",
+   "ar": "انشطة تنظيف المبانى والمنشات الصناعية الاخرى"
+  },
+  {
+   "code": "8130",
+   "en": "Gardening services and maintenance activities",
+   "ar": "انشطة خدمات رعاية وصيانة الحدائق"
+  },
+  {
+   "code": "8211",
+   "en": "Joint office support services activities",
+   "ar": "انشطة خدمات الدعم المكتبية المشتركة"
+  },
+  {
+   "code": "8219",
+   "en": "Photocopying, document processing and other specialized office support services activities",
+   "ar": "النسخ وتجهيز المستندات وانشطة خدمات الدعم المكتبية المتخصصة الاخرى"
+  },
+  {
+   "code": "8220",
+   "en": "Information center services",
+   "ar": "خدمات مراكز الاستعلامات"
+  },
+  {
+   "code": "8230",
+   "en": "Organizing trade conferences and exhibitions",
+   "ar": "تنظيم المؤتمرات والمعارض التجارية"
+  },
+  {
+   "code": "8291",
+   "en": "Activities of collection agencies and lending offices",
+   "ar": "انشطة وكالات التحصيل ومكاتب الاقراض"
+  },
+  {
+   "code": "8292",
+   "en": "Packaging activities",
+   "ar": "انشطة التغليف"
+  },
+  {
+   "code": "8299",
+   "en": "Other support services activities that are not classified in other locations",
+   "ar": "انشطة خدمات الدعم الاخرى الخاصة بالاعمال التجارية غير المصنفة فى مواضع اخرى"
+  },
+  {
+   "code": "8411",
+   "en": "Public administration activities",
+   "ar": "انشطة الادارات العامة"
+  },
+  {
+   "code": "8412",
+   "en": "Organizing activities to provide health care, education, educational services and other social services, with the exception of social security",
+   "ar": "تنظيم انشطة تقديم العناية الصحية والتعليم والخدمات التثقيفية والخدمات الاجتماعية الاخرى باستثناء الضمان الاجتماعى"
+  },
+  {
+   "code": "8413",
+   "en": "Organize and contribute to effective business operations",
+   "ar": "تنظيم والمساهمة فى عمليات الاعمال التجارية الفعالة"
+  },
+  {
+   "code": "8421",
+   "en": "Foreign affairs",
+   "ar": "الشئون الخارجية"
+  },
+  {
+   "code": "8422",
+   "en": "Defense activities",
+   "ar": "انشطة الدفاع"
+  },
+  {
+   "code": "8423",
+   "en": "Security and public order activities",
+   "ar": "انشطة الامن والنظام العام"
+  },
+  {
+   "code": "8430",
+   "en": "Compulsory social insurance activities",
+   "ar": "انشطة التامين الاجتماعى الاجبارى"
+  },
+  {
+   "code": "8510",
+   "en": "Primary and pre-primary education",
+   "ar": "التعليم الابتدائى وقبل الابتدائى"
+  },
+  {
+   "code": "8521",
+   "en": "General secondary education",
+   "ar": "التعليم الثانوى العام"
+  },
+  {
+   "code": "8522",
+   "en": "Technical and vocational secondary education",
+   "ar": "التعليم الثانوى الفنى والهنى"
+  },
+  {
+   "code": "8530",
+   "en": "Higher Education",
+   "ar": "التعليم العالى"
+  },
+  {
+   "code": "8541",
+   "en": "Sports and rehabilitation education",
+   "ar": "التعليم الرياضى والتاهيلى"
+  },
+  {
+   "code": "8542",
+   "en": "Cultural education",
+   "ar": "التعليم الثقافى"
+  },
+  {
+   "code": "8549",
+   "en": "Other types of education not classified elsewhere",
+   "ar": "انواع التعليم الاخرى غير المصنفة فى مواضع اخرى"
+  },
+  {
+   "code": "8550",
+   "en": "Activities in support of education",
+   "ar": "الانشطة الداعمة للتعليم"
+  },
+  {
+   "code": "8610",
+   "en": "Hospital activities",
+   "ar": "انشطة المستشفيات"
+  },
+  {
+   "code": "8620",
+   "en": "Activities related to medicine and dentistry",
+   "ar": "الانشطة المتصلة بالطب وطب الاسنان"
+  },
+  {
+   "code": "8690",
+   "en": "Other activities related to human health",
+   "ar": "الانشطة الاخرى المتصلة بصحة الانسان"
+  },
+  {
+   "code": "8710",
+   "en": "Nursing facilities for sanatoriums",
+   "ar": "تسهيلات العناية بالتمريض بالمصحات"
+  },
+  {
+   "code": "8720",
+   "en": "Nursing care facilities for special needs clinics, mental illnesses and physical abuse",
+   "ar": "تسهيلات العناية بالتمريض بالمصحات الخاصة بذوى الاحتياجات الخاصة والامراض العقلية والانتهاكات البدنية"
+  },
+  {
+   "code": "8730",
+   "en": "Spa facilities for the elderly and disabled",
+   "ar": "تسهيلات العناية بالمصحات الخاصة بالعجائز والمقعدين"
+  },
+  {
+   "code": "8790",
+   "en": "Other spa care facilities",
+   "ar": "تسهيلات العناية الاخرى بالمصحات"
+  },
+  {
+   "code": "8810",
+   "en": "Social work activities for the infirm and disabled that take place without accommodation",
+   "ar": "انشطة الاعمال الاجتماعية للعجزة والمقعدين التى تتم بدون اقامة"
+  },
+  {
+   "code": "8890",
+   "en": "Other social business activities that take place without residence",
+   "ar": "انشطة الاعمال الاجتماعية الاخرى التى تتم بدون اقامة"
+  },
+  {
+   "code": "9000",
+   "en": "Creative and recreational art activities",
+   "ar": "انشطة الفن الابداعى والترفية"
+  },
+  {
+   "code": "9101",
+   "en": "Library and archive activities",
+   "ar": "انشطة المكتبات والارشيف"
+  },
+  {
+   "code": "9102",
+   "en": "Museum activities and restoration of historic sites and buildings",
+   "ar": "انشطة المتاحف وعمليات ترميم المواقع والمبانى التاريخية"
+  },
+  {
+   "code": "9103",
+   "en": "Botanical and zoological gardens and natural wildlife activities",
+   "ar": "حدائق النباتات والحيوانات وانشطة الحياة البرية الطبيعية"
+  },
+  {
+   "code": "9200",
+   "en": "Betting activities and gambling",
+   "ar": "انشطة المراهنات والعاب القمار"
+  },
+  {
+   "code": "9311",
+   "en": "Providing sports facilities",
+   "ar": "توفير التسهيلات الرياضية"
+  },
+  {
+   "code": "9312",
+   "en": "Sports club activities",
+   "ar": "انشطة النوادى الرياضية"
+  },
+  {
+   "code": "9319",
+   "en": "Other sports activities",
+   "ar": "الانشطة الرياضية الاخرى"
+  },
+  {
+   "code": "9321",
+   "en": "Recreational activities and performances in parks",
+   "ar": "الانشطة الترفيهية والعروض التى تتم بالمتنزهات"
+  },
+  {
+   "code": "9329",
+   "en": "Other leisure and entertainment activities not classified elsewhere",
+   "ar": "الانشطة الترفيهية والمسلية الاخرى غير المصنفة فى مواضع اخرى"
+  },
+  {
+   "code": "9411",
+   "en": "The activities of commercial enterprises, employers and professional membership organizations",
+   "ar": "انشطة المؤسسات التجارية وارباب العمل ومنظمات العضوية المهنية"
+  },
+  {
+   "code": "9412",
+   "en": "Activities of professional membership organizations",
+   "ar": "انشطة منظمات العضوية المهنية"
+  },
+  {
+   "code": "9420",
+   "en": "Trade union activities",
+   "ar": "انشطة النقابات التجارية"
+  },
+  {
+   "code": "9491",
+   "en": "Activities of religious organizations",
+   "ar": "انشطة المنظمات الدينية"
+  },
+  {
+   "code": "9492",
+   "en": "Activities of political organizations",
+   "ar": "انشطة المنظمات السياسية"
+  },
+  {
+   "code": "9499",
+   "en": "Activities of other membership organizations not classified elsewhere",
+   "ar": "انشطة المنظمات الاخرى ذات العضوية غير المصنفة فى مواضع اخرى"
+  },
+  {
+   "code": "9511",
+   "en": "Computer repair and accessories",
+   "ar": "اصلاح الحاسبات الالية ومستلزماتها"
+  },
+  {
+   "code": "9512",
+   "en": "Communication equipment repair",
+   "ar": "اصلاح اجهزة الاتصالات"
+  },
+  {
+   "code": "9521",
+   "en": "Electronic devices repair",
+   "ar": "اصلاح الاجهزة الاليكترونية"
+  },
+  {
+   "code": "9522",
+   "en": "Repair of tools, household appliances, and garden care equipment",
+   "ar": "اصلاح الادوات والاجهزة المنزلية ومعدات العناية بالحدائق"
+  },
+  {
+   "code": "9523",
+   "en": "Shoe and leather products repair",
+   "ar": "اصلاح الاحذية والمنتجات الجلدية"
+  },
+  {
+   "code": "9524",
+   "en": "Repair of furniture and household items",
+   "ar": "اصلاح الاثاث والمستلزمات المنزلية"
+  },
+  {
+   "code": "9529",
+   "en": "Repair of other household and personal products",
+   "ar": "اصلاح المنتجات المنزلية والشخصية الاخرى"
+  },
+  {
+   "code": "9601",
+   "en": "Wash and clean textile and fur products",
+   "ar": "غسيل المنسوجات والمنتجات الفرائية وتنظيفها تنظيفا جافا"
+  },
+  {
+   "code": "9602",
+   "en": "Hair styling and other cosmetics",
+   "ar": "تصفيف الشعر وانواع التجميل الاخرى"
+  },
+  {
+   "code": "9603",
+   "en": "Funeral and related activities",
+   "ar": "انشطة الجنائز وما يتصل بها"
+  },
+  {
+   "code": "9609",
+   "en": "Other personal services activities not classified elsewhere",
+   "ar": "انشطة الخدمات الشخصية الاخرى غير المصنفة فى مواضع اخرى"
+  },
+  {
+   "code": "9700",
+   "en": "Home employment activities",
+   "ar": "انشطة توظيف العمالة المنزلية"
+  },
+  {
+   "code": "9810",
+   "en": "Activities of producing unearthed products and services for home appliances for personal use",
+   "ar": "انشطة انتاج المنتجات والخدمات غير المتميزة الخاصة بالاجهزة المنزلية للاستخدام الشخصى"
+  },
+  {
+   "code": "9820",
+   "en": "Activities of producing unearthed products and services for home appliances for personal use",
+   "ar": "انشطة انتاج المنتجات والخدمات غير المتميزة الخاصة بالاجهزة المنزلية للاستخدام الشخصى"
+  },
+  {
+   "code": "9900",
+   "en": "Activities of non-regional organizations and bodies",
+   "ar": "انشطة المنظمات والهيئات غير الاقليمية"
+  }
+ ]
+}
