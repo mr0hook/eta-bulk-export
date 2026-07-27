@@ -117,6 +117,19 @@ test('rejection window: expired and future-dated docs are ineligible', () => {
   assert.equal(ev({}, doc({ dateTimeRecevied: undefined, dateTimeReceived: '2026-07-26T00:00:00Z' })).eligible, true, 'accepts the corrected spelling too');
 });
 
+test('T-020 per-type window resolver overrides the cfg fallback', () => {
+  const d5 = doc({ dateTimeRecevied: '2026-07-22T12:00:00Z' });   // 5 days old vs NOW
+  const base = evaluateDoc(normalizeCfg(defaultCfg()), d5, { nowMs: NOW });
+  assert.equal(base.eligible, true, 'cfg 14d allows a 5-day-old doc');
+  assert.equal(base.windowDays, 14, 'result reports the window it used');
+  const tight = evaluateDoc(normalizeCfg(defaultCfg()), d5, { nowMs: NOW, resolveWindow: () => 3 });
+  assert.equal(tight.eligible, false, 'per-type 3d window closes it');
+  assert.equal(tight.windowDays, 3);
+  const junk = evaluateDoc(normalizeCfg(defaultCfg()), d5, { nowMs: NOW, resolveWindow: () => 'not-a-number' });
+  assert.equal(junk.eligible, true, 'non-numeric resolver output falls back to cfg');
+  assert.equal(junk.windowDays, 14);
+});
+
 test('missing core fields flag DATA-MISSING and never auto-reject alone', () => {
   const r = ev({}, doc({ uuid: null }));
   assert.equal(r.verdict, 'flag');
