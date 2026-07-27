@@ -6,7 +6,9 @@
 > Track: STANDARD · Started: 2026-07-27 (Agent OS adopted mid-project at v0.3.0) · Client: internal
 
 ## NEXT ACTION
-→ Run 30-spec.md for F-02: write docs/specs/SPEC-002-received-fetcher.md (test cases first)
+→ User-run portal smoke (SPEC-006 T-038 checklist) after remove/re-add of the extension and a
+portal-tab reload; then capture the portal documenttypes response + one manual rejection request
+from DevTools (freezes window.js fixtures and LIVE_REJECT_PATH).
 
 ## Phase gates
 - [x] PLAN     · brief ✓ (user requirements captured in design spec) · PRD ✓ (superseded by design spec — brownfield adoption)
@@ -19,11 +21,11 @@
 | ID | Feature | Status | Spec | Notes |
 |---|---|---|---|---|
 | F-01 | References linkage (credit/debit → original UUID, both sheets) | VALIDATED | SPEC-001 | T-001..T-006 green; suite 132/132; merged 972411a |
-| F-02 | Shared received-details fetcher (received.js) | IDEA | — | pure refactor out of scan.js |
-| F-03 | Rejection-window service (window.js + rules resolver) | IDEA | — | portal documenttypes UNVERIFIED → honest fallback |
-| F-04 | PO engine (po.js: parse/match/analyze) | IDEA | — | pure, biggest test surface |
-| F-05 | PO report + template renderers (po_xlsx.js) | IDEA | — | 4 RTL sheets; filename dodges Merge glob |
-| F-06 | Rejection tab UI + PO card wiring | IDEA | — | tab≠source machine; i18n EN+AR same commit |
+| F-02 | Shared received-details fetcher (received.js) | VALIDATED | SPEC-002 | T-007..T-012; reject.test untouched; 138/138 |
+| F-03 | Rejection-window service (window.js + rules resolver) | VALIDATED | SPEC-003 | T-013..T-020; source:'config' fallback until live capture; 146/146 |
+| F-04 | PO engine (po.js: parse/match/analyze) | VALIDATED | SPEC-004 | T-021..T-030; 156/156 |
+| F-05 | PO report + template renderers (po_xlsx.js) | VALIDATED | SPEC-005 | T-031..T-035; template↔parser round-trip guarded; 161/161 |
+| F-06 | Rejection tab UI + PO card wiring | TESTING | SPEC-006 | suite 161/161 + build + package (T-036/T-037) green; T-038 manual portal smoke pending (user-run) |
 
 ## Blockers
 - none (live-verification items are post-merge follow-ups, not blockers: portal documenttypes
@@ -36,7 +38,9 @@
 - Git adopted at v0.3.0 baseline (Agent OS git discipline; repo was previously un-versioned).
 
 ## Parking notes
-- refreshLicense ungated branch (drawer.js:416) doesn't re-enable rj-scan — fix rides F-06.
+- (resolved) refreshLicense ungated-branch rj-scan gap — fixed in F-06.
 
 ## Session log
 - 2026-07-27 · v0.4 design approved + plan validated; Agent OS adopted; git baseline; STATE created
+- 2026-07-27 · F-01..F-06 built spec-first (SPEC-001..006, T-001..T-038); suite 126→161 green;
+  v0.4.0 packaged (eta-bulk-export-v0.4.0.zip); remaining: user portal smoke + live captures
