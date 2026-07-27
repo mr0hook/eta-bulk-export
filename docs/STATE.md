@@ -6,7 +6,7 @@
 > Track: STANDARD · Started: 2026-07-27 (Agent OS adopted mid-project at v0.3.0) · Client: internal
 
 ## NEXT ACTION
-→ Run 30-spec.md for F-01: write docs/specs/SPEC-001-references-linkage.md (test cases first)
+→ Run 30-spec.md for F-02: write docs/specs/SPEC-002-received-fetcher.md (test cases first)
 
 ## Phase gates
 - [x] PLAN     · brief ✓ (user requirements captured in design spec) · PRD ✓ (superseded by design spec — brownfield adoption)
@@ -18,7 +18,7 @@
 ## Features (v0.4 milestone)
 | ID | Feature | Status | Spec | Notes |
 |---|---|---|---|---|
-| F-01 | References linkage (credit/debit → original UUID, both sheets) | IDEA | — | summary col exists; line sheet + placement + tests |
+| F-01 | References linkage (credit/debit → original UUID, both sheets) | VALIDATED | SPEC-001 | T-001..T-006 green; suite 132/132; merged 972411a |
 | F-02 | Shared received-details fetcher (received.js) | IDEA | — | pure refactor out of scan.js |
 | F-03 | Rejection-window service (window.js + rules resolver) | IDEA | — | portal documenttypes UNVERIFIED → honest fallback |
 | F-04 | PO engine (po.js: parse/match/analyze) | IDEA | — | pure, biggest test surface |
