@@ -77,6 +77,34 @@ test('merge: dedup by uuid + header union + continuous serial', async () => {
   assert.equal(u2.values[statusCol], 'Valid', 'first-file-wins on dedup');
 });
 
+test('T-006 merge: line-sheet header union when only the newer part carries الرقم المرجعي', async () => {
+  const dir = fakeDir();
+  const U = 'الرقم الإلكترونى', REF = 'الرقم المرجعي';
+  // old part: line sheet WITHOUT the references column
+  await putXlsx(dir, 'eInvoices_2026_Received_old.xlsx',
+    ['مسلسل', U], [[1, 'U1']],
+    ['رقم الفاتورة', U], [['A-1', 'U1']]);
+  // new part: line sheet WITH it
+  await putXlsx(dir, 'eInvoices_2026_Received_new.xlsx',
+    ['مسلسل', U, REF], [[1, 'U2', 'A, B']],
+    ['رقم الفاتورة', U, REF], [['B-1', 'U2', 'A, B']]);
+
+  await mergeFolder(ExcelJS, dir, { onStatus: () => {} });
+
+  const combinedName = [...dir.files.keys()].find((n) => /COMBINED.*\.xlsx$/.test(n));
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load((await (await dir.getFileHandle(combinedName)).getFile()).arrayBuffer());
+  const s1 = wb.getWorksheet('بيانات الفواتير');
+  const header = s1.getRow(1).values.slice(1);
+  assert.ok(header.includes(REF), 'line-sheet header union includes الرقم المرجعي from the new part');
+  const refCol = header.indexOf(REF) + 1;
+  const rows = [2, 3].map((rn) => s1.getRow(rn));
+  const oldRow = rows.find((r) => r.values[1] === 'A-1');
+  const newRow = rows.find((r) => r.values[1] === 'B-1');
+  assert.equal(oldRow.values[refCol] ?? '', '', 'old part renders blank in the unioned column');
+  assert.equal(newRow.values[refCol], 'A, B', 'new part keeps its joined references');
+});
+
 test('merge: HIGH regression — an unreadable chunk is surfaced, not silently counted as merged (#2)', async () => {
   const dir = fakeDir();
   const U = 'الرقم الإلكترونى';

@@ -160,7 +160,10 @@ function buildInvoices(records, options, cfg) {
   if (S.some((o) => o.serviceDeliveryDate)) sumCols.push({ key: 'serviceDeliveryDate', header: 'خدمة التوصيل', width: 13 });
   if (S.some((o) => o.serviceDeliveryDate)) lineCols.push({ key: 'serviceDeliveryDate', header: 'خدمة التوصيل', width: 13 });   // lr.serviceDeliveryDate is set per line — needs a line column too, else dropped
   // v62 additions — sparse ETA fields; add the column only when some invoice carries it
-  if (S.some((o) => o.references?.[0])) sumCols.push({ key: 'referenceUUID', header: 'الرقم المرجعي', width: 32 });
+  if (S.some((o) => o.references?.[0])) {
+    insertBefore(sumCols, 'signature', { key: 'referenceUUID', header: 'الرقم المرجعي', width: 32 });   // near the other reference fields, not past the url column
+    insertBefore(lineCols, 'uuid', { key: 'referenceUUID', header: 'الرقم المرجعي', width: 32 });        // lr.referenceUUID needs a line col too, else dropped
+  }
   if (S.some((o) => o.customsDeclarationNumber)) sumCols.push({ key: 'customsDeclarationNumber', header: 'رقم الرسالة الجمركية', width: 15 });
   if (S.some((o) => o.customsClearanceDate)) sumCols.push({ key: 'customsClearanceDate', header: 'تاريخ الرسالة الجمركية', width: 15 });
   if (S.some((o) => o.ePaymentNumber)) sumCols.push({ key: 'ePaymentNumber', header: 'رقم المدفوعة', width: 15 });
@@ -233,6 +236,7 @@ function buildInvoices(records, options, cfg) {
         if (l.itemsDiscount > 0) lr.itemsDiscount = w ? l.itemsDiscount : sgn(l.itemsDiscount);
       }
       if (o.serviceDeliveryDate) lr.serviceDeliveryDate = dateEg(o.serviceDeliveryDate);
+      if (o.references?.[0]) lr.referenceUUID = o.references.filter(Boolean).join(', ');   // same join as the summary row
       if (anyNonEgp && cur !== 'EGP') {
         lr.currencySold = l.unitValue?.currencySold || 'EGP'; lr.currencyExchangeRate = l.unitValue?.currencyExchangeRate || 1;
         lr.amountSold = sgn(l.unitValue?.amountSold || 0); lr.totalForeign = sgn(l.totalForeign || 0);
