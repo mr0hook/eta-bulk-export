@@ -2,10 +2,10 @@
 // and subscribes to its hooks. "Control console" aesthetic from the design concept.
 import { createOrchestrator } from '../core/orchestrator.js';
 import { ALL_STATUSES } from '../api/sources.js';
-import { idbGet } from '../core/fs.js';
+import { idbGet, ensurePermission, writeBlob } from '../core/fs.js';
 import { mergeFolder } from '../core/merge.js';
 import { repairFolder } from '../core/repair.js';
-import { removableColumns } from '../export/xlsx.js';
+import { removableColumns, XLSX_MIME } from '../export/xlsx.js';
 import { session, register, gateEnabled, taxpayerId, requestRin, reportBug, LEAD_URL, EXT_VERSION } from '../core/registration.js';
 import { createRunLog } from '../core/runlog.js';
 import { createEtaTracker } from '../core/eta.js';
@@ -17,6 +17,10 @@ import { t, getLang, setLang } from '../core/i18n.js';
 import { defaultCfg, normalizeCfg } from '../reject/rules.js';
 import { scanReceived } from '../reject/scan.js';
 import { submitRejections, liveRejectAvailable, auditRuns, auditText } from '../reject/submit.js';
+import { loadWindows, makeResolver } from '../reject/window.js';
+import { fetchReceivedDetails } from '../reject/received.js';
+import { parsePoWorkbook, projectInvoice, analyzePo } from '../reject/po.js';
+import { renderPoAnalytics, renderPoTemplate, poAnalyticsName } from '../reject/po_xlsx.js';
 
 const CSS = `
 :host{ all:initial;
@@ -179,8 +183,9 @@ export function mountUI() {
         </div>
         <div class="src" id="srcrow">
           <div class="seg" role="tablist" aria-label="Source">
-            <button role="tab" aria-selected="true" data-src="invoices" data-i18n="ui.invoices">Invoices</button>
-            <button role="tab" aria-selected="false" data-src="receipts" data-i18n="ui.receipts">Receipts</button>
+            <button role="tab" aria-selected="true" data-tab="invoices" data-i18n="ui.invoices">Invoices</button>
+            <button role="tab" aria-selected="false" data-tab="receipts" data-i18n="ui.receipts">Receipts</button>
+            <button role="tab" aria-selected="false" data-tab="rejection" data-i18n="ui.rejection">Rejection</button>
           </div>
           <div class="cap" id="cap">Documents · cap <b>10,000</b>/search</div>
         </div>
@@ -209,6 +214,7 @@ export function mountUI() {
           </div>
         </div>
         <div id="main">
+        <div id="view-export">
         <section class="card">
           <div class="sh"><span class="n">1</span><h3 data-i18n="ui.configure">Configure</h3></div>
           <div class="row">
@@ -250,8 +256,10 @@ export function mountUI() {
           <button class="btn sm" id="bug" style="width:100%;margin-top:8px" data-i18n="ui.bug">🐞 Report a bug</button>
           <button class="btn sm" id="reqrin" style="width:100%;margin-top:8px" hidden data-i18n="ui.reqrin">＋ Request access for another account</button>
         </section>
+        </div>
+        <div id="view-rejection" hidden>
         <section class="card">
-          <div class="sh"><span class="n">5</span><h3 data-i18n="rej.title">Auto-Reject</h3><span class="hint" data-i18n="rej.hint">received · Valid only</span></div>
+          <div class="sh"><span class="n">1</span><h3 data-i18n="rej.title">Auto-Reject</h3><span class="hint" data-i18n="rej.hint">received · Valid only</span></div>
           <div class="row">
             <div><label class="l" data-i18n="ui.from">From</label><input type="date" class="ctl" id="rj-from"></div>
             <div><label class="l" data-i18n="ui.to">To</label><input type="date" class="ctl" id="rj-to"></div>
@@ -263,7 +271,7 @@ export function mountUI() {
                 <option value="block" data-i18n="rej.modeBlock">Blocklist → reject</option>
                 <option value="allow" data-i18n="rej.modeAllow">Trusted-only → flag others</option>
               </select></div>
-              <div><label class="l" data-i18n="rej.window">Window (days)</label><input type="number" class="rjnum" id="rj-window" min="1" max="365" value="14"></div>
+              <div><label class="l" data-i18n="rej.window">Window (days)</label><input type="number" class="rjnum" id="rj-window" min="1" max="365" value="14"><span id="rj-winsrc" style="display:block;font:600 9px ui-monospace;color:var(--dim);margin-top:3px"></span></div>
             </div>
             <textarea class="rjreason" id="rj-tins" rows="2" data-i18n-ph="rej.tinsPh" placeholder="Tax registration numbers — one per line" style="margin-top:9px;direction:ltr;font-family:ui-monospace,monospace"></textarea>
             <div class="row" style="margin-top:9px">
@@ -287,6 +295,20 @@ export function mountUI() {
             <button class="btn sm" id="rj-auditbtn" data-i18n="rej.audit">⧉ Audit</button>
           </div>
         </section>
+        <section class="card">
+          <div class="sh"><span class="n">2</span><h3 data-i18n="po.title">PO Reconciliation</h3><span class="hint" data-i18n="po.hint">upload · analyze</span></div>
+          <input type="file" id="po-file" accept=".xlsx" style="display:none">
+          <div class="tools"><button class="btn" id="po-pick" data-i18n="po.pick">⇪ Upload PO sheet</button><button class="btn sm" id="po-template" data-i18n="po.template">⤓ Template</button></div>
+          <div class="rjmeta" id="po-status" style="margin-top:7px"></div>
+          <div class="row" style="margin-top:11px">
+            <div><label class="l" data-i18n="po.from">From</label><input type="date" class="ctl" id="po-from"></div>
+            <div><label class="l" data-i18n="po.to">To</label><input type="date" class="ctl" id="po-to"></div>
+          </div>
+          <button class="btn primary" id="po-analyze" style="width:100%;margin-top:12px" disabled data-i18n="po.analyze">▦ Analyze period</button>
+          <div class="rjnote" id="po-note" hidden></div>
+          <div class="stats" id="po-sum" hidden><div class="stat"><div class="k" data-i18n="po.stInvoices">Invoices</div><div class="v num" id="po-s-inv">—</div></div><div class="stat"><div class="k" data-i18n="po.stMatched">Matched</div><div class="v num" id="po-s-match">—</div></div><div class="stat"><div class="k" data-i18n="po.stWarnings">Warnings</div><div class="v num" id="po-s-warn">—</div></div><div class="stat"><div class="k" data-i18n="po.stExceeded">POs exceeded</div><div class="v num" id="po-s-exc">—</div></div></div>
+        </section>
+        </div>
         </div>
       </div>
       <footer class="ft" id="ft"><span class="dot"></span><span class="msg" id="ftmsg">Pick a source and build a plan.</span></footer>
@@ -296,7 +318,9 @@ export function mountUI() {
   const $ = (id) => root.getElementById ? root.getElementById(id) : root.querySelector('#' + id);
   const q = (sel) => root.querySelector(sel);
   let currentPlan = null, source = 'invoices', busy = false, licensed = true;   // licensed=true default → standalone (no bridge) is ungated
-  let rjItems = [], rjCtrl = null;   // auto-reject review items + abort controller for a scan/submit in flight
+  let rjItems = [], rjCtrl = null;   // auto-reject review items + abort controller for a scan/submit/analyze in flight
+  let tab = 'invoices';              // visible view: invoices | receipts | rejection (source stays export-only)
+  let poState = { pos: [], warnings: [], fileName: '', analysis: null };   // uploaded PO sheet + last analysis
   let lastSession = null;        // last /session verdict (drives the request-RIN prefill)
   // Live time-left: measured in WORK units (invoices fully processed, PDFs doubling), not discovered
   // rows — the paged /search phase is fast and must not make the timer plummet (see core/eta.js).
@@ -392,7 +416,8 @@ export function mountUI() {
     if (b) { eta.reset(); lastChunk = null; logRun = 'active'; saveLogSoon(true); }   // fresh rate baseline; mark mid-flight so a crash restores the log
     else if (logRun === 'active') { logRun = 'none'; saveLogSoon(true); }             // activity ended without a terminal status (plan built, resume loaded) → nothing to resume
     $('build').disabled = b || !licensed; $('sync').disabled = b || !licensed; $('start').disabled = b || !currentPlan || !licensed; $('pause').disabled = !b; $('resume').disabled = b; $('pick').disabled = b; $('merge').disabled = b; $('repair').disabled = b;
-    $('rj-scan').disabled = b || !licensed; rjFoot(); }
+    $('rj-scan').disabled = b || !licensed; rjFoot();
+    $('po-pick').disabled = b; $('po-template').disabled = b; poFoot(); }
 
   // Registration gate — engages only once LEAD_URL is wired (gateEnabled). Locks to one taxpayer per device:
   // registered → ungated; a different client-taxpayer must register again (a new lead for that entity).
@@ -413,7 +438,7 @@ export function mountUI() {
     el.append(x);
   };
   async function refreshLicense() {
-    if (!gateEnabled()) { licensed = true; $('gate').hidden = true; showMain(true); renderAnnouncement(null); renderMessage(null); if (!busy) { $('build').disabled = false; $('sync').disabled = false; $('start').disabled = !currentPlan; } return; }
+    if (!gateEnabled()) { licensed = true; $('gate').hidden = true; showMain(true); renderAnnouncement(null); renderMessage(null); if (!busy) { $('build').disabled = false; $('sync').disabled = false; $('start').disabled = !currentPlan; $('rj-scan').disabled = false; poFoot(); } return; }   // ungated branch must mirror the gated one for the rejection controls too
     const s = await session();
     lastSession = s;
     renderAnnouncement(s.announcement);
@@ -440,7 +465,7 @@ export function mountUI() {
         $('blk-reqmsg').textContent = '';
       }
     }
-    if (!busy) { $('build').disabled = !licensed; $('start').disabled = !currentPlan || !licensed; $('rj-scan').disabled = !licensed; }
+    if (!busy) { $('build').disabled = !licensed; $('start').disabled = !currentPlan || !licensed; $('rj-scan').disabled = !licensed; poFoot(); }
   }
 
   function applySourceUI() {
@@ -452,7 +477,7 @@ export function mountUI() {
     $('field').innerHTML = src.dateFields.map(([v], i) => `<option value="${v}"${i === 0 ? ' selected' : ''}>${t('src.' + v)}</option>`).join('');
     if (keepDir && src.dirs.some(([v]) => v === keepDir)) $('dir').value = keepDir;
     if (keepField && src.dateFields.some(([v]) => v === keepField)) $('field').value = keepField;
-    $('cap').innerHTML = t(source === 'receipts' ? 'ui.capReceipts' : 'ui.capDocs');
+    renderCap();   // cap line is tab-aware (Rejection shows its own scan cap), owned by renderCap
     const pl = $('procLabel'); if (pl) pl.textContent = t(source === 'receipts' ? 'ui.fetchedRec' : 'ui.fetchedInv');
     const cols = $('cols');
     if (cols) { cols.innerHTML = removableColumns(source).map((c) => `<label class="sc" title="${c.key}"><input type="checkbox" data-col="${c.key}"${keepOff.has(c.key) ? '' : ' checked'}>${c.header}</label>`).join(''); updateColHint(); }
@@ -495,20 +520,31 @@ export function mountUI() {
     else if (!e.shiftKey && active === last) { e.preventDefault(); first.focus(); }
   });
 
-  // source switch — shared by the header tabs and Sync (which restores the last run's source).
-  // A built plan belongs to the PREVIOUS source: invalidate it so "Approve & Start" can't silently
-  // export the other source than the one now selected — force a re-build for the new source.
+  // Tab machine. `tab` is the visible view (invoices | receipts | rejection); `source` stays the
+  // EXPORT source only — 'rejection' is a view, never a SOURCES key (applySourceUI would throw),
+  // and visiting it must not invalidate a built export plan. setSource keeps the plan-invalidation
+  // rule for real source switches; selectTab owns aria + view visibility + the cap line.
   function setSource(src) {
     if (source === src) return;
-    root.querySelectorAll('.seg [role=tab]').forEach((x) => x.setAttribute('aria-selected', String(x.dataset.src === src)));
     source = src; applySourceUI();
     currentPlan = null; $('start').disabled = true;
     for (const id of ['s-chunks', 's-rows', 's-big', 's-eta']) $(id).textContent = '—';
   }
+  function renderCap() {
+    $('cap').innerHTML = tab === 'rejection' ? t('ui.capRejection') : t(source === 'receipts' ? 'ui.capReceipts' : 'ui.capDocs');
+  }
+  function selectTab(next) {
+    tab = next;
+    root.querySelectorAll('.seg [role=tab]').forEach((x) => x.setAttribute('aria-selected', String(x.dataset.tab === next)));
+    const rej = next === 'rejection';
+    $('view-export').hidden = rej; $('view-rejection').hidden = !rej;
+    if (!rej) setSource(next);   // export tabs keep source === tab; rejection leaves source (and the plan) alone
+    renderCap();
+  }
   root.querySelectorAll('.seg [role=tab]').forEach((b) => b.onclick = () => {
-    if (busy || source === b.dataset.src) return;   // don't switch source mid-run or onto the same tab
-    setSource(b.dataset.src);
-    setFt('', t('ft.sourceChanged', { src: t(source === 'receipts' ? 'ui.receipts' : 'ui.invoices') }));
+    if (busy || tab === b.dataset.tab) return;   // don't switch tabs mid-run or onto the same tab
+    selectTab(b.dataset.tab);
+    setFt('', b.dataset.tab === 'rejection' ? t('ft.rejTab') : t('ft.sourceChanged', { src: t(source === 'receipts' ? 'ui.receipts' : 'ui.invoices') }));
   });
 
   // actions
@@ -525,7 +561,7 @@ export function mountUI() {
       const sel = deriveSyncSel(await readProgress(d), todayYmd());
       if (!sel) { setFt('', t('sync.noPrev')); return; }
       // reflect the derived selection into the form so the user sees exactly what will run
-      setSource(sel.source);
+      selectTab(sel.source);   // also pulls the user back to the export view if they were on Rejection
       $('from').value = sel.from; $('to').value = sel.to; $('year').value = '';
       $('dir').value = sel.dir; $('field').value = sel.field; $('pdf').checked = !!sel.downloadPdf;
       ALL_STATUSES.forEach((s) => { const c = $('st_' + s); if (c) c.checked = (sel.statuses || ALL_STATUSES).includes(s); });
@@ -712,7 +748,9 @@ export function mountUI() {
     rjItems = []; rjRender(); $('rj-note').hidden = true;
     const ctrl = new AbortController(); rjCtrl = ctrl;
     try {
-      const res = await scanReceived({ from: $('rj-from').value, to: $('rj-to').value, cfg, hooks: {
+      const win = await loadWindows({ signal: ctrl.signal });   // per-type window when the portal exposes it; honest fallback otherwise
+      renderWinBadge(win, cfg);
+      const res = await scanReceived({ from: $('rj-from').value, to: $('rj-to').value, cfg, resolveWindow: makeResolver(win, cfg), hooks: {
         onStatus: () => setFt('run', t('rej.phRows')),
         onProgress: (cur, max) => setFt('run', t('rej.phDetails', { cur: fmt(cur), max: fmt(max) })),
         onRate: (w) => setFt('wait', t('orch.rateWait', { s: Math.round(w / 1000) })),
@@ -771,8 +809,103 @@ export function mountUI() {
   $('rj-to').value = todayYmd();
   $('rj-from').value = new Date(Date.now() - 14 * 864e5).toISOString().slice(0, 10);   // default: the receiver-rejection window
 
+  // ── PO Reconciliation card ─────────────────────────────────────────────────
+  // Upload → parse (engine) → Analyze: fetch received+details for the period, match against the
+  // sheet, write the PO_Analytics workbook, surface stats. Out-of-period/over-consumption are
+  // warnings only — this card never feeds the reject flow.
+  function renderWinBadge(win, cfg) {
+    const el = $('rj-winsrc'); if (!el) return;
+    el.textContent = win && win.source === 'api' ? t('rej.winApi') : t('rej.winCfg', { days: cfg.windowDays });
+  }
+  function poFoot() { const b = $('po-analyze'); if (b) b.disabled = busy || !licensed || !poState.pos.length; }
+  function poRender() {
+    const st = $('po-status'); if (!st) return;
+    st.textContent = poState.pos.length ? t('po.loaded', { n: fmt(poState.pos.length), warn: fmt(poState.warnings.length) }) + (poState.fileName ? ' · ' + poState.fileName : '') : '';
+    const a = poState.analysis;
+    $('po-sum').hidden = !a;
+    if (a) { $('po-s-inv').textContent = fmt(a.totals.invoices); $('po-s-match').textContent = fmt(a.totals.matched); $('po-s-warn').textContent = fmt(a.totals.warnings); $('po-s-exc').textContent = fmt(a.totals.exceededPos); }
+    poFoot();
+  }
+  const poNote = (cls, msg) => { const n = $('po-note'); n.hidden = false; n.className = cls ? 'rjnote warn' : 'rjnote'; n.textContent = msg; };
+  $('po-pick').onclick = () => $('po-file').click();
+  $('po-file').onchange = async () => {
+    const f = $('po-file').files?.[0];
+    $('po-file').value = '';   // reset so re-selecting the same (edited) file refires onchange
+    if (!f) return;
+    if (!window.ExcelJS) { setFt('err', t('orch.noExcel')); return; }
+    try {
+      const wb = new window.ExcelJS.Workbook();
+      await wb.xlsx.load(await f.arrayBuffer());   // same read path merge.js uses
+      const { pos, rowWarnings } = parsePoWorkbook(wb);
+      poState = { pos, warnings: rowWarnings, fileName: f.name, analysis: null };
+      poRender();
+      if (!pos.length) poNote(true, t('po.noPos'));
+      else poNote(rowWarnings.length > 0, t('po.loaded', { n: fmt(pos.length), warn: fmt(rowWarnings.length) }));
+    } catch (e) {
+      const msg = e.code === 'PO_HEADERS' ? t('po.badHeaders', { missing: (e.missing || []).join(', ') }) : t('po.parseFailed', { msg: e?.message || e });
+      poNote(true, msg); setFt('err', msg);
+    }
+  };
+  $('po-template').onclick = async () => {
+    if (busy) return;
+    if (!window.ExcelJS) { setFt('err', t('orch.noExcel')); return; }
+    let d = null; try { d = await orch.ensureDir(); } catch {}
+    if (!d) { setFt('', t('orch.pickFolder')); return; }
+    if (!(await ensurePermission(d))) { setFt('err', t('orch.permLost')); return; }   // permission inside the click gesture
+    try {
+      const buf = await renderPoTemplate(window.ExcelJS).workbook.xlsx.writeBuffer();
+      await writeBlob(d, 'PO_Template.xlsx', new Blob([buf], { type: XLSX_MIME }));
+      setFt('ok', t('po.templateSaved'));
+    } catch (e) { setFt('err', t('po.failed', { msg: e?.message || e })); }
+  };
+  $('po-analyze').onclick = async () => {
+    if (busy || !poState.pos.length) return;
+    await refreshLicense(); if (!licensed) { $('gate').hidden = false; return; }
+    if (!window.ExcelJS) { setFt('err', t('orch.noExcel')); return; }
+    // folder + permission FIRST, inside the gesture — after minutes of fetching the re-request would fail
+    let d = null; try { d = await orch.ensureDir(); } catch {}
+    if (!d) { setFt('', t('orch.pickFolder')); return; }
+    if (!(await ensurePermission(d))) { setFt('err', t('orch.permLost')); return; }
+    setBusy(true);
+    const ctrl = new AbortController(); rjCtrl = ctrl;   // shared controller: Pause aborts analyze too
+    try {
+      const cfg = rjCollectCfg(false);
+      const win = await loadWindows({ signal: ctrl.signal });
+      renderWinBadge(win, cfg);
+      setFt('run', t('po.phFetch'));
+      const { results } = await fetchReceivedDetails({ from: $('po-from').value, to: $('po-to').value, hooks: {
+        onStatus: () => setFt('run', t('po.phFetch')),
+        onProgress: (cur, max) => setFt('run', t('po.phVerify', { cur: fmt(cur), max: fmt(max) })),
+        onRate: (w) => setFt('wait', t('orch.rateWait', { s: Math.round(w / 1000) })),
+        signal: ctrl.signal,
+      } });
+      const invoices = results.filter((r) => r.o && (!r.o.status || r.o.status === 'Valid')).map((r) => projectInvoice(r.o));
+      const fetchFailed = results.filter((r) => !r.o).length;   // fail-closed: unverifiable docs are counted and reported, never dropped silently
+      const analysis = analyzePo(poState.pos, invoices, { resolveWindow: makeResolver(win, cfg), windowDays: cfg.windowDays, fetchFailed });
+      poState.analysis = analysis;
+      const name = poAnalyticsName(new Date());
+      const meta = { from: $('po-from').value, to: $('po-to').value, generatedAt: new Date().toISOString(), version: EXT_VERSION, windowSource: win.source, windowDays: cfg.windowDays };
+      const buf = await renderPoAnalytics(window.ExcelJS, analysis, meta).workbook.xlsx.writeBuffer();
+      await writeBlob(d, name, new Blob([buf], { type: XLSX_MIME }));
+      poRender();
+      let msg = t('po.done', { name, inv: fmt(analysis.totals.invoices), matched: fmt(analysis.totals.matched), warn: fmt(analysis.totals.warnings) });
+      if (fetchFailed) msg += ' ' + t('po.fetchFail', { n: fmt(fetchFailed) });
+      poNote(analysis.totals.warnings > 0 || fetchFailed > 0, msg);
+      logLine(msg, { level: analysis.totals.warnings || fetchFailed ? 'warn' : 'ok' });
+      setFt(analysis.totals.warnings || fetchFailed ? 'wait' : 'ok', msg);
+    } catch (e) {
+      const msg = e.code === 'TOO_MANY' ? t('rej.tooMany', { n: fmt(e.count), cap: fmt(e.cap) })
+        : e.code === 'BAD_RANGE' ? t('rej.badRange')
+        : e.code === 'STOPPED' ? t('ft.pausingShort')
+        : t('po.failed', { msg: e.code || e.message || e });
+      poNote(true, msg); logLine(msg, { level: 'err' }); setFt('err', msg);
+    } finally { rjCtrl = null; setBusy(false); }
+  };
+  $('po-to').value = todayYmd();
+  $('po-from').value = new Date(Date.now() - 30 * 864e5).toISOString().slice(0, 10);   // default: last 30 days (2,000-doc scan cap guides narrower ranges)
+
   $('logcopy').onclick = async () => {
-    const header = `ETA Bulk v${EXT_VERSION} · ${source} · ${new Date().toISOString()}\n`;
+    const header = `ETA Bulk v${EXT_VERSION} · ${tab === 'rejection' ? 'rejection' : source} · ${new Date().toISOString()}\n`;
     try { await navigator.clipboard.writeText(header + rlog.text()); setFt('ok', t('ft.logCopied')); }
     catch { setFt('err', t('ft.logCopyBlocked')); }   // portal permissions-policy edge case
   };
@@ -790,7 +923,8 @@ export function mountUI() {
     { const pl = $('privacy-link'); if (pl) pl.href = String(LEAD_URL).replace(/\/$/, '') + '/privacy'; }    // consent innerHTML recreates the link — re-point it
     if (!orch.folderName()) $('folder').textContent = t('ui.noFolder');
     $('langBtn').textContent = L === 'ar' ? 'EN' : 'ع';
-    applySourceUI();   // dir/field option labels, cap line, proc label, column chips (selection-preserving)
+    applySourceUI();   // dir/field option labels, cap line (renderCap), proc label, column chips (selection-preserving)
+    rjRender(); poRender();   // rejection views bake t() at render — re-render so a language toggle isn't half-translated (row state lives on the items)
     renderLog();
   }
   $('langBtn').onclick = () => { setLang(getLang() === 'ar' ? 'en' : 'ar'); applyLang(); refreshLicense(); };
