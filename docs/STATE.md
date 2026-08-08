@@ -6,7 +6,7 @@
 > Track: STANDARD · Started: 2026-07-27 (Agent OS adopted mid-project at v0.3.0) · Client: internal
 
 ## NEXT ACTION
-→ USER SMOKE TEST, then package v0.4.1. F-10..F-15 are all code-complete and unit-green (252/252)
+→ USER SMOKE TEST of v0.4.1 (built + packaged: dist-package/eta-bulk-export-v0.4.1.zip). F-10..F-15 are all code-complete and unit-green (252/252)
 but NONE has been exercised against real portal data. Load the rebuilt extension and, in one
 session: (1) Merge the big folder that used to fail — confirm it completes and leaves no .jsonl;
 (2) Merge again immediately — must say "Already up to date" and write nothing; (3) sync a day, merge
