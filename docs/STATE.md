@@ -6,12 +6,11 @@
 > Track: STANDARD · Started: 2026-07-27 (Agent OS adopted mid-project at v0.3.0) · Client: internal
 
 ## NEXT ACTION
-→ Build F-13 (incremental merge), spec-first as SPEC-012. Design already agreed with the user:
-one master COMBINED set under STABLE names (drop the timestamp, which today abandons a whole new
-dated set every merge); eta_merge_state.json holding consumed chunk files + UUID list + nextSerial
-+ column unions + part inventory; incremental pass reads ONLY new chunk files and tops up the last
-part; auto full rebuild — logged — when a new column appears, a consumed file changed, or a part is
-missing. Then F-14 (period-labeled, day-aligned parts).
+→ Build F-14 (period-labeled, day-aligned COMBINED parts), spec-first as SPEC-013. User directive:
+each part should say which date range it covers, and the split should be logged. Note the framing
+correction already made to the user: the 1,048,576-row Excel limit is unreachable — memory caps a
+part at ~72k rows (F-10), so period labelling is about making the output self-describing, not about
+the row limit. Design intent: prefer day boundaries so two parts never both claim the same day.
 
 Parked (user smoke, not blocking): overnight smoke below; plus confirm the F-10 merge fix against
 the real big folder that used to fail.
@@ -45,7 +44,7 @@ portal smoke + the documenttypes/LIVE_REJECT_PATH DevTools captures into the sam
 | F-10 | Merge survives big folders + never strands scratch files | VALIDATED | (fix, no spec) | T-072..T-075; root cause = OOM part sizes + O(n²) append + happy-path-only cleanup; suite 198→202 |
 | F-11 | TIN-scoped export folders (block a second company) | VALIDATED | SPEC-010 | T-076..T-090; suite 202→213. Guard in ensureDir+start+resume+plan; merge may proceed logged-out on a claimed folder |
 | F-12 | Run log persisted to the folder | VALIDATED | SPEC-011 | T-091..T-102; suite 213→226. Batched open/append/close (NOT a held stream — FSA is only durable on close) |
-| F-13 | Incremental merge (only new chunk files) | PLANNED | — | Design agreed 2026-08-08: stable COMBINED names, eta_merge_state.json, auto full rebuild on column drift |
+| F-13 | Incremental merge (only new chunk files) | VALIDATED | SPEC-012 | T-103..T-114; suite 226→238. Stable COMBINED names; T-111 pins incremental output == full rebuild |
 | F-14 | Period-labeled, day-aligned COMBINED parts | PLANNED | — | Parts named/logged by the date range they cover; boundaries prefer day edges |
 
 ## Blockers
