@@ -105,6 +105,35 @@ test('T-006 merge: line-sheet header union when only the newer part carries ال
   assert.equal(newRow.values[refCol], 'A, B', 'new part keeps its joined references');
 });
 
+test('T-059 merge: header union when only the newer part carries رقم الفاتورة الأصلية (SPEC-008)', async () => {
+  const dir = fakeDir();
+  const U = 'الرقم الإلكترونى', REF = 'الرقم المرجعي', NUM = 'رقم الفاتورة الأصلية';
+  // a folder exported across the SPEC-008 upgrade: the old part predates the number column
+  await putXlsx(dir, 'eInvoices_2026_Received_old.xlsx',
+    ['مسلسل', U, REF], [[1, 'U1', 'A']],
+    ['رقم الفاتورة', U, REF], [['A-1', 'U1', 'A']]);
+  await putXlsx(dir, 'eInvoices_2026_Received_new.xlsx',
+    ['مسلسل', U, NUM, REF], [[1, 'U2', 'ORIG-7', 'B']],
+    ['رقم الفاتورة', U, NUM, REF], [['B-1', 'U2', 'ORIG-7', 'B']]);
+
+  await mergeFolder(ExcelJS, dir, { onStatus: () => {} });
+
+  const combinedName = [...dir.files.keys()].find((n) => /COMBINED.*\.xlsx$/.test(n));
+  const wb = new ExcelJS.Workbook();
+  await wb.xlsx.load((await (await dir.getFileHandle(combinedName)).getFile()).arrayBuffer());
+  for (const sheet of ['جميع الفواتير', 'بيانات الفواتير']) {
+    const s = wb.getWorksheet(sheet);
+    const header = s.getRow(1).values.slice(1);
+    assert.ok(header.includes(NUM), `${sheet}: header union includes ${NUM}`);
+    const numCol = header.indexOf(NUM) + 1;
+    const rows = [2, 3].map((rn) => s.getRow(rn));
+    const oldRow = rows.find((r) => String(r.values[header.indexOf(U) + 1]) === 'U1');
+    const newRow = rows.find((r) => String(r.values[header.indexOf(U) + 1]) === 'U2');
+    assert.equal(oldRow.values[numCol] ?? '', '', `${sheet}: pre-upgrade rows stay blank, not broken`);
+    assert.equal(newRow.values[numCol], 'ORIG-7', `${sheet}: new part keeps its resolved number`);
+  }
+});
+
 test('merge: HIGH regression — an unreadable chunk is surfaced, not silently counted as merged (#2)', async () => {
   const dir = fakeDir();
   const U = 'الرقم الإلكترونى';
