@@ -79,7 +79,7 @@ export function createOrchestrator(hooks = {}) {
     running = true; keepalive.start();
     const SRC = SOURCES[plan.source] || SOURCES.invoices;
     const sp = statusPlan(plan.statuses, SRC);
-    const opts = { columns: Object.fromEntries((plan.excludeColumns || []).map((k) => [k, false])), combineAll: true, taxColumns: true, discountColumns: true, negativeCredit: false, validOnly: false };
+    const opts = { columns: Object.fromEntries((plan.excludeColumns || []).map((k) => [k, false])), combineAll: true, taxColumns: true, discountColumns: true, negativeCredit: true, validOnly: false };   // SPEC-007: credit notes always export negative — no UI switch
     const done = new Set(plan.doneIds || []); const failed = new Set(plan.failedIds || []);
     let rowsFetched = plan.chunks.filter((c) => done.has(c.id)).reduce((s, c) => s + Math.min(c.count, plan.cap || 1e12), 0);
     onCount(rowsFetched, plan.totalRows);   // seed from already-completed chunks (resume-aware)
