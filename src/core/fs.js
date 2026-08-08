@@ -30,6 +30,14 @@ export async function appendText(dir, name, text) {
   const w = await fh.createWritable({ keepExistingData: true });
   await w.write({ type: 'write', position: size, data: text }); await w.close();
 }
+// One long-lived writable for streaming a scratch file. appendText re-opens with keepExistingData, and
+// Chromium copies the WHOLE current file into a swap file on every open — O(N²) bytes on a multi-GB temp.
+// Callers that own the file end-to-end (and can afford to truncate it) should stream through this instead.
+export async function openWrite(dir, name) {
+  const fh = await dir.getFileHandle(name, { create: true });
+  const w = await fh.createWritable();   // truncates: this is a fresh scratch file, not an append target
+  return { write: (text) => w.write(text), close: () => w.close() };
+}
 export async function remove(dir, name) { await dir.removeEntry(name); }
 export async function readText(dir, name) { try { const fh = await dir.getFileHandle(name); return await (await fh.getFile()).text(); } catch { return null; } }
 export async function listFiles(dir, re) { const out = []; for await (const [n, h] of dir.entries()) if (h.kind === 'file' && (!re || re.test(n))) out.push(n); return out; }

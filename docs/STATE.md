@@ -32,6 +32,7 @@ portal smoke + the documenttypes/LIVE_REJECT_PATH DevTools captures into the sam
 | F-07 | Credit notes export every figure negative | VALIDATED | SPEC-007 | T-039..T-048; also fixed a latent defect that negated T4 on PLAIN invoices; merged ed6c14c |
 | F-08 | Note reference → original invoice NUMBER | VALIDATED | SPEC-008 | T-049..T-059; free from the corpus, cached lookup otherwise; merged 0a18559 |
 | F-09 | Overnight session keep-warm | TESTING | SPEC-009 | T-060..T-071 green; unit-complete, but only an overnight run can confirm the real cause — user smoke pending |
+| F-10 | Merge survives big folders + never strands scratch files | VALIDATED | (fix, no spec) | T-072..T-075; root cause = OOM part sizes + O(n²) append + happy-path-only cleanup; suite 198→202 |
 
 ## Blockers
 - none (live-verification items are post-merge follow-ups, not blockers: portal documenttypes
@@ -56,3 +57,13 @@ portal smoke + the documenttypes/LIVE_REJECT_PATH DevTools captures into the sam
   original invoice number, overnight logout). Suite 161→194 green; v0.4.0 repackaged. Two
   behaviour changes worth remembering: credit-note T4 withholding is now negated (parity.test:94
   deliberately re-pinned), and a run now waits up to 8 h for a token instead of 15 min.
+- 2026-08-08 · F-10: user reported Merge always failing on big folders and leaving a .jsonl behind.
+  Three measured root causes, all fixed: (1) Phase-2 part caps (60k/900k rows) were sized against
+  Excel's sheet limit, not against memory — the vendored browser ExcelJS has no streaming writer,
+  so a part lives in its object model until writeBuffer(); benchmarked ~9.5KB heap/row, 72k rows
+  peaks ~950MB and passes, 90k rows OOMs. Caps are now 12k/60k. (2) Phase 1 appended via
+  appendText, which re-opens with keepExistingData — Chromium copies the whole file each time, so
+  a multi-GB scratch cost O(n²) disk I/O; now one long-lived stream (fs.openWrite). (3) The
+  scratch .jsonl was unlinked only on the happy path, so every crash stranded it; cleanup is now
+  in a finally and stale ones are swept at merge start. Trade-off accepted: parts are smaller, so
+  big folders produce more COMBINED files — a merge that finishes beats one that kills the tab.

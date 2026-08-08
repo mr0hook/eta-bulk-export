@@ -31,6 +31,7 @@ function fakeDir() {
         },
       };
     },
+    async removeEntry(name) { if (!files.delete(name)) throw new Error('not found'); },
     async *entries() { for (const n of files.keys()) yield [n, { kind: 'file' }]; },
   };
 }
@@ -132,6 +133,85 @@ test('T-059 merge: header union when only the newer part carries رقم الفا
     assert.equal(oldRow.values[numCol] ?? '', '', `${sheet}: pre-upgrade rows stay blank, not broken`);
     assert.equal(newRow.values[numCol], 'ORIG-7', `${sheet}: new part keeps its resolved number`);
   }
+});
+
+test('T-072 merge: the scratch .jsonl never survives the merge, and stale ones are swept', async () => {
+  const dir = fakeDir();
+  const U = 'الرقم الإلكترونى';
+  await putXlsx(dir, 'eInvoices_2026_Sent_a.xlsx', ['مسلسل', U], [[1, 'U1']], ['رقم الفاتورة', U], [['A-1', 'U1']]);
+  // an orphan left by a crashed pre-fix run — these were multi-GB in the field and never cleaned up
+  const orphan = 'eInvoices_COMBINED_2026-01-01T00-00-00-000Z.jsonl';
+  const fh = await dir.getFileHandle(orphan, { create: true });
+  const w = await fh.createWritable(); await w.write(new TextEncoder().encode('{"stale":1}\n')); await w.close();
+
+  await mergeFolder(ExcelJS, dir, { onStatus: () => {} });
+
+  const left = [...dir.files.keys()].filter((n) => /\.jsonl$/i.test(n));
+  assert.deepEqual(left, [], `no scratch .jsonl left behind, got ${JSON.stringify(left)}`);
+  assert.ok([...dir.files.keys()].some((n) => /COMBINED.*\.xlsx$/.test(n)), 'the merge still produced its output');
+});
+
+test('T-073 merge: the scratch .jsonl is cleaned up even when Phase 2 fails', async () => {
+  const dir = fakeDir();
+  const U = 'الرقم الإلكترونى';
+  await putXlsx(dir, 'eInvoices_2026_Sent_a.xlsx', ['مسلسل', U], [[1, 'U1']], ['رقم الفاتورة', U], [['A-1', 'U1']]);
+  // fail the part write the way a full disk / revoked permission would
+  const real = dir.getFileHandle.bind(dir);
+  dir.getFileHandle = async (name, opts) => {
+    if (/COMBINED.*\.xlsx$/.test(name)) throw new Error('disk full');
+    return real(name, opts);
+  };
+
+  await assert.rejects(() => mergeFolder(ExcelJS, dir, { onStatus: () => {} }), /disk full/);
+
+  const left = [...dir.files.keys()].filter((n) => /\.jsonl$/i.test(n));
+  assert.deepEqual(left, [], `scratch removed on the failure path too, got ${JSON.stringify(left)}`);
+});
+
+test('T-074 merge: parts split on the row caps that keep a part inside browser memory', async () => {
+  const dir = fakeDir();
+  const U = 'الرقم الإلكترونى';
+  // 5 invoices, 2 line rows each, in one source file
+  const sum = [], lines = [];
+  for (let i = 1; i <= 5; i++) { sum.push([i, 'U' + i]); lines.push(['L' + i + 'a', 'U' + i], ['L' + i + 'b', 'U' + i]); }
+  await putXlsx(dir, 'eInvoices_2026_Sent_a.xlsx', ['مسلسل', U], sum, ['رقم الفاتورة', U], lines);
+
+  await mergeFolder(ExcelJS, dir, { onStatus: () => {}, partSum: 2, partLine: 1e9 });
+
+  const parts = [...dir.files.keys()].filter((n) => /COMBINED.*\.xlsx$/.test(n)).sort();
+  assert.equal(parts.length, 3, `5 invoices at 2 per part -> 3 parts, got ${JSON.stringify(parts)}`);
+
+  // serial numbering stays continuous 1..5 across the parts, and every invoice survives exactly once
+  const serials = [], uuids = [];
+  for (const nm of [parts.find((n) => !/_part/.test(n)), ...parts.filter((n) => /_part/.test(n))]) {
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load((await (await dir.getFileHandle(nm)).getFile()).arrayBuffer());
+    const s0 = wb.worksheets[0], hdr = s0.getRow(1).values.slice(1);
+    for (let rn = 2; rn <= s0.actualRowCount; rn++) { const v = s0.getRow(rn).values; serials.push(v[1]); uuids.push(v[hdr.indexOf(U) + 1]); }
+  }
+  assert.deepEqual(serials, [1, 2, 3, 4, 5], 'serial runs continuously across parts');
+  assert.deepEqual(uuids.sort(), ['U1', 'U2', 'U3', 'U4', 'U5'], 'no invoice dropped or duplicated at a part boundary');
+});
+
+test('T-075 merge: line rows alone can trigger a split (invoices with many lines)', async () => {
+  const dir = fakeDir();
+  const U = 'الرقم الإلكترونى';
+  const sum = [], lines = [];
+  for (let i = 1; i <= 4; i++) { sum.push([i, 'U' + i]); for (let k = 0; k < 3; k++) lines.push(['L' + i + '-' + k, 'U' + i]); }
+  await putXlsx(dir, 'eInvoices_2026_Sent_a.xlsx', ['مسلسل', U], sum, ['رقم الفاتورة', U], lines);
+
+  // summary cap is out of reach; only the line cap can split this
+  await mergeFolder(ExcelJS, dir, { onStatus: () => {}, partSum: 1e9, partLine: 3 });
+
+  const parts = [...dir.files.keys()].filter((n) => /COMBINED.*\.xlsx$/.test(n));
+  assert.ok(parts.length > 1, `line-row cap splits the run, got ${parts.length} part(s)`);
+  let total = 0;
+  for (const nm of parts) {
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load((await (await dir.getFileHandle(nm)).getFile()).arrayBuffer());
+    total += wb.worksheets[1].actualRowCount - 1;
+  }
+  assert.equal(total, 12, 'every line row lands in exactly one part');
 });
 
 test('merge: HIGH regression — an unreadable chunk is surfaced, not silently counted as merged (#2)', async () => {
