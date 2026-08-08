@@ -87,6 +87,20 @@ kv_namespaces = [
   tag = "v1"
   new_sqlite_classes = ["Locks"]
 
+  # D1 for job records (SPEC-016 / A2, per ADR-002). Bound as JOBS to match the LEADS convention —
+  # wrangler's auto-derived binding name (eta_bulk_jobs) is the database name, not a good identifier.
+  # Schema: npx wrangler d1 execute eta-bulk-jobs --file=schema.sql --remote --env staging
+  #
+  # PRODUCTION HAS NO JOBS BINDING ON PURPOSE. It needs its own database, exactly as it has its own
+  # KV namespace — sharing one would put live job records and test runs in the same tables:
+  #     npx wrangler d1 create eta-bulk-jobs-prod
+  # Until then the planner routes must treat a missing env.JOBS as "unavailable" and say so, the
+  # same way every LOCKS caller falls back rather than throwing.
+  [[env.staging.d1_databases]]
+  binding = "JOBS"
+  database_name = "eta-bulk-jobs"
+  database_id = "aecaceea-e253-4a85-8ceb-0b77bef35dfa"
+
   # No cron on staging: the daily snapshot would write snap: records nobody reads. Test scheduled()
   # with `wrangler dev --test-scheduled` instead.
 
