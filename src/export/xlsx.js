@@ -172,8 +172,11 @@ function buildInvoices(records, options, cfg) {
   let serial = 0;
   for (const o of S) {
     serial++;   // always emit the summary row — a lineless/odd detail must NOT silently vanish (receipts already do this)
+    // A credit note reverses value: EVERY figure it carries exports negative, so a plain SUM()
+    // over a period nets against the originating invoices instead of double-counting (SPEC-007).
+    // Rates are not figures — tax rate %, FX rate and unit price are never signed (a signed unit
+    // price would cancel the signed quantity and flip the line total back positive).
     const y = !!(options.negativeCredit && o.documentTypeNamePrimaryLang === 'Credit Note');
-    const w = o.documentTypeNamePrimaryLang === 'Credit Note';
     const sgn = (v) => (y ? -1 * v : v);
     let cur = o.currenciesSold; if (cur !== 'EGP') cur = (o.invoiceLines || []).find((l) => l.unitValue?.currencySold)?.unitValue.currencySold || cur;
     const statusEn = deriveInvStatus(o);
@@ -190,7 +193,7 @@ function buildInvoices(records, options, cfg) {
     };
     if (options.taxColumns) {
       for (const t of o.taxTotals || []) {
-        row[t.taxType] = t.taxType === 'T4' ? (w ? t.amount : (options.negativeCredit ? -1 * t.amount : t.amount)) : sgn(t.amount);
+        row[t.taxType] = sgn(t.amount);   // incl. T4 withholding — see SPEC-007 (the old T4 branch negated it on PLAIN invoices)
         if (t.taxType !== 'T20') {
           const rates = new Set(); (o.invoiceLines || []).forEach((l) => l.lineTaxableItems?.forEach((x) => x.taxType === t.taxType && rates.add(x.rate)));
           row[t.taxType + '%'] = [...rates].sort((a, b) => a - b).join('&');
@@ -202,9 +205,9 @@ function buildInvoices(records, options, cfg) {
       row.currencyTotal = sgn(o.currencySegments[0].totalAmount);
     }
     if (options.discountColumns) {
-      if (o.totalItemsDiscountAmount > 0) row.itemsDiscount = w ? o.totalItemsDiscountAmount : sgn(o.totalItemsDiscountAmount);
-      if (o.totalDiscount > 0) row.discount = w ? o.totalDiscount : sgn(o.totalDiscount);
-      if (o.extraDiscountAmount > 0) row.extraDiscount = w ? o.extraDiscountAmount : sgn(o.extraDiscountAmount);
+      if (o.totalItemsDiscountAmount > 0) row.itemsDiscount = sgn(o.totalItemsDiscountAmount);
+      if (o.totalDiscount > 0) row.discount = sgn(o.totalDiscount);
+      if (o.extraDiscountAmount > 0) row.extraDiscount = sgn(o.extraDiscountAmount);
     }
     if (o.serviceDeliveryDate) row.serviceDeliveryDate = dateEg(o.serviceDeliveryDate);
     if (o.references?.[0]) row.referenceUUID = o.references.filter(Boolean).join(', ');   // a note can reference >1 original
@@ -226,14 +229,13 @@ function buildInvoices(records, options, cfg) {
         salesOrderReference: o.salesOrderReference, salesOrderDescription: o.salesOrderDescription, uuid: o.uuid, signature: o.signatures?.[0]?.signedBy || '',
       };
       if (options.taxColumns) for (const t of l.lineTaxableItems || []) {
-        const amt = (y && t.taxType !== 'T4') ? -1 * t.amount : (t.taxType === 'T4' ? (w ? t.amount : (options.negativeCredit ? -1 * t.amount : t.amount)) : t.amount);
-        lr[t.taxType] = (lr[t.taxType] || 0) + amt;   // accumulate: a line may carry several taxable items of the same taxType
+        lr[t.taxType] = (lr[t.taxType] || 0) + sgn(t.amount);   // accumulate: a line may carry several taxable items of the same taxType
         if (t.taxType !== 'T20' && t.rate !== undefined) { const k = t.taxType + '%'; const c = lr[k]; lr[k] = c == null || c === '' ? t.rate : (String(c).split('&').includes(String(t.rate)) ? c : c + '&' + t.rate); }
       }
       if (options.discountColumns) {
-        if (l.valueDifference > 0) lr.valueDifference = w ? l.valueDifference : sgn(l.valueDifference);
-        if (l.discount?.amount > 0) lr.discount = w ? l.discount.amount : sgn(l.discount.amount);
-        if (l.itemsDiscount > 0) lr.itemsDiscount = w ? l.itemsDiscount : sgn(l.itemsDiscount);
+        if (l.valueDifference > 0) lr.valueDifference = sgn(l.valueDifference);
+        if (l.discount?.amount > 0) lr.discount = sgn(l.discount.amount);
+        if (l.itemsDiscount > 0) lr.itemsDiscount = sgn(l.itemsDiscount);
       }
       if (o.serviceDeliveryDate) lr.serviceDeliveryDate = dateEg(o.serviceDeliveryDate);
       if (o.references?.[0]) lr.referenceUUID = o.references.filter(Boolean).join(', ');   // same join as the summary row

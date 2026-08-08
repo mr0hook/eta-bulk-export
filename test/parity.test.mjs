@@ -86,12 +86,15 @@ test('removableColumns: never offers index/details/uuid, does offer the extras',
   assert.ok(rcp.length > 0 && !rcp.includes('uuid'), 'receipts list valid, uuid protected');
 });
 
-test('invoices: credit-note signs + T4 special case', () => {
+test('invoices: credit-note signs (SPEC-007 — no tax is special-cased any more)', () => {
   const r = renderWorkbook(MockExcel, invoices, 'invoices', OPTS);
   const cn = byUuid(r.summaryRows, 'INV-2');
   assert.equal(cn.totalAmount, -560, 'credit note totalAmount negated under negativeCredit');
   assert.equal(cn.T1, -70, 'T1 negated for credit note');
-  assert.equal(cn.T4, 10, 'T4 (withholding) keeps raw amount for a credit note');
+  // Was `10` until SPEC-007: T4 withholding used to keep its raw sign on a credit note. The
+  // user's rule is now "every figure on a credit note is negative, no exceptions" — and the old
+  // carve-out also mis-signed T4 on PLAIN invoices once the flag was on (test/signs.test.mjs T-045).
+  assert.equal(cn.T4, -10, 'T4 (withholding) is negated for a credit note like every other figure');
 });
 
 test('invoices: v62 sparse fields (reference/customs/ePayment)', () => {
