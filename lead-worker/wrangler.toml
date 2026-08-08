@@ -60,17 +60,18 @@ enabled = true
 # Environments do NOT inherit bindings in wrangler: kv_namespaces, rules, durable_objects, migrations
 # and triggers must be repeated under each [env.*]. That is why the blocks below look duplicated.
 #
-# ⚠ STAGING IS NOT DEPLOYABLE YET. It needs its own KV namespace, which requires your account:
-#     npx wrangler kv namespace create LEADS --env staging
-#   then paste the printed id over STAGING_KV_ID_PLACEHOLDER below. Until then a real
-#   `wrangler deploy --env staging` fails on the unresolvable namespace id — deliberately, rather than
-#   silently sharing production's data. Note `--dry-run` does NOT catch this: it bundles without
-#   contacting the account, so it reports success with the placeholder still in place.
+# Staging got its own KV namespace on 2026-08-09. It shares nothing with production: different
+# worker name, different namespace id, different secret. Secrets do NOT carry across environments —
+# set staging's separately, or every /api/* call there returns 401:
+#     npx wrangler secret put ADMIN_TOKEN --env staging
+#
+# Note `--dry-run` never validates a namespace id: it bundles without contacting the account, so a
+# wrong id passes the dry run and fails only on a real deploy (Cloudflare API error 10042).
 
 [env.staging]
 name = "eta-bulk-leads-staging"
 kv_namespaces = [
-  { binding = "LEADS", id = "STAGING_KV_ID_PLACEHOLDER" }
+  { binding = "LEADS", id = "3b62222ea7234685bf5d569af322454b" }
 ]
 
   [[env.staging.rules]]
