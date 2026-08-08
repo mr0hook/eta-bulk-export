@@ -10,6 +10,8 @@ import { resolveReferenceNumbers } from './refs.js';
 import * as store from './store.js';
 import * as fs from './fs.js';
 import * as keepalive from './keepalive.js';
+import { createSessionKeeper } from './session.js';
+import { bridgeRequest } from './registration.js';
 import { bumpStats } from './stats.js';
 import { t } from './i18n.js';
 
@@ -25,7 +27,11 @@ const PDF_CONC = 8;   // official PDFs are larger; fetch fewer at once
 // continue automatically; hard-pause only if none appears.
 const TOKEN_FRESH_MIN_MS = 2 * 60 * 1000;      // a renewed token must have at least this left to count
 const TOKEN_WAIT_POLL_MS = 15 * 1000;          // how often to re-read the token while waiting
-const TOKEN_WAIT_MAX_POLLS = 60;               // give up (real pause) after ~15 min without a fresh token
+// SPEC-009: this was 60 (~15 min). A session that dies at 01:00 then left the run paused since
+// 01:15 and the whole night was lost. 1920 polls = 8 hours, so the run instead sits waiting and
+// resumes by itself the moment the user logs back in the next morning. Pause/Halt still break the
+// wait on the next poll, and progress is written before we start waiting.
+const TOKEN_WAIT_MAX_POLLS = 1920;
 
 export function createOrchestrator(hooks = {}) {
   const { onStatus = () => {}, onProgress = () => {}, onPlan = () => {}, onToken = () => {}, onCount = () => {}, onChunk = () => {}, guard = async () => true } = hooks;
@@ -34,6 +40,12 @@ export function createOrchestrator(hooks = {}) {
   const rate = (w) => onStatus(t('orch.rateWait', { s: Math.round(w / 1000) }), { level: 'wait', kind: 'rate' });
   let dirHandle = null, running = false, currentCtrl = null;
   const flags = { paused: false, halted: false };
+  // SPEC-009 — keeps the portal SESSION host alive for the length of a run (see session.js). The
+  // run itself only ever talks to the API host, which is exactly why the session idles out.
+  const session = createSessionKeeper({
+    warm: () => bridgeRequest('portal-warm'),
+    renew: async () => { onStatus(t('orch.sessionRenew'), { level: 'wait' }); await bridgeRequest('portal-renew'); },
+  });
 
   function statusPlan(sel, SRC) {
     if (!sel || !sel.length || sel.length === ALL_STATUSES.length) return { statusParam: null, filterSet: null, mode: 'all' };
@@ -77,7 +89,7 @@ export function createOrchestrator(hooks = {}) {
     if (!window.ExcelJS) { onStatus(t('orch.noExcel'), { level: 'err' }); return; }
     if (!dirHandle) { onStatus(t('orch.pickFolder'), { level: 'warn' }); return; }
     if (!(await fs.ensurePermission(dirHandle))) { onStatus(t('orch.permLost'), { level: 'err' }); return; }
-    running = true; keepalive.start();
+    running = true; keepalive.start(); session.start();
     const SRC = SOURCES[plan.source] || SOURCES.invoices;
     const sp = statusPlan(plan.statuses, SRC);
     const opts = { columns: Object.fromEntries((plan.excludeColumns || []).map((k) => [k, false])), combineAll: true, taxColumns: true, discountColumns: true, negativeCredit: true, validOnly: false };   // SPEC-007: credit notes always export negative — no UI switch
@@ -99,6 +111,10 @@ export function createOrchestrator(hooks = {}) {
         if (flags.paused || flags.halted) return null;
         const tk = tokenStatus(); onToken(tk);
         if (tk.ok && (tk.left === 0 || tk.left >= TOKEN_FRESH_MIN_MS)) return tk;   // left=0 = valid token with unknown exp
+        // SPEC-009: don't just watch localStorage and hope — ask for a renewal. The keeper's own
+        // rate limit means this is at most one background tab per 5 min however long we wait, so
+        // an unattended run keeps trying all night instead of dying 15 minutes in.
+        await session.renewNow();
         await sleep(TOKEN_WAIT_POLL_MS);
       }
       return null;
@@ -248,7 +264,7 @@ export function createOrchestrator(hooks = {}) {
       const pdfMsg = pdfDropped ? t('orch.pdfTail', { n: pdfDropped }) : '';
       onStatus(t('orch.doneSummary', { word: t(complete ? 'orch.doneOk' : 'orch.doneIncomplete'), done: done.size, n: plan.chunks.length, failed: failed.size, drops: dropMsg, pdfs: pdfMsg }), { level: complete && !failed.size ? 'ok' : 'warn', terminal: true, kind: 'done' });   // kind:'done' + level:'ok' = clean finish (drawer zeroes the timer & closes the persisted log)
       await store.writeProgress(dirHandle, plan, complete ? 'done' : 'incomplete');
-    } finally { running = false; keepalive.stop(); }
+    } finally { running = false; keepalive.stop(); session.stop(); }
   }
 
   async function resume() {

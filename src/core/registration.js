@@ -48,6 +48,20 @@ function bridgeFetch(url, opts) {
   });
 }
 
+// SPEC-009: a bare kind-only bridge call (no url, no body) for the session keep-warm messages.
+// Deliberately built on the SAME pending map and response listener as bridgeFetch above, but
+// bridgeFetch itself is left untouched — it is the licensing path and not worth re-plumbing for
+// this. Never rejects: the keeper is best-effort by contract.
+export function bridgeRequest(kind, timeoutMs = 20000) {
+  return new Promise((resolve) => {
+    if (typeof window === 'undefined' || !window.postMessage) { resolve({ ok: false, status: 0, error: 'no bridge' }); return; }
+    const id = 'k' + (++_bridgeSeq) + '_' + Date.now();
+    const timer = setTimeout(() => { if (_bridgePending.has(id)) { _bridgePending.delete(id); resolve({ ok: false, status: 0, error: 'timeout' }); } }, timeoutMs);
+    _bridgePending.set(id, (result) => { clearTimeout(timer); resolve(result || { ok: false, status: 0, error: 'no result' }); });
+    window.postMessage({ __eta: 'req', kind, id }, window.location.origin);
+  });
+}
+
 export async function deviceId() {
   let id = lsGet('reg_device_id');
   if (!id) { id = uuid(); lsSet('reg_device_id', id); }

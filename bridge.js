@@ -12,6 +12,22 @@
     if (e.source !== window) return;                 // same-frame only
     var d = e.data;
     if (!d || d.__eta !== 'req' || !d.id) return;
+    // SPEC-009: session keep-warm. Only the KIND crosses the bridge — no url, no options. The
+    // service worker builds the portal URL from its own pinned constant.
+    if (d.kind === 'portal-warm' || d.kind === 'portal-renew') {
+      try {
+        chrome.runtime.sendMessage(
+          { type: d.kind === 'portal-warm' ? 'eta-portal-warm' : 'eta-portal-renew' },
+          function (resp) {
+            var err0 = chrome.runtime.lastError;
+            window.postMessage({ __eta: 'res', id: d.id, result: err0 ? { ok: false, status: 0, error: err0.message } : (resp || { ok: false, status: 0, error: 'no response' }) }, location.origin);
+          }
+        );
+      } catch (ex0) {
+        window.postMessage({ __eta: 'res', id: d.id, result: { ok: false, status: 0, error: String((ex0 && ex0.message) || ex0) } }, location.origin);
+      }
+      return;
+    }
     if (d.kind === 'lead-fetch') {
       try {
         chrome.runtime.sendMessage(
