@@ -6,6 +6,7 @@ import { buildUrl, apiGet, probeCount, fetchAllRows, fetchDetails, fetchPdf, map
 import { buildChunks } from './chunker.js';
 import { safeName } from './time.js';
 import { renderWorkbook, XLSX_MIME } from '../export/xlsx.js';
+import { resolveReferenceNumbers } from './refs.js';
 import * as store from './store.js';
 import * as fs from './fs.js';
 import * as keepalive from './keepalive.js';
@@ -80,6 +81,9 @@ export function createOrchestrator(hooks = {}) {
     const SRC = SOURCES[plan.source] || SOURCES.invoices;
     const sp = statusPlan(plan.statuses, SRC);
     const opts = { columns: Object.fromEntries((plan.excludeColumns || []).map((k) => [k, false])), combineAll: true, taxColumns: true, discountColumns: true, negativeCredit: true, validOnly: false };   // SPEC-007: credit notes always export negative — no UI switch
+    // SPEC-008: run-level uuid→invoice-number cache for credit/debit note references. Shared across
+    // chunks on purpose — one original is resolved once however many notes point at it.
+    if (plan.source === 'invoices') opts.refNumbers = new Map();
     const done = new Set(plan.doneIds || []); const failed = new Set(plan.failedIds || []);
     let rowsFetched = plan.chunks.filter((c) => done.has(c.id)).reduce((s, c) => s + Math.min(c.count, plan.cap || 1e12), 0);
     onCount(rowsFetched, plan.totalRows);   // seed from already-completed chunks (resume-aware)
@@ -171,6 +175,13 @@ export function createOrchestrator(hooks = {}) {
                 onStatus(t('orch.pdfsUnavailable', { count: pdfFails.length, i: i + 1 }), { level: 'warn' });
               }
             }
+            // SPEC-008: resolve each note's reference UUIDs to the original's invoice number. Free
+            // for originals already in this export; only the genuinely-missing ones cost a lookup.
+            // AUTH/STOPPED propagate into the catch below, which owns renewal and pause.
+            if (opts.refNumbers) await resolveReferenceNumbers(records, { SRC }, opts.refNumbers, {
+              signal: currentCtrl.signal, onRate: rate,
+              onLookup: (n2) => onStatus(t('orch.refLookup', { i: i + 1, n: plan.chunks.length, n2 }), { level: 'run' }),
+            });
             onStatus(t('orch.chunkXlsx', { i: i + 1, n: plan.chunks.length, count: records.length }), { level: 'run' });
             const r = renderWorkbook(window.ExcelJS, records, plan.source, opts);
             const buf = await r.workbook.xlsx.writeBuffer();
