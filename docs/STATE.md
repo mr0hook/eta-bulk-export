@@ -6,7 +6,17 @@
 > Track: STANDARD · Started: 2026-07-27 (Agent OS adopted mid-project at v0.3.0) · Client: internal
 
 ## NEXT ACTION
-→ User-run overnight smoke: remove/re-add the extension, reload the portal tab, start a long run
+→ Build F-11 (SPEC-010, TIN-scoped folders): write test/folder.test.mjs T-076..T-083 first, watch
+them fail, then src/core/folder.js, then the ensureDir guard (T-084/T-085), then the drawer confirm
++ i18n. This jumps the queue ahead of F-12..F-14 because it is a live silent-corruption bug, not a
+feature: resume decides what is already downloaded by filename alone (store.js:49 →
+orchestrator.js:286), so a second company in the same folder gets an export containing the first
+company's invoices with no error shown.
+
+Parked (user smoke, not blocking): overnight smoke below; plus confirm the F-10 merge fix against
+the real big folder that used to fail.
+
+→ (parked) User-run overnight smoke: remove/re-add the extension, reload the portal tab, start a long run
 and leave it overnight. Next morning, read the run log and report which happened — (a) it ran
 clean through, (b) `⏳ Portal session running low` lines appear and it recovered, or (c) it sat
 waiting and resumed only after login. That answers whether the ETA session is idle-sliding or
@@ -33,6 +43,10 @@ portal smoke + the documenttypes/LIVE_REJECT_PATH DevTools captures into the sam
 | F-08 | Note reference → original invoice NUMBER | VALIDATED | SPEC-008 | T-049..T-059; free from the corpus, cached lookup otherwise; merged 0a18559 |
 | F-09 | Overnight session keep-warm | TESTING | SPEC-009 | T-060..T-071 green; unit-complete, but only an overnight run can confirm the real cause — user smoke pending |
 | F-10 | Merge survives big folders + never strands scratch files | VALIDATED | (fix, no spec) | T-072..T-075; root cause = OOM part sizes + O(n²) append + happy-path-only cleanup; suite 198→202 |
+| F-11 | TIN-scoped export folders (block a second company) | SPEC'D | SPEC-010 | T-076..T-085; live silent-corruption bug — resume matches chunks by filename with no owner check |
+| F-12 | Run log persisted to the folder | PLANNED | — | runlog.js is in-memory + localStorage only; lost on tab kill. Note: FSA needs periodic close() to be crash-safe |
+| F-13 | Incremental merge (only new chunk files) | PLANNED | — | Design agreed 2026-08-08: stable COMBINED names, eta_merge_state.json, auto full rebuild on column drift |
+| F-14 | Period-labeled, day-aligned COMBINED parts | PLANNED | — | Parts named/logged by the date range they cover; boundaries prefer day edges |
 
 ## Blockers
 - none (live-verification items are post-merge follow-ups, not blockers: portal documenttypes
