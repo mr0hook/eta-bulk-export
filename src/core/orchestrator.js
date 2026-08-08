@@ -9,6 +9,7 @@ import { renderWorkbook, XLSX_MIME } from '../export/xlsx.js';
 import { resolveReferenceNumbers } from './refs.js';
 import * as store from './store.js';
 import * as folder from './folder.js';
+import { createFolderLog } from './folderlog.js';
 import { taxpayerId, taxpayerName } from './registration.js';
 import * as fs from './fs.js';
 import * as keepalive from './keepalive.js';
@@ -36,7 +37,12 @@ const TOKEN_WAIT_POLL_MS = 15 * 1000;          // how often to re-read the token
 const TOKEN_WAIT_MAX_POLLS = 1920;
 
 export function createOrchestrator(hooks = {}) {
-  const { onStatus = () => {}, onProgress = () => {}, onPlan = () => {}, onToken = () => {}, onCount = () => {}, onChunk = () => {}, guard = async () => true, confirmFolder = async () => false } = hooks;
+  const { onStatus: rawStatus = () => {}, onProgress = () => {}, onPlan = () => {}, onToken = () => {}, onCount = () => {}, onChunk = () => {}, guard = async () => true, confirmFolder = async () => false } = hooks;
+  // SPEC-011: every user-visible line already funnels through onStatus, so mirroring the run log to
+  // the folder needs exactly one interception point. It must never be able to break a run, hence the
+  // swallow — a logger that aborts the export it documents is worse than no logger.
+  let fLog = null;
+  const onStatus = (msg, meta) => { try { fLog?.push(msg, meta); } catch {} rawStatus(msg, meta); };
   // onStatus(msg, meta) — meta { level:'ok'|'err'|'warn'|'wait'|'run'|'info', terminal?, kind? } lets the UI
   // classify without string-sniffing; kind marks high-frequency lines the run log coalesces (rate/page/probe).
   const rate = (w) => onStatus(t('orch.rateWait', { s: Math.round(w / 1000) }), { level: 'wait', kind: 'rate' });
@@ -125,6 +131,10 @@ export function createOrchestrator(hooks = {}) {
     if (!dirHandle) { onStatus(t('orch.pickFolder'), { level: 'warn' }); return; }
     if (!(await fs.ensurePermission(dirHandle))) { onStatus(t('orch.permLost'), { level: 'err' }); return; }
     if (!(await folderAllowed())) return;   // SPEC-010: never write into another taxpayer's folder
+    // SPEC-011: start the folder log only once the folder is known AND allowed, so a refused folder
+    // never gets written to. rotate() keeps one generation back for last-night/tonight comparisons.
+    fLog = createFolderLog(dirHandle, plan.key);
+    try { await fLog.rotate(); } catch {}
     running = true; keepalive.start(); session.start();
     const SRC = SOURCES[plan.source] || SOURCES.invoices;
     const sp = statusPlan(plan.statuses, SRC);
@@ -300,7 +310,13 @@ export function createOrchestrator(hooks = {}) {
       const pdfMsg = pdfDropped ? t('orch.pdfTail', { n: pdfDropped }) : '';
       onStatus(t('orch.doneSummary', { word: t(complete ? 'orch.doneOk' : 'orch.doneIncomplete'), done: done.size, n: plan.chunks.length, failed: failed.size, drops: dropMsg, pdfs: pdfMsg }), { level: complete && !failed.size ? 'ok' : 'warn', terminal: true, kind: 'done' });   // kind:'done' + level:'ok' = clean finish (drawer zeroes the timer & closes the persisted log)
       await store.writeProgress(dirHandle, plan, complete ? 'done' : 'incomplete');
-    } finally { running = false; keepalive.stop(); session.stop(); }
+    } finally {
+      running = false; keepalive.stop(); session.stop();
+      // Every terminal path returns from inside the loop, so the last lines — including the halt or
+      // pause reason a user reads the next morning — only reach disk because of this flush.
+      try { await fLog?.flush(); } catch {}
+      fLog = null;
+    }
   }
 
   async function resume() {
