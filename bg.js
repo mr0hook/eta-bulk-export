@@ -11,6 +11,45 @@
 //
 // The LEAD_ORIGIN value below is injected by build.mjs from new URL(LEAD_URL).origin (src/core/registration.js).
 const LEAD_ORIGIN = 'https://eta-bulk-leads.omsoliman95.workers.dev';
+
+// SPEC-009 — overnight session keep-warm. A run talks only to api-portal.invoicing.eta.gov.eg, so
+// the session host below goes hours without a single request and a sliding idle timeout logs the
+// user out mid-run. Two jobs, both pinned to this exact origin (already in host_permissions):
+//
+//   eta-portal-warm  — credentialed GET, slides the idle timeout. Cheap, invisible, every 10 min.
+//   eta-portal-renew — boots the portal in a BACKGROUND tab so the SPA's OIDC silent auth mints a
+//                      fresh token into localStorage (shared with the run tab), then closes it.
+//
+// SECURITY: neither handler reads a URL from the message. The page can ask us to warm or renew THE
+// PORTAL and nothing else — this cannot be repurposed into a general fetch/tab-open primitive.
+const PORTAL_ORIGIN = 'https://invoicing.eta.gov.eg';
+const RENEW_DWELL_MS = 12000;   // long enough for the SPA to boot and complete silent auth
+
+async function portalWarm() {
+  // Result is deliberately discarded: a 200, a 302 to the login page, or a network error are all
+  // equally fine. The point is that the session host saw a live, cookie-bearing browser.
+  try { await fetch(PORTAL_ORIGIN + '/', { method: 'GET', credentials: 'include', cache: 'no-store', redirect: 'follow' }); return true; }
+  catch { return false; }
+}
+
+async function portalRenew() {
+  let tab = null;
+  try {
+    tab = await chrome.tabs.create({ url: PORTAL_ORIGIN + '/', active: false });   // active:false — never steal the user's focus
+    await new Promise((r) => setTimeout(r, RENEW_DWELL_MS));
+    return true;
+  } catch { return false; }
+  finally { if (tab && tab.id != null) { try { await chrome.tabs.remove(tab.id); } catch {} } }
+}
+
+chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  if (!msg || (msg.type !== 'eta-portal-warm' && msg.type !== 'eta-portal-renew')) return false;
+  (async () => {
+    const ok = msg.type === 'eta-portal-warm' ? await portalWarm() : await portalRenew();
+    sendResponse({ ok, status: ok ? 200 : 0 });
+  })();
+  return true;   // async sendResponse
+});
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (!msg || msg.type !== 'eta-lead-fetch') return false;
   (async () => {
