@@ -6,13 +6,15 @@
 > Track: STANDARD · Started: 2026-07-27 (Agent OS adopted mid-project at v0.3.0) · Client: internal
 
 ## NEXT ACTION
-→ CREATE THE STAGING KV NAMESPACE, then deploy A0 to staging and open /admin against it:
-  `cd lead-worker && npx wrangler kv namespace create LEADS --env staging` — paste the printed id
-  over STAGING_KV_ID_PLACEHOLDER in wrangler.toml, `npx wrangler secret put ADMIN_TOKEN --env
-  staging`, then `npm run deploy:staging`. Needs your Cloudflare login, so it can't be automated.
-  A0 is code-complete and locally verified (18/18 smoke, 29/29 routes byte-identical vs the
-  pre-split worker) but NOTHING HAS BEEN DEPLOYED — production still runs the pre-split build.
-  The staging deploy is the first real test of the text-module rule and the environment split.
+→ DECIDE TWO THINGS so the next phase can start. Both are yours; everything unblocked is done.
+  (1) The S1/S2 planner design — architecture section presented (planner leaves the extension, jobs
+      in D1, sealed cursor for the probe conversation), never ruled on. Admin phase A2 (jobs domain)
+      cannot start without it, and A3 (patched-client detection) sits behind A2.
+  (2) Three defaults for UI simplification U1 — pressing Export with no configuration: current year
+      or last 12 months? all statuses or valid-only? both directions or received-only? These decide
+      what the one-button flow does, and a wrong default silently produces an incomplete export.
+  If you'd rather not decide yet: admin phase A1 (Cloudflare Access, roles, actor in the audit log)
+  and A6 (grouped errors, alerting) are both unblocked and need nothing from the client side.
 
 Parked (extension milestone, unchanged): USER SMOKE TEST of v0.4.1 (built + packaged: dist-package/eta-bulk-export-v0.4.1.zip). F-10..F-15 are all code-complete and unit-green (252/252)
 but NONE has been exercised against real portal data. Load the rebuilt extension and, in one
@@ -66,7 +68,8 @@ because every other phase adds code to the file it breaks up.
 
 | ID | Feature | Status | Spec | Notes |
 |---|---|---|---|---|
-| F-16 | A0 · worker platform split + env separation | TESTING | SPEC-015 | T-129..T-136 green LOCALLY. 1479-line worker.js → 91-line entry + src/** (726) + 2 html assets. Verified byte-identical on 29 routes vs pre-split. NOT DEPLOYED; staging blocked on a KV namespace only you can create |
+| F-16 | A0 · worker platform split + env separation | VALIDATED | SPEC-015 | T-129..T-136 + live staging verification. 1479-line worker.js → 91-line entry + src/** (726) + 2 html assets. DEPLOYED TO STAGING and exercised end-to-end: /admin 200 (74,580B from the text module), /privacy 200, /api/health 401, register + signed session/rin-request/bug all pass, and a duplicate RIN claim is refused 409 — the FIRST post-split test of the Locks Durable Object, which the local harness never reached (it ran without the binding, on the KV fallback). Production still runs the pre-split build |
+| F-19 | Drawer on the omarsoliman.dev design system | VALIDATED | (no spec — direct user direction) | Palette (clay & paper, dark set), all 54 font declarations tokenised, real typefaces bundled as bytes and registered via FontFace (bypasses the portal CSP — user confirmed they render), brand mark on both the header seal and the opener pill, byline. Suite 252→262. Colours are the design system UNMODIFIED by explicit decision: 11 pairs sit below WCAG AA, each pinned with its measured ratio in test/theme.test.mjs |
 | F-17 | A1 · admin identity (Cloudflare Access, roles, actor in audit) | NOT STARTED | — | unblocked by F-16 |
 | F-18 | A2 · jobs domain (D1 schema, jobs list, chunk timeline) | NOT STARTED | — | needs ADR-002 (accepted-in-principle, status proposed) + the client-side S2 planner work |
 
@@ -86,6 +89,20 @@ because every other phase adds code to the file it breaks up.
 - (resolved) refreshLicense ungated-branch rj-scan gap — fixed in F-06.
 
 ## Session log
+- 2026-08-09 · A0 DEPLOYED TO STAGING and verified live. Staging has its own KV namespace, its own
+  worker name and its own ADMIN_TOKEN — nothing shared with production. seed-staging.mjs (npm run
+  seed:staging) populates it through the real extension endpoints and doubles as the Durable Object
+  regression test; it refuses any target whose URL lacks "staging", because it writes permanent
+  records. All nine checks pass. Two traps recorded in wrangler.toml: a bare key after a [[table]]
+  header joins that table (this silently dropped the KV binding once), and --dry-run never validates
+  a namespace id — a wrong one passes the dry run and fails only on a real deploy (API error 10042).
+- 2026-08-09 · F-19: drawer moved onto the omarsoliman.dev design system across four passes. The one
+  worth remembering: bundling the real typefaces works ONLY because they are registered with
+  FontFace(name, ArrayBuffer) rather than a url() @font-face — the drawer runs in the MAIN world, so
+  a fetched font is subject to the portal CSP that already forced csp-shim.js to exist. User
+  confirmed the faces render. Also caught pre-ship: the bulk font rewrite replaced family names
+  inside the token definitions themselves (--font-ui:var(--font-ui)), a CSS cycle that would have
+  left all 54 call sites with no font-family and that nothing in 259 tests could see.
 - 2026-08-09 · A0 BUILT (F-16, SPEC-015, ADR-001, ADR-002). worker.js 1479 → 91 lines; the rest is
   src/lib/{util,kv,audit,auth}.js, src/routes/{extension,admin}.js, src/locks.js, src/assets/*.html.
   Split done MECHANICALLY (sliced, never retyped) for two reasons found first: worker.js:102 held
