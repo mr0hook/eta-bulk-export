@@ -7,9 +7,21 @@ compatibility_date = "2026-07-09"
 compatibility_flags = ["nodejs_compat"]
 
 # KV namespace "ETA_BULK_LEADS" — already created in your account (id below), bound as LEADS.
+# NOTE (TOML): every bare key must appear BEFORE the first [table] header of its section, or it
+# silently becomes a key of that table instead. `wrangler deploy --dry-run` prints the resolved
+# binding list — check LEADS is in it after editing this file.
 kv_namespaces = [
   { binding = "LEADS", id = "7d039a655c434302a5e8fcae6a5450d0" }
 ]
+
+# A0: the dashboard and privacy pages live in src/assets/*.html and are imported as text modules
+# (`import DASH from '../assets/dash.html'`). Deliberately NOT Workers Static Assets: those are served
+# by the platform ahead of the Worker, which would change who answers `/` and `/admin`. A text module
+# keeps the exact same request path as when the HTML was a template literal inside worker.js.
+[[rules]]
+type = "Text"
+globs = ["**/*.html"]
+fallthrough = true
 
 # Durable Object "Locks" — strongly-consistent, single-threaded coordination for ATOMIC RIN-ownership claims
 # and rate limiting (Cloudflare KV has no compare-and-set). Available on the Workers Free plan. The migration
@@ -37,3 +49,73 @@ enabled = true
 
 # ADMIN_TOKEN guards /admin, /api/*, and /export (via the Authorization: Bearer header). Set it once with:
 #   wrangler secret put ADMIN_TOKEN
+# Per environment:
+#   wrangler secret put ADMIN_TOKEN --env staging
+#   wrangler secret put ADMIN_TOKEN --env production
+
+# ── environments ─────────────────────────────────────────────────────────────────────────────────
+# The top-level config above stays the DEFAULT target, so a bare `wrangler deploy --env=""` hits the
+# live worker exactly as before.
+#
+# Environments do NOT inherit bindings in wrangler: kv_namespaces, rules, durable_objects, migrations
+# and triggers must be repeated under each [env.*]. That is why the blocks below look duplicated.
+#
+# ⚠ STAGING IS NOT DEPLOYABLE YET. It needs its own KV namespace, which requires your account:
+#     npx wrangler kv namespace create LEADS --env staging
+#   then paste the printed id over STAGING_KV_ID_PLACEHOLDER below. Until then a real
+#   `wrangler deploy --env staging` fails on the unresolvable namespace id — deliberately, rather than
+#   silently sharing production's data. Note `--dry-run` does NOT catch this: it bundles without
+#   contacting the account, so it reports success with the placeholder still in place.
+
+[env.staging]
+name = "eta-bulk-leads-staging"
+kv_namespaces = [
+  { binding = "LEADS", id = "STAGING_KV_ID_PLACEHOLDER" }
+]
+
+  [[env.staging.rules]]
+  type = "Text"
+  globs = ["**/*.html"]
+  fallthrough = true
+
+  [[env.staging.durable_objects.bindings]]
+  name = "LOCKS"
+  class_name = "Locks"
+
+  [[env.staging.migrations]]
+  tag = "v1"
+  new_sqlite_classes = ["Locks"]
+
+  # No cron on staging: the daily snapshot would write snap: records nobody reads. Test scheduled()
+  # with `wrangler dev --test-scheduled` instead.
+
+  [env.staging.observability]
+  enabled = true
+
+[env.production]
+name = "eta-bulk-leads"
+kv_namespaces = [
+  { binding = "LEADS", id = "7d039a655c434302a5e8fcae6a5450d0" }
+]
+
+  [[env.production.rules]]
+  type = "Text"
+  globs = ["**/*.html"]
+  fallthrough = true
+
+  [[env.production.durable_objects.bindings]]
+  name = "LOCKS"
+  class_name = "Locks"
+
+  [[env.production.migrations]]
+  tag = "v1"
+  new_sqlite_classes = ["Locks"]
+
+  [env.production.triggers]
+  crons = ["0 2 * * *"]
+
+  [env.production.observability]
+  enabled = true
+
+    [env.production.observability.logs]
+    invocation_logs = true

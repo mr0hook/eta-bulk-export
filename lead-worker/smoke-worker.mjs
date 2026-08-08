@@ -3,15 +3,14 @@
 // Covers: /register → signed /bug with+without diag (sanitize+cap) → /rin-request dedupe → sig-fail
 // error logging → /session stats max-merge + per-user message delivery (incl. locked) → trash
 // delete/restore (RIN re-claim, lostRins, 409) → scheduled() snapshot → admin reads.
-import { readFileSync, writeFileSync, unlinkSync } from 'fs';
 import { webcrypto } from 'crypto';
+import { register } from 'node:module';
 const { subtle } = webcrypto;
 
-// Node can't resolve 'cloudflare:workers' — stub the DO base class (the smoke runs the KV-fallback paths).
-const UT = new URL('./.smoke-worker-under-test.mjs', import.meta.url);
-writeFileSync(UT, readFileSync(new URL('./worker.js', import.meta.url), 'utf8')
-  .replace(/import\s*\{[^}]*\}\s*from\s*['"]cloudflare:workers['"];?/, 'const DurableObject = class { constructor(){} };'));
-const worker = (await import(UT.href)).default;
+// Node can't resolve 'cloudflare:workers' or import *.html — smoke-hooks.mjs supplies both, so the
+// whole src/ tree loads exactly as written (no text rewriting of the source under test).
+register('./smoke-hooks.mjs', import.meta.url);
+const worker = (await import(new URL('./worker.js', import.meta.url).href)).default;
 
 const store = new Map();
 const LEADS = {
@@ -115,7 +114,7 @@ try {
   const boom = await signed('/session', { rin: '123456789' }, reg.clientKey, 'dev-1');
   LEADS.get = origGet;
   check('unhandled throw → JSON 500', boom.status === 500 && (await boom.json()).error === 'server error');
-} finally { try { unlinkSync(UT); } catch {} }
+} finally { /* nothing to clean up — the source under test is imported as-is */ }
 
 console.log(fails ? 'SMOKE FAILED: ' + fails : 'SMOKE OK');
 process.exit(fails ? 1 : 0);

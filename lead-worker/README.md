@@ -34,10 +34,36 @@ cd lead-worker
 npm install                 # gets wrangler locally
 npx wrangler login          # once, opens your browser
 
-npx wrangler secret put ADMIN_TOKEN   # type a long random string (your dashboard password)
-npx wrangler deploy                   # prints your Worker URL
+npx wrangler secret put ADMIN_TOKEN --env production   # long random string (your dashboard password)
+npx wrangler deploy --env production                   # prints your Worker URL
 ```
 `deploy` prints the URL, e.g. `https://eta-bulk-leads.<your-subdomain>.workers.dev`.
+
+Always pass `--env production` (or `--env staging`). Since the environment split there are three
+possible targets and a bare `wrangler deploy` warns rather than guessing. `npm run deploy:prod`
+and `npm run deploy:staging` are the shortcuts.
+
+**Staging needs one setup step before it works** — it has no KV namespace yet:
+```bash
+npx wrangler kv namespace create LEADS --env staging   # paste the printed id into wrangler.toml
+npx wrangler secret put ADMIN_TOKEN --env staging
+```
+Until then `--env staging` deploys will fail on the placeholder id. That is deliberate: sharing
+production's namespace would defeat the point of having a staging environment.
+
+## Layout
+```
+worker.js                 entry point + router only (~90 lines)
+src/locks.js              Locks Durable Object
+src/lib/util.js           pure helpers — CORS/JSON, hashing, hex, version compare
+src/lib/kv.js             KV access — devices, prefix scans, RIN ownership, rate limits
+src/lib/audit.js          admin audit trail (180d) + extension failure log (30d)
+src/lib/auth.js           HMAC signature check, admin bearer token, email validation
+src/routes/extension.js   /register /session /rin-request /bug   (STABLE contract)
+src/routes/admin.js       /admin /privacy /api/* /export /backup
+src/assets/*.html         dashboard + privacy pages, imported as text modules
+smoke-worker.mjs          `npm run smoke` — 18 functional assertions, no wrangler needed
+```
 
 ## Wire it to the extension (fixes the "Network error")
 Open `cleanroom/src/core/registration.js`, set `LEAD_URL` to that Worker URL (no trailing slash), rebuild:

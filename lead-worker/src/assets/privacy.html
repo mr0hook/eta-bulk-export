@@ -1,0 +1,59 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>ETA Bulk Export — Privacy Policy</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<style>
+body{font:16px/1.6 system-ui,Segoe UI,Roboto,sans-serif;max-width:760px;margin:0 auto;padding:32px 20px 64px;color:#1f2733;background:#fff}
+@media(prefers-color-scheme:dark){body{background:#0e1116;color:#e9edf3}a{color:#e3a552}code{background:#1b2230}}
+h1{font-size:24px;margin:0 0 4px}h2{font-size:17px;margin:28px 0 8px}
+.sub{color:#647085;margin:0 0 24px}
+table{border-collapse:collapse;width:100%;margin:8px 0}th,td{border:1px solid #d3dbe6;padding:8px 10px;text-align:left;vertical-align:top;font-size:14px}
+@media(prefers-color-scheme:dark){th,td{border-color:#28303c}}
+code{padding:1px 5px;border-radius:4px;background:#eef1f6;font-family:ui-monospace,monospace;font-size:13px}
+.tag{display:inline-block;font:600 11px ui-monospace;padding:2px 8px;border-radius:999px;background:#e6f5ee;color:#177d54;border:1px solid #bfe3d1}
+</style></head><body>
+<h1>ETA Bulk Export — Privacy Policy</h1>
+<p class="sub">Last updated: 12 July 2026 &middot; Data controller: <b>Omar Soliman</b></p>
+
+<p>ETA Bulk Export is a Chrome extension that lets an Egyptian taxpayer bulk-export <b>their own</b> e-invoices
+and e-receipts from the Egyptian Tax Authority (ETA) portal to Excel/JSON files. This policy explains exactly
+what data the extension handles and where it goes. There are two independent data flows.</p>
+
+<h2>1. Your invoice &amp; receipt data — stays on your device <span class="tag">not sent to us</span></h2>
+<p>Your invoices, receipts and their line items are read on your device from the ETA API
+(<code>api-portal.invoicing.eta.gov.eg</code>), using the access token the ETA portal already stored in your
+browser for your own session. They are written only to a folder <b>you</b> pick on your computer. This content
+is <b>never</b> transmitted to the developer, to the backend server described below, or to any third party.</p>
+
+<h2>2. Registration &amp; account data — sent to the backend</h2>
+<p>Access to bulk export requires a free, one-time registration. Registration and the ongoing licence checks
+send the following to the developer's backend at <code>eta-bulk-leads.omsoliman95.workers.dev</code> (hosted on
+Cloudflare):</p>
+<table>
+<tr><th>When</th><th>Data</th><th>Why</th></tr>
+<tr><td>On registration</td><td>Name, email, phone, company (typed by you); your tax registration number (RIN) and taxpayer legal name (read automatically from the ETA portal); a random device identifier; the extension version.</td><td>To create your account, bind it to your RIN, and let the operator contact you about the tool.</td></tr>
+<tr><td>Automatically by the server</td><td>Your IP address and the country derived from it (via Cloudflare); the result of an email-deliverability check performed by a third-party service (Disify).</td><td>Abuse prevention (rate limiting) and rejecting invalid/disposable email addresses.</td></tr>
+<tr><td>On each licence check-in</td><td>Your RIN, the extension version, and cumulative usage counters — the number of export runs, the number of documents exported, the number of PDFs downloaded, and the time of the last export. Counts only: the contents of your invoices and receipts are never sent.</td><td>Access-control enforcement (lock, disable, require a newer version, block a voided registration number) and understanding how much the tool is used.</td></tr>
+<tr><td>If you submit a bug report</td><td>The message you type; your browser's user-agent string; the extension version; the extension's recent activity log (status messages such as "Chunk 3/12 fetching…" — never invoice or receipt contents); and a run summary (date range, chunk/row counts). The report form states this before you send.</td><td>To diagnose and fix the issue.</td></tr>
+</table>
+
+<h2>How your data is used</h2>
+<p>Registration data is used to provide managed access to the tool, to enforce the access controls above, and to
+contact you about the tool. It is <b>not</b> sold. It is processed only by the operator and the service providers
+named here (Cloudflare for hosting and storage; Disify for email validation).</p>
+
+<h2>Retention</h2>
+<p>Account records are kept until you request deletion or the account is removed by the operator. Administrative
+action logs auto-expire after 180 days. Server error logs auto-expire after 30 days. Anti-abuse counters
+expire automatically within hours.</p>
+
+<h2>Your choices &amp; rights</h2>
+<p>Registration is required only for bulk export; you can stop using the extension and request deletion of your
+account at any time. To request access to, correction of, or deletion of your data, email the developer at
+<a href="mailto:omsoliman95@gmail.com">omsoliman95@gmail.com</a>. Uninstalling the extension stops all further
+data collection.</p>
+
+<h2>Contact</h2>
+<p>Omar Soliman (data controller) &mdash; <a href="mailto:omsoliman95@gmail.com">omsoliman95@gmail.com</a>.</p>
+
+<h2>Changes</h2>
+<p>Material changes to this policy will be reflected here with an updated date above.</p>
+</body></html>

@@ -6,7 +6,15 @@
 > Track: STANDARD · Started: 2026-07-27 (Agent OS adopted mid-project at v0.3.0) · Client: internal
 
 ## NEXT ACTION
-→ USER SMOKE TEST of v0.4.1 (built + packaged: dist-package/eta-bulk-export-v0.4.1.zip). F-10..F-15 are all code-complete and unit-green (252/252)
+→ CREATE THE STAGING KV NAMESPACE, then deploy A0 to staging and open /admin against it:
+  `cd lead-worker && npx wrangler kv namespace create LEADS --env staging` — paste the printed id
+  over STAGING_KV_ID_PLACEHOLDER in wrangler.toml, `npx wrangler secret put ADMIN_TOKEN --env
+  staging`, then `npm run deploy:staging`. Needs your Cloudflare login, so it can't be automated.
+  A0 is code-complete and locally verified (18/18 smoke, 29/29 routes byte-identical vs the
+  pre-split worker) but NOTHING HAS BEEN DEPLOYED — production still runs the pre-split build.
+  The staging deploy is the first real test of the text-module rule and the environment split.
+
+Parked (extension milestone, unchanged): USER SMOKE TEST of v0.4.1 (built + packaged: dist-package/eta-bulk-export-v0.4.1.zip). F-10..F-15 are all code-complete and unit-green (252/252)
 but NONE has been exercised against real portal data. Load the rebuilt extension and, in one
 session: (1) Merge the big folder that used to fail — confirm it completes and leaves no .jsonl;
 (2) Merge again immediately — must say "Already up to date" and write nothing; (3) sync a day, merge
@@ -52,6 +60,16 @@ portal smoke + the documenttypes/LIVE_REJECT_PATH DevTools captures into the sam
 | F-14 | Period-labeled, day-aligned output | VALIDATED | SPEC-013 | T-115..T-121; period now REPORTED (log + state), not in filenames — names stay stable so increments don't rename |
 | F-15 | Streaming xlsx writer — one file, not 17 | VALIDATED | SPEC-014 | T-122..T-128; suite 245→252. Own zip+SpreadsheetML writer; 1M rows at 22MB heap; summary/details are separate single-sheet files |
 
+## Features (admin backend milestone — roadmap A0..A6)
+Roadmap: `docs/specs/2026-08-09-admin-backend-roadmap.md`. A menu, not a commitment; A0 first
+because every other phase adds code to the file it breaks up.
+
+| ID | Feature | Status | Spec | Notes |
+|---|---|---|---|---|
+| F-16 | A0 · worker platform split + env separation | TESTING | SPEC-015 | T-129..T-136 green LOCALLY. 1479-line worker.js → 91-line entry + src/** (726) + 2 html assets. Verified byte-identical on 29 routes vs pre-split. NOT DEPLOYED; staging blocked on a KV namespace only you can create |
+| F-17 | A1 · admin identity (Cloudflare Access, roles, actor in audit) | NOT STARTED | — | unblocked by F-16 |
+| F-18 | A2 · jobs domain (D1 schema, jobs list, chunk timeline) | NOT STARTED | — | needs ADR-002 (accepted-in-principle, status proposed) + the client-side S2 planner work |
+
 ## Blockers
 - none (live-verification items are post-merge follow-ups, not blockers: portal documenttypes
   capture; LIVE_REJECT_PATH capture from v0.3)
@@ -68,6 +86,18 @@ portal smoke + the documenttypes/LIVE_REJECT_PATH DevTools captures into the sam
 - (resolved) refreshLicense ungated-branch rj-scan gap — fixed in F-06.
 
 ## Session log
+- 2026-08-09 · A0 BUILT (F-16, SPEC-015, ADR-001, ADR-002). worker.js 1479 → 91 lines; the rest is
+  src/lib/{util,kv,audit,auth}.js, src/routes/{extension,admin}.js, src/locks.js, src/assets/*.html.
+  Split done MECHANICALLY (sliced, never retyped) for two reasons found first: worker.js:102 held
+  raw control chars in a regex, and the DASH literal held \n / \' / \\ escapes that only survive
+  evaluation. Verified by a throwaway parity harness driving the pre-split worker (from git) and the
+  new tree through identical KV stubs — 29 routes byte-identical, plus 18/18 smoke. The smoke harness
+  no longer rewrites its source under test; smoke-hooks.mjs supplies cloudflare:workers and .html.
+  ADR-001 chose text-module imports over Workers Static Assets (assets are served AHEAD of the
+  Worker, which would change who answers / and /admin). Caught and fixed a TOML footgun mid-work:
+  a bare key after a [[table]] header joins that table — the KV binding silently vanished from the
+  dry-run until the keys were reordered. Staging env added but NOT usable until you create its KV
+  namespace. Nothing deployed.
 - 2026-08-09 · Anti-tamper direction explored (no code changes). Findings: the current cheapest
   bypass needs no patching at all — `reg_verdict` is hand-editable localStorage and `graceVerdict`
   (registration.js:150) honours it whenever the worker is unreachable. Direction agreed so far:
