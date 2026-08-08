@@ -1,13 +1,17 @@
-// Contrast guard for the drawer's theme tokens (both themes).
+// Contrast record for the drawer's theme tokens (both themes).
 //
-// The palette comes from the omarsoliman.dev design system, but a design system built for an
-// editorial website is not automatically legible in a dense operational drawer: the site's own
-// ink-4 and clay-5 both fail WCAG AA at the sizes this UI uses them. This test pins the ratios so
-// a future palette edit cannot quietly regress legibility — which is exactly what had happened to
-// --dim before the retheme (3.55 dark / 2.98 light, shipped).
+// The palette is the omarsoliman.dev design system, used UNMODIFIED — brand fidelity was chosen
+// over contrast adjustment by explicit decision. Eleven pairs land below WCAG AA as a result.
 //
-// Thresholds: 4.5 for anything rendering text (the drawer's labels run 9-13px, so the large-text
-// exemption never applies), 3.0 for purely decorative/­structural pairs.
+// This test does NOT quietly accept them. Each one is listed in ACCEPTED with the ratio it actually
+// measures, so:
+//   * a token edit that changes any of those ratios fails the test rather than drifting silently;
+//   * every pair NOT listed must still clear its floor;
+//   * a pair that gets fixed must be removed from the list — the test rejects entries that now pass,
+//     so ACCEPTED can never become stale cover for a value nobody re-checked.
+//
+// Floors: 4.5 for anything rendering text (drawer labels run 9-13px, so the large-text exemption
+// never applies), 3.0 for non-text UI that conveys state.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -37,17 +41,16 @@ const ratio = (a, b) => {
   return (x + 0.05) / (y + 0.05);
 };
 
-const DARK = tokens(':host{ all:initial;');
-const LIGHT = tokens(':host([data-theme=light]){');
+const THEMES = { dark: tokens(':host{ all:initial;'), light: tokens(':host([data-theme=light]){') };
 
-// [foreground, background, min, what it is]
+// [foreground, background, floor, what it is]
 const PAIRS = [
   ['--text', '--bg', 4.5, 'body text on the drawer'],
   ['--text', '--bg2', 4.5, 'text inside inputs and chips'],
   ['--text', '--bg-hd', 4.5, 'wordmark on the header'],
   ['--muted', '--bg', 4.5, 'secondary text'],
-  ['--dim', '--bg', 4.5, 'micro-labels — the token that was failing before the retheme'],
-  ['--dim', '--bg-hd', 4.5, 'the .tag line under the wordmark'],
+  ['--dim', '--bg', 4.5, 'micro-labels, incl. the omarsoliman.dev byline'],
+  ['--dim', '--bg-hd', 4.5, 'the byline line under the wordmark'],
   ['--gold', '--bg', 4.5, 'accent text (caps, step numerals)'],
   ['--gold', '--gold-chip', 4.5, 'step numeral on its chip'],
   ['--on-gold', '--gold', 4.5, 'primary button label, gradient bottom'],
@@ -62,29 +65,76 @@ const PAIRS = [
   ['--teal', '--bg', 3.0, 'progress fill — conveys run state, so 1.4.11 applies'],
   // Deliberately NOT asserted: --line / --line2 / --line3. Hairline borders are decorative in this
   // palette (and in the source design system), and --line3 is used in exactly one place —
-  // .btn:hover border-color (drawer.js:106). A button stays identifiable by its own fill and
-  // resting border without it, so 1.4.11's 3:1 does not attach to the hover accent. Asserting it
-  // would have forced a heavier border than either design intends.
+  // .btn:hover border-color. A button stays identifiable by its fill and resting border without it.
 ];
 
-for (const [themeName, T] of [['dark', DARK], ['light', LIGHT]]) {
-  test(`${themeName} theme — every token pair meets its contrast floor`, () => {
+// Below-AA pairs accepted by explicit decision, with the ratio each actually measures.
+// The light theme carries most of them: a paper palette built for an editorial website puts
+// mid-tone terracotta under cream text, which is a marketing-page move, not a dense-UI one.
+const ACCEPTED = {
+  'dark --dim on --bg': 3.70,        // ink-4 on paper-0
+  'dark --dim on --bg-hd': 3.43,
+  'light --dim on --bg': 3.05,
+  'light --dim on --bg-hd': 3.24,
+  'light --gold on --bg': 3.87,      // clay-5 as accent text
+  'light --gold on --gold-chip': 3.32,
+  'light --on-gold on --gold': 4.10, // cream on clay-5 — the site's own primary button
+  'light --on-gold on --gold2': 2.60,// cream on clay-4, the gradient's top. The worst pair here.
+  'light --ok on --ok-bg': 4.18,     // green-6 on green-2
+  'light --err on --err-bg': 4.43,   // red-6 on red-2
+  'light --warn-tx on --warn-bg': 3.96, // amber-6 on amber-2
+};
+
+for (const [theme, T] of Object.entries(THEMES)) {
+  test(`${theme} theme — unlisted pairs clear their floor`, () => {
     const failures = [];
-    for (const [fg, bg, min, what] of PAIRS) {
-      assert.ok(T[fg], `${themeName}: missing ${fg}`);
-      assert.ok(T[bg], `${themeName}: missing ${bg}`);
+    for (const [fg, bg, floor, what] of PAIRS) {
+      assert.ok(T[fg], `${theme}: missing ${fg}`);
+      assert.ok(T[bg], `${theme}: missing ${bg}`);
+      if (`${theme} ${fg} on ${bg}` in ACCEPTED) continue;
       const r = ratio(T[fg], T[bg]);
-      if (r < min) failures.push(`  ${fg} (${T[fg]}) on ${bg} (${T[bg]}) = ${r.toFixed(2)}, need ${min} — ${what}`);
+      if (r < floor) failures.push(`  ${fg} (${T[fg]}) on ${bg} (${T[bg]}) = ${r.toFixed(2)}, need ${floor} — ${what}`);
     }
-    assert.equal(failures.length, 0, `${themeName} contrast failures:\n${failures.join('\n')}`);
+    assert.equal(failures.length, 0, `${theme} contrast failures:\n${failures.join('\n')}`);
   });
 }
 
-test('the retheme actually landed — palette is the warm clay-and-paper set', () => {
-  assert.equal(DARK['--bg'], '#1a1712', 'dark surface should be paper-0 dark');
-  assert.equal(DARK['--text'], '#f0eadb', 'dark text should be ink-1 dark');
-  assert.equal(DARK['--gold'], '#e08358', 'dark accent should be clay');
-  assert.equal(LIGHT['--bg'], '#faf6ee', 'light surface should be paper-0');
+test('accepted below-AA pairs still measure exactly what was signed off', () => {
+  const drift = [];
+  for (const [key, expected] of Object.entries(ACCEPTED)) {
+    const [theme, fg, , bg] = key.split(' ');
+    const T = THEMES[theme];
+    const actual = ratio(T[fg], T[bg]);
+    if (Math.abs(actual - expected) > 0.02) {
+      drift.push(`  ${key}: recorded ${expected}, now ${actual.toFixed(2)} — update the record or revert the token`);
+    }
+  }
+  assert.equal(drift.length, 0, `accepted-pair drift:\n${drift.join('\n')}`);
+});
+
+test('the accepted list contains nothing that now passes', () => {
+  // Stops ACCEPTED from outliving the problem it documents.
+  const stale = [];
+  for (const key of Object.keys(ACCEPTED)) {
+    const [theme, fg, , bg] = key.split(' ');
+    const floor = (PAIRS.find(([f, b]) => f === fg && b === bg) || [, , 4.5])[2];
+    if (ratio(THEMES[theme][fg], THEMES[theme][bg]) >= floor) stale.push('  ' + key + ' now clears its floor — remove it');
+  }
+  assert.equal(stale.length, 0, `stale exemptions:\n${stale.join('\n')}`);
+});
+
+test('the palette is the design system, unmodified', () => {
+  const D = THEMES.dark, L = THEMES.light;
+  assert.equal(D['--bg'], '#1a1712', 'dark surface = paper-0 dark');
+  assert.equal(D['--text'], '#f0eadb', 'dark text = ink-1 dark');
+  assert.equal(D['--dim'], '#7a715c', 'dark faint = ink-4 dark, unadjusted');
+  assert.equal(D['--gold'], '#e08358', 'dark accent = clay dark');
+  assert.equal(L['--bg'], '#faf6ee', 'light surface = paper-0');
+  assert.equal(L['--dim'], '#968d78', 'light faint = ink-4, unadjusted');
+  assert.equal(L['--gold'], '#c2603b', 'light accent = clay-5, unadjusted');
+  assert.equal(L['--ok'], '#2e7b4f', 'green-6, unadjusted');
+  assert.equal(L['--err'], '#b23f2e', 'red-6, unadjusted');
+  assert.equal(L['--warn-tx'], '#95680f', 'amber-6, unadjusted');
   assert.ok(!SRC.includes('#151a21'), 'the old cool-slate surface should be gone');
   assert.ok(!SRC.includes('#e3a552'), 'the old amber accent should be gone');
 });
@@ -96,13 +146,13 @@ test('the light theme stays opt-in — the drawer defaults to dark', () => {
   assert.match(SRC.slice(SRC.indexOf(':host{ all:initial;')), /^:host\{ all:initial;[\s\S]{0,2000}?--scheme:dark/);
 });
 
-test('the byline is RTL-safe', () => {
-  const i = SRC.indexOf('.by{');
-  assert.ok(i > -1, '.by rule missing');
+test('the byline is RTL-safe and not translated', () => {
+  assert.ok(SRC.includes('<div class="tag">omarsoliman.dev</div>'), 'byline markup missing');
+  assert.ok(!SRC.includes('data-i18n="ui.tag"'), 'the byline must not be swapped by the translator');
+  const i = SRC.indexOf('.tag{');
   const rule = SRC.slice(i, SRC.indexOf('}', i));
   // A Latin domain inside an Arabic RTL header must be bidi-isolated or it reorders on screen.
-  assert.match(rule, /direction:ltr/, '.by must pin LTR');
-  assert.match(rule, /unicode-bidi:isolate/, '.by must isolate from surrounding RTL');
-  assert.match(rule, /margin-inline-start/, '.by must use a logical margin so it flips with dir');
-  assert.doesNotMatch(rule, /text-transform:uppercase/, 'uppercase + tracking breaks Arabic joining');
+  assert.match(rule, /direction:ltr/, '.tag must pin LTR');
+  assert.match(rule, /unicode-bidi:isolate/, '.tag must isolate from surrounding RTL');
+  assert.doesNotMatch(rule, /text-transform:uppercase/, 'a domain is a name, not a label');
 });

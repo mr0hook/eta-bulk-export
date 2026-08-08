@@ -27,12 +27,12 @@ const CSS = `
   /* Theme palette — omarsoliman.dev "clay & paper", dark set. The drawer stays dark on purpose: it is
      injected into the ETA portal's white SPA and has to read as a separate instrument, so the site's
      LIGHT paper palette is used only for the opt-in light theme below. data-theme flips the set.
-     Two values deviate from the source system, both for contrast — see test/theme.test.mjs:
-       --dim  the site's ink-4 (#7A715C) scores 3.70 on this background; AA needs 4.5 at 10-11px.
-       light --gold  the site's clay-5 (#C2603B) under cream text scores 4.10; clay-6 scores 5.89. */
+     Values are the design system's, UNMODIFIED — by explicit decision, brand fidelity over the
+     contrast nudges an earlier pass applied. Three pairs land below WCAG AA as a result; they are
+     measured and pinned in test/theme.test.mjs rather than silently accepted. */
   --bg:#1a1712; --bg2:#131008; --bg3:#0d0b06; --bg-hd:#221e17; --bg-ft:#151209; --bg-hov:#2b261d;
   --line:#3b3527; --line2:#2b261d; --line3:#564e3a;
-  --text:#f0eadb; --muted:#a39a84; --dim:#8e8571; --gate-sub:#d6b98a;
+  --text:#f0eadb; --muted:#a39a84; --dim:#7a715c; --gate-sub:#d6b98a;
   --gold:#e08358; --gold2:#ec9a74; --gold-bd:#c2603b; --on-gold:#1a1712; --gold-chip:#3a2a20;
   --teal:#8fae97; --ok:#7cbe96; --ok-bd:#2c4a38; --ok-bg:#24342a; --err:#e08a7b; --err-bd:#4e312b; --err-bg:#3d241f;
   --info-bg:#27332b; --info-tx:#8fae97; --warn-bg:#3c321a; --warn-tx:#d9b05e;
@@ -44,13 +44,10 @@ const CSS = `
 :host([data-theme=light]){
   --bg:#faf6ee; --bg2:#fffdf7; --bg3:#f2ebdd; --bg-hd:#fffdf7; --bg-ft:#f2ebdd; --bg-hov:#e7dec9;
   --line:#e3dac6; --line2:#efe8d8; --line3:#c9bea3;
-  --text:#231f18; --muted:#6b6453; --dim:#776e5b; --gate-sub:#7c381f;
-  --gold:#7c381f; --gold2:#a04a2a; --gold-bd:#6a2f1a; --on-gold:#fffdf7; --gold-chip:#f4e2d6;
-  /* The three status foregrounds are the design system's green-6 / red-6 / amber-6 darkened by a
-     few percent. On their own soft backgrounds the source values land at 4.18 / 4.43 / 3.96 — just
-     under AA, and these render 11px chip text. Nudged to 4.52 each; see test/theme.test.mjs. */
-  --teal:#44685a; --ok:#2c754b; --ok-bd:#c4dcc9; --ok-bg:#ddebdb; --err:#b03e2e; --err-bd:#e8c9bf; --err-bg:#f4ddd4;
-  --info-bg:#e2e9e0; --info-tx:#2f4f41; --warn-bg:#f3e6c2; --warn-tx:#89600e;
+  --text:#231f18; --muted:#6b6453; --dim:#968d78; --gate-sub:#7c381f;
+  --gold:#c2603b; --gold2:#dd8b62; --gold-bd:#a04a2a; --on-gold:#fffdf7; --gold-chip:#f4e2d6;
+  --teal:#44685a; --ok:#2e7b4f; --ok-bd:#c4dcc9; --ok-bg:#ddebdb; --err:#b23f2e; --err-bd:#e8c9bf; --err-bg:#f4ddd4;
+  --info-bg:#e2e9e0; --info-tx:#2f4f41; --warn-bg:#f3e6c2; --warn-tx:#95680f;
   --focus:rgba(160,74,42,.22); --focus2:rgba(160,74,42,.22); --scrim:rgba(35,31,24,.28); --mscrim:rgba(35,31,24,.45);
   --shadow:0 18px 40px -14px rgba(35,31,24,.22); --glow:0 6px 16px -6px rgba(160,74,42,.35); --seg-shadow:0 2px 8px rgba(35,31,24,.12);
   --scheme:light }
@@ -74,11 +71,11 @@ const CSS = `
 .seal{ width:32px;height:32px;border-radius:var(--r);display:grid;place-items:center;color:var(--on-gold);background:linear-gradient(160deg,var(--gold2),var(--gold)) }
 .seal svg{ width:17px;height:17px }
 .wm{ font:700 18px/1 system-ui }
-/* Byline. direction/unicode-bidi keep the Latin domain intact inside the Arabic RTL header, and
-   margin-inline-start flips with it. Deliberately NOT uppercase + tracked like the site's micro-labels:
-   letter-spacing breaks Arabic cursive joining, and this line sits in a bilingual header. */
-.by{ font:600 9px/1 ui-monospace; letter-spacing:.04em; color:var(--gold); margin-inline-start:7px;
-  vertical-align:2px; direction:ltr; unicode-bidi:isolate; white-space:nowrap } .tag{ font:600 9px/1 ui-monospace; letter-spacing:.16em; text-transform:uppercase; color:var(--dim); margin-top:3px }
+/* Byline, sitting where the old translated tag line used to. direction/unicode-bidi keep the Latin
+   domain intact inside the Arabic RTL header. Not uppercased: a domain is a name, and this line is
+   no longer a translated label — the text is fixed in both languages, so it carries no data-i18n. */
+.tag{ font:600 9px/1 ui-monospace; letter-spacing:.09em; color:var(--dim); margin-top:3px;
+  direction:ltr; unicode-bidi:isolate; white-space:nowrap }
 .x{ background:transparent;border:0;color:var(--muted);font-size:20px;cursor:pointer;padding:4px 8px;border-radius:var(--r-sm) } .x:hover{ background:var(--bg-hov);color:var(--text) }
 .chip{ display:inline-flex;align-items:center;gap:6px;padding:4px 9px;border-radius:999px;font:600 11px/1 ui-monospace;border:1px solid var(--line);color:var(--muted);background:var(--bg2) }
 .chip .dot{ width:6px;height:6px;border-radius:50%;background:currentColor }
@@ -194,7 +191,7 @@ export function mountUI() {
     <aside class="drawer" id="drawer" dir="ltr" role="dialog" aria-modal="true" aria-label="ETA Bulk Export">
       <header class="hd">
         <div class="hd-top">
-          <div class="brand"><div class="seal">${SEAL}</div><div><div class="wm">ETA&nbsp;Bulk<span class="by">by omarsoliman.dev</span></div><div class="tag" data-i18n="ui.tag">export console</div></div></div>
+          <div class="brand"><div class="seal">${SEAL}</div><div><div class="wm">ETA&nbsp;Bulk</div><div class="tag">omarsoliman.dev</div></div></div>
           <div style="display:flex;align-items:center;gap:8px"><span class="chip" id="tok"><span class="dot"></span><span class="num">—</span></span><button class="x" id="langBtn" data-i18n-title="ui.langTitle" title="العربية / English" aria-label="Language" style="font-size:13px;font-weight:700">ع</button><button class="x" id="themeBtn" data-i18n-title="ui.themeTitle" title="Light / dark theme" aria-label="Toggle theme" style="font-size:15px">🌙</button><button class="x" id="close" aria-label="Close">×</button></div>
         </div>
         <div class="src" id="srcrow">

@@ -94,7 +94,6 @@ export const EN = {
   'reg.serverError': 'Server error ({status}).',
   'reg.storageBlocked': 'Registered on the server, but this browser blocked local storage. Turn off private/incognito mode or allow site data for the ETA portal, then retry.',
   // ── drawer chrome ──
-  'ui.tag': 'export console',
   'ui.invoices': 'Invoices',
   'ui.receipts': 'Receipts',
   'ui.capDocs': 'Documents · cap <b>10,000</b>/search',
@@ -325,7 +324,6 @@ export const AR = {
   'reg.unreachable': 'تعذّر الوصول إلى خادم التسجيل ({err}). أعد المحاولة لاحقًا.',
   'reg.serverError': 'خطأ من الخادم ({status}).',
   'reg.storageBlocked': 'تم التسجيل على الخادم، لكن المتصفح منع التخزين المحلي. أوقف وضع التصفح الخفي أو اسمح ببيانات الموقع لبوابة الضرائب ثم أعد المحاولة.',
-  'ui.tag': 'وحدة التصدير',
   'ui.invoices': 'الفواتير',
   'ui.receipts': 'الإيصالات',
   'ui.capDocs': 'المستندات · الحد <b>10,000</b>/استعلام',
