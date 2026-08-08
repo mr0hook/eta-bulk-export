@@ -22,6 +22,19 @@ const PART_SUM = 12000, PART_LINE = 60000;
 const TEMP_RE = /^e(Invoices|Receipts)_COMBINED_.*\.jsonl$/i;   // scratch only — never a deliverable
 const FLUSH_CHARS = 1 << 20;                                    // batch scratch writes ~1MB at a time
 
+// SPEC-013 — the issue-date column, identical in the invoice and receipt schemas. Used only to
+// label parts; if the user excluded it, parts fall back to numbers and nothing else changes.
+const DATE_COL = 'تاريخ الإصدار';
+// How far past a cap a part may run to avoid cutting one day across two files. Bounded, because the
+// cap exists to keep a part inside browser memory (F-10) and a single huge day must not defeat it.
+const DAY_OVERFLOW = 1.5;
+// dateEg() shifts the instant so it reads as Cairo wall-clock, so the UTC date IS the Cairo day.
+const dayOf = (v) => {
+  if (v instanceof Date && !isNaN(v)) return v.toISOString().slice(0, 10);
+  const m = /^(\d{4}-\d{2}-\d{2})/.exec(String(v ?? ''));
+  return m ? m[1] : null;
+};
+
 const uuidKeyOf = (hdr) => hdr.includes(UUID) ? UUID : (hdr.find((h) => typeof h === 'string' && (h.indexOf('إلكترون') >= 0 || /^uuid$/i.test(h.trim()))) || UUID);
 const addCols = (into, hdr) => { for (const h of hdr) if (h != null && h !== '' && !into.includes(h)) into.push(h); };
 const toObj = (hdr, vals) => { const o = {}; for (let i = 0; i < hdr.length; i++) { const h = hdr[i]; if (h != null && h !== '') o[h] = vals[i]; } return o; };
@@ -30,7 +43,10 @@ const nfcHdr = (arr) => arr.map((h) => (typeof h === 'string' ? h.normalize('NFC
 
 export async function mergeFolder(ExcelJS, dir, { onStatus = () => {}, partSum = PART_SUM, partLine = PART_LINE } = {}) {
   if (!ExcelJS) { onStatus(t('merge.noExcel')); return; }
-  const files = (await listFiles(dir, /^e(Invoices|Receipts)_.*\.xlsx$/i)).filter((n) => !/COMBINED/i.test(n));
+  // Sorted so parts come out in roughly chronological order: chunk filenames embed the date label,
+  // so name order tracks date order within a run. SPEC-013's period labels are only meaningful if
+  // consecutive parts cover consecutive ranges rather than interleaving.
+  const files = (await listFiles(dir, /^e(Invoices|Receipts)_.*\.xlsx$/i)).filter((n) => !/COMBINED/i.test(n)).sort();
   if (!files.length) { onStatus(t('merge.noFiles')); return; }
   // Sweep scratch files an earlier run left behind. Pre-fix versions only unlinked the temp on the happy
   // path, so a crashed merge stranded a multi-GB .jsonl in the user's export folder for good.
@@ -121,6 +137,7 @@ async function runMerge(ExcelJS, dir, { onStatus, partSum, partLine, prefix, fil
     const parts = base ? [...base.parts] : [];
     let part = 0, serial = base ? base.nextSerial : 1;
     let wb = null, ws0 = null, ws1 = null, curSum = 0, curLine = 0, dirty = false;
+    let curFrom = null, curTo = null, curName = null;   // SPEC-013: the period this part covers
 
     // Incremental: reopen the last part and keep filling it, so a small increment rewrites one file
     // instead of the whole set. Earlier parts are never opened.
@@ -131,12 +148,14 @@ async function runMerge(ExcelJS, dir, { onStatus, partSum, partLine, prefix, fil
       ws0 = wb.worksheets[0]; ws1 = wb.worksheets[1];
       ws0.views = [RTL]; ws1.views = [RTL];   // re-apply rather than trust a load/save round-trip
       part = parts.length; curSum = last.sum; curLine = last.line; dirty = false;
+      curFrom = last.from || null; curTo = last.to || null; curName = last.name;
     };
     const newPart = () => {
       part++; wb = new ExcelJS.Workbook();
       ws0 = wb.addWorksheet(sheetNames.s0 || 'Summary', { views: [RTL] });
       ws1 = wb.addWorksheet(sheetNames.s1 || 'Details', { views: [RTL] });
       ws0.addRow(sumCols); ws1.addRow(lineCols); curSum = 0; curLine = 0; dirty = false;
+      curFrom = null; curTo = null; curName = null;
     };
     const flush = async () => {
       // An already-full part gets reopened and then immediately spilled past — rewriting it would
@@ -144,20 +163,36 @@ async function runMerge(ExcelJS, dir, { onStatus, partSum, partLine, prefix, fil
       if (wb && !dirty) { wb = null; ws0 = null; ws1 = null; return; }
       if (!wb || curSum === 0) return;
       const buf = await wb.xlsx.writeBuffer();
-      const nm = ms.combinedName(prefix, part);
+      const taken = new Set(parts.filter((p, i) => i !== part - 1).map((p) => p.name));
+      const nm = ms.combinedName(prefix, part, curFrom, curTo, taken);
       await writeBlob(dir, nm, new Blob([buf], { type: XLSX_MIME }));
-      const rec = { name: nm, sum: curSum, line: curLine };
+      // Topping up the last part can widen its period and so change its name. Drop the old file, or
+      // the folder ends up with two copies of the same part under two different date ranges.
+      if (curName && curName !== nm) { try { await remove(dir, curName); } catch {} }
+      const rec = { name: nm, sum: curSum, line: curLine, from: curFrom, to: curTo };
       if (parts.length >= part) parts[part - 1] = rec; else parts.push(rec);
-      wb = null; ws0 = null; ws1 = null;   // drop the part's object model before the next one is built
-      onStatus(t('merge.phase2', { name: nm }));
+      wb = null; ws0 = null; ws1 = null;
+      onStatus(curFrom ? t('merge.phase2Period', { name: nm, from: curFrom, to: curTo, sum: curSum, line: curLine })
+                       : t('merge.phase2', { name: nm }));
     };
     const emit = async (rec) => {
       if (!rec || !rec.sum) return;
+      const day = dayOf(rec.sum[DATE_COL]);
       if (!wb) { if (parts.length) await reopenLast(); else newPart(); }
-      if (curSum >= partSum || curLine >= partLine) { await flush(); newPart(); }
+      if (curSum >= partSum || curLine >= partLine) {
+        // Don't cut a single day across two files: a record belonging to the day this part already
+        // ends on stays here, so every part's period is a clean, non-overlapping range. Bounded by
+        // DAY_OVERFLOW so one enormous day can't blow the memory cap the split exists to enforce.
+        const hard = curSum >= partSum * DAY_OVERFLOW || curLine >= partLine * DAY_OVERFLOW;
+        if (hard || !day || day !== curTo) {
+          if (curTo) onStatus(t('merge.split', { at: curTo, sum: curSum, line: curLine }));
+          await flush(); newPart();
+        }
+      }
       const s = { ...rec.sum, [SERIAL]: serial++ };
       ws0.addRow(sumCols.map((c) => s[c] ?? '')); curSum++; dirty = true;
       for (const l of rec.lines || []) { ws1.addRow(lineCols.map((c) => l[c] ?? '')); curLine++; }
+      if (day) { if (!curFrom || day < curFrom) curFrom = day; if (!curTo || day > curTo) curTo = day; }
     };
     for await (const line of readLines(dir, jsonl)) { if (line.trim()) { let rec; try { rec = JSON.parse(line); } catch {} if (rec) await emit(rec); } }
     await flush();

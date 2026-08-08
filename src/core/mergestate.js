@@ -7,9 +7,19 @@ import { readText, writeText, listFiles } from './fs.js';
 export const STATE = 'eta_merge_state.json';
 const V = 1;
 
-export const combinedName = (prefix, part) => (part <= 1 ? `${prefix}_COMBINED.xlsx` : `${prefix}_COMBINED_part${part}.xlsx`);
-// Pre-SPEC-012 output: every merge minted a NEW dated set and abandoned the last one.
-export const DATED_RE = /^e(Invoices|Receipts)_COMBINED_\d{4}-.*\.xlsx$/i;
+// SPEC-013: a part is named for the period it covers, so the folder says what is in each file
+// without opening any of them. Falls back to part numbers when the issue-date column was excluded.
+// `taken` disambiguates the case where two parts cover the same single day (a day bigger than one
+// part's cap), which would otherwise collide on one filename.
+export function combinedName(prefix, part, from, to, taken) {
+  if (!from || !to) return part <= 1 ? `${prefix}_COMBINED.xlsx` : `${prefix}_COMBINED_part${part}.xlsx`;
+  const base = `${prefix}_COMBINED_${from}_${to}.xlsx`;
+  if (!taken || !taken.has(base)) return base;
+  return `${prefix}_COMBINED_${from}_${to}_p${part}.xlsx`;
+}
+// Pre-SPEC-012 output: every merge minted a NEW timestamp-stamped set and abandoned the last one.
+// Anchored on the ISO timestamp shape (…T14-55-21-919Z) so SPEC-013's period names never match.
+export const DATED_RE = /^e(Invoices|Receipts)_COMBINED_\d{4}-\d{2}-\d{2}T[\d-]+Z(_part\d+)?\.xlsx$/i;
 
 export async function readState(dir) {
   try {
