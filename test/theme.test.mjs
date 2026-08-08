@@ -49,9 +49,9 @@ const PAIRS = [
   ['--text', '--bg2', 4.5, 'text inside inputs and chips'],
   ['--text', '--bg-hd', 4.5, 'wordmark on the header'],
   ['--muted', '--bg', 4.5, 'secondary text'],
-  ['--dim', '--bg', 4.5, 'micro-labels, incl. the omarsoliman.dev byline'],
-  ['--dim', '--bg-hd', 4.5, 'the byline line under the wordmark'],
+  ['--dim', '--bg', 4.5, 'micro-labels — field labels, stat keys, hints'],
   ['--gold', '--bg', 4.5, 'accent text (caps, step numerals)'],
+  ['--gold', '--bg-hd', 4.5, 'the omarsoliman.dev byline in the header'],
   ['--gold', '--gold-chip', 4.5, 'step numeral on its chip'],
   ['--on-gold', '--gold', 4.5, 'primary button label, gradient bottom'],
   ['--on-gold', '--gold2', 4.5, 'primary button label, gradient top'],
@@ -73,10 +73,10 @@ const PAIRS = [
 // mid-tone terracotta under cream text, which is a marketing-page move, not a dense-UI one.
 const ACCEPTED = {
   'dark --dim on --bg': 3.70,        // ink-4 on paper-0
-  'dark --dim on --bg-hd': 3.43,
   'light --dim on --bg': 3.05,
-  'light --dim on --bg-hd': 3.24,
   'light --gold on --bg': 3.87,      // clay-5 as accent text
+  'light --gold on --bg-hd': 4.10,   // the byline. In DARK it measures 5.97 and needs no exemption —
+                                     // moving it off --dim improved it from 3.43.
   'light --gold on --gold-chip': 3.32,
   'light --on-gold on --gold': 4.10, // cream on clay-5 — the site's own primary button
   'light --on-gold on --gold2': 2.60,// cream on clay-4, the gradient's top. The worst pair here.
@@ -155,4 +155,6 @@ test('the byline is RTL-safe and not translated', () => {
   assert.match(rule, /direction:ltr/, '.tag must pin LTR');
   assert.match(rule, /unicode-bidi:isolate/, '.tag must isolate from surrounding RTL');
   assert.doesNotMatch(rule, /text-transform:uppercase/, 'a domain is a name, not a label');
+  assert.match(rule, /color:var\(--gold\)/, 'the byline carries the brand accent, not --dim');
+  assert.doesNotMatch(rule, /ui-monospace/, 'the byline is a signature, not a mono field label');
 });

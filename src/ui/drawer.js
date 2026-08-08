@@ -71,10 +71,16 @@ const CSS = `
 .seal{ width:32px;height:32px;border-radius:var(--r);display:grid;place-items:center;color:var(--on-gold);background:linear-gradient(160deg,var(--gold2),var(--gold)) }
 .seal svg{ width:17px;height:17px }
 .wm{ font:700 18px/1 system-ui }
-/* Byline, sitting where the old translated tag line used to. direction/unicode-bidi keep the Latin
-   domain intact inside the Arabic RTL header. Not uppercased: a domain is a name, and this line is
-   no longer a translated label — the text is fixed in both languages, so it carries no data-i18n. */
-.tag{ font:600 9px/1 ui-monospace; letter-spacing:.09em; color:var(--dim); margin-top:3px;
+/* Byline, sitting where the old translated tag line used to. Carries the brand accent rather than
+   --dim, and the design system's display stack rather than the 9px mono the other micro-labels use
+   — it is a signature, not a field label, so it does not follow their convention. (The webfont
+   itself will not load under the portal's CSS policy; the stack degrades to system-ui, which is
+   what every other line in this drawer already renders in.)
+   direction/unicode-bidi keep the Latin domain intact inside the Arabic RTL header. Not uppercased:
+   a domain is a name, and this line is no longer a translated label — the text is fixed in both
+   languages, so it carries no data-i18n. */
+.tag{ font:600 11px/1 'Bricolage Grotesque','Avenir Next','Segoe UI',system-ui,sans-serif;
+  letter-spacing:.01em; color:var(--gold); margin-top:4px;
   direction:ltr; unicode-bidi:isolate; white-space:nowrap }
 .x{ background:transparent;border:0;color:var(--muted);font-size:20px;cursor:pointer;padding:4px 8px;border-radius:var(--r-sm) } .x:hover{ background:var(--bg-hov);color:var(--text) }
 .chip{ display:inline-flex;align-items:center;gap:6px;padding:4px 9px;border-radius:999px;font:600 11px/1 ui-monospace;border:1px solid var(--line);color:var(--muted);background:var(--bg2) }
