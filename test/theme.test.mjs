@@ -43,6 +43,15 @@ const ratio = (a, b) => {
 
 const THEMES = { dark: tokens(':host{ all:initial;'), light: tokens(':host([data-theme=light]){') };
 
+// The CSS template literal with /* comments */ stripped. Scans for hardcoded font families and for
+// url()-based @font-face must look at rules only — the comments in that block legitimately discuss
+// both, and matching them made three earlier versions of these tests fail on their own prose.
+const CSS_CODE = (() => {
+  const a = SRC.indexOf('const CSS = `');
+  const css = SRC.slice(a, SRC.indexOf('`;', a));
+  return css.replace(/\/\*[\s\S]*?\*\//g, '');
+})();
+
 // [foreground, background, floor, what it is]
 const PAIRS = [
   ['--text', '--bg', 4.5, 'body text on the drawer'],
@@ -139,11 +148,50 @@ test('the palette is the design system, unmodified', () => {
   assert.ok(!SRC.includes('#e3a552'), 'the old amber accent should be gone');
 });
 
+test('font tokens resolve — no self-reference, every stack ends in a system fallback', () => {
+  // A bulk rewrite of font declarations once replaced the family names INSIDE these very
+  // definitions, producing --font-ui:var(--font-ui). CSS treats that cycle as invalid at
+  // computed-value time, so every one of the ~54 call sites silently lost its font-family.
+  // Nothing else in the suite parses custom-property cycles, so this is the only guard.
+  const decls = [...CSS_CODE.matchAll(/(--font-[\w-]+)\s*:\s*([^;}]+)[;}]/g)].map(([, k, v]) => [k, v.trim()]);
+  assert.ok(decls.length >= 3, 'expected the ui / mono / ar font tokens');
+  for (const [k, v] of decls) {
+    assert.ok(!v.includes(`var(${k})`), `${k} refers to itself: ${v}`);
+    // A token may alias another token (the RTL block points --font-ui at --font-ar); anything else
+    // is a real stack and must bottom out in a generic family so a failed load still renders.
+    if (/^var\(--font-[\w-]+\)$/.test(v)) continue;
+    assert.match(v, /(sans-serif|monospace|serif)\s*$/, `${k} must end in a generic family: ${v}`);
+  }
+  const names = decls.map(([k]) => k);
+  for (const need of ['--font-ui', '--font-mono', '--font-ar']) assert.ok(names.includes(need), 'missing ' + need);
+});
+
+test('every font declaration goes through a token — none hardcode a family', () => {
+  const body = CSS_CODE.replace(/--font-[\w-]+\s*:[^;}]+[;}]/g, '');   // token definitions are the exception
+  for (const bad of ['system-ui', 'ui-monospace', 'Bricolage', 'IBM Plex']) {
+    assert.ok(!body.includes(bad), `"${bad}" is hardcoded in a rule — it belongs in a --font-* token`);
+  }
+});
+
+test('the bundled faces are registered from bytes, never fetched', () => {
+  // A url()-based @font-face would be subject to the ETA portal's CSP; FontFace(name, ArrayBuffer)
+  // performs no fetch. If this ever regresses to a URL the fonts stop loading on the live portal
+  // while still working in any local test page — a failure that only shows up in production.
+  assert.match(SRC, /new FontFace\([^)]*bytes\.buffer/, 'faces must be constructed from an ArrayBuffer');
+  assert.ok(!CSS_CODE.includes('@font-face'), 'no url()-based @font-face — the portal CSP would block it');
+  assert.match(SRC, /installFonts\(\);/, 'installFonts must be called at mount');
+});
+
 test('the light theme stays opt-in — the drawer defaults to dark', () => {
   // The drawer is injected into the ETA portal's white SPA and has to read as a separate
   // instrument. :host carries the dark set; light only applies under [data-theme=light].
-  assert.ok(SRC.indexOf(':host{ all:initial;') < SRC.indexOf(':host([data-theme=light]){'));
-  assert.match(SRC.slice(SRC.indexOf(':host{ all:initial;')), /^:host\{ all:initial;[\s\S]{0,2000}?--scheme:dark/);
+  const darkAt = SRC.indexOf(':host{ all:initial;');
+  const lightAt = SRC.indexOf(':host([data-theme=light]){');
+  assert.ok(darkAt > -1 && lightAt > darkAt, 'the unqualified :host block must come first');
+  // --scheme:dark must close the FIRST block, i.e. fall between the two selectors. (Asserting a
+  // character distance instead made this fail the moment the block grew by the font tokens.)
+  const schemeDarkAt = SRC.indexOf('--scheme:dark');
+  assert.ok(schemeDarkAt > darkAt && schemeDarkAt < lightAt, 'dark is the default set, not the override');
 });
 
 test('the byline is RTL-safe and not translated', () => {

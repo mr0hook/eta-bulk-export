@@ -1,5 +1,6 @@
-// Unified drawer UI (Shadow-DOM isolated, no remote code → system fonts). Owns the orchestrator
-// and subscribes to its hooks. "Control console" aesthetic from the design concept.
+// Unified drawer UI (Shadow-DOM isolated, no remote code). Owns the orchestrator and subscribes to
+// its hooks. Type, mark and palette follow the omarsoliman.dev design system; the faces are bundled
+// bytes (fonts.js) registered via FontFace, not fetched, so nothing here loads remote code.
 import { createOrchestrator } from '../core/orchestrator.js';
 import { ALL_STATUSES } from '../api/sources.js';
 import { idbGet, ensurePermission, writeBlob } from '../core/fs.js';
@@ -9,6 +10,7 @@ import { removableColumns, XLSX_MIME } from '../export/xlsx.js';
 import { session, register, gateEnabled, taxpayerId, requestRin, reportBug, LEAD_URL, EXT_VERSION } from '../core/registration.js';
 import { createRunLog } from '../core/runlog.js';
 import { createEtaTracker } from '../core/eta.js';
+import { FONT_BLOBS } from './fonts.js';
 import { lsGet, lsSet } from '../core/ls.js';
 import { readProgress } from '../core/store.js';
 import { deriveSyncSel } from '../core/sync.js';
@@ -38,6 +40,12 @@ const CSS = `
   --info-bg:#27332b; --info-tx:#8fae97; --warn-bg:#3c321a; --warn-tx:#d9b05e;
   --focus:rgba(224,131,88,.15); --focus2:rgba(224,131,88,.18); --scrim:rgba(12,10,7,.35); --mscrim:rgba(12,10,7,.55);
   --shadow:0 18px 50px -12px rgba(0,0,0,.65); --glow:0 6px 16px -6px rgba(224,131,88,.5); --seg-shadow:0 8px 24px -8px rgba(0,0,0,.6);
+  /* Type system. The families are bundled and registered from bytes at mount (see fonts.js and
+     installFonts) — a url() @font-face would be subject to the portal's CSP. Each stack keeps its
+     system fallback, so a blocked or failed load degrades silently to what shipped before. */
+  --font-ui:'Bricolage Grotesque','Avenir Next','Segoe UI',system-ui,sans-serif;
+  --font-mono:'IBM Plex Mono',ui-monospace,Menlo,Consolas,monospace;
+  --font-ar:'IBM Plex Sans Arabic','Bricolage Grotesque',system-ui,sans-serif;
   --r-lg:16px; --r:10px; --r-sm:6px;
   --dur-1:.12s; --dur-2:.2s; --dur-3:.35s; --ease-out:cubic-bezier(.22,1,.36,1);
   --scheme:dark }
@@ -53,7 +61,7 @@ const CSS = `
   --scheme:light }
 *{ box-sizing:border-box }
 [hidden]{ display:none !important }   /* the hidden attribute must always win over any class display: rule (this bit .gate and #modal-root) */
-.pill{ position:fixed; right:16px; bottom:16px; z-index:2147483647; font:600 13px system-ui,sans-serif;
+.pill{ position:fixed; right:16px; bottom:16px; z-index:2147483647; font:600 13px var(--font-ui);
   padding:10px 14px; border-radius:var(--r); border:1px solid var(--gold-bd); color:var(--on-gold); cursor:pointer;
   background:linear-gradient(var(--gold2),var(--gold)); box-shadow:var(--glow) }
 .pill:hover{ filter:brightness(1.05) }
@@ -62,90 +70,96 @@ const CSS = `
 .drawer{ position:fixed; top:0; right:0; bottom:0; z-index:2147483647; width:404px; max-width:100vw;
   display:flex; flex-direction:column; background:var(--bg); color:var(--text); border-left:1px solid var(--line);
   box-shadow:var(--shadow); transform:translateX(100%); transition:transform var(--dur-3) var(--ease-out);
-  font-family:system-ui,-apple-system,Segoe UI,sans-serif }   /* direction comes from the dir attribute (ltr default, rtl in Arabic) */
+  font-family:var(--font-ui) }   /* direction comes from the dir attribute (ltr default, rtl in Arabic) */
 .drawer.on{ transform:none }
-.num{ font-family:ui-monospace,Menlo,Consolas,monospace; font-variant-numeric:tabular-nums; direction:ltr; unicode-bidi:isolate }   /* numbers/times stay LTR inside RTL text */
+/* Arabic gets its own face rather than letting Bricolage fall back to a system Arabic font: the two
+   have different vertical metrics and the mixed result looks accidental. Scoped to the container so
+   every descendant inherits, tokens included. */
+.drawer[dir=rtl]{ --font-ui:var(--font-ar) }
+.num{ font-family:var(--font-mono); font-variant-numeric:tabular-nums; direction:ltr; unicode-bidi:isolate }   /* numbers/times stay LTR inside RTL text */
 .hd{ padding:16px 16px 13px; border-bottom:1px solid var(--line2); background:linear-gradient(180deg,var(--bg-hd),var(--bg)) }
 .hd-top{ display:flex; justify-content:space-between; align-items:center }
 .brand{ display:flex; align-items:center; gap:10px }
-.seal{ width:32px;height:32px;border-radius:var(--r);display:grid;place-items:center;color:var(--on-gold);background:linear-gradient(160deg,var(--gold2),var(--gold)) }
-.seal svg{ width:17px;height:17px }
-.wm{ font:700 18px/1 system-ui }
+/* The mark, matching assets/mark.svg: a flat clay tile with the cream star. Flat, not the gradient
+   the old seal used — the brand mark has no gradient. radius is mark.svg's rx=15 at 64, scaled. */
+.seal{ width:32px;height:32px;border-radius:7.5px;display:grid;place-items:center;color:var(--on-gold);background:var(--gold) }
+.seal svg{ width:18px;height:18px }
+.wm{ font:700 18px/1 var(--font-ui) }
 /* Byline, sitting where the old translated tag line used to. Carries the brand accent rather than
    --dim, and the design system's display stack rather than the 9px mono the other micro-labels use
    — it is a signature, not a field label, so it does not follow their convention. (The webfont
-   itself will not load under the portal's CSS policy; the stack degrades to system-ui, which is
+   itself will not load under the portal's CSS policy; the stack degrades to var(--font-ui), which is
    what every other line in this drawer already renders in.)
    direction/unicode-bidi keep the Latin domain intact inside the Arabic RTL header. Not uppercased:
    a domain is a name, and this line is no longer a translated label — the text is fixed in both
    languages, so it carries no data-i18n. */
-.tag{ font:600 11px/1 'Bricolage Grotesque','Avenir Next','Segoe UI',system-ui,sans-serif;
+.tag{ font:600 11px/1 var(--font-ui);
   letter-spacing:.01em; color:var(--gold); margin-top:4px;
   direction:ltr; unicode-bidi:isolate; white-space:nowrap }
 .x{ background:transparent;border:0;color:var(--muted);font-size:20px;cursor:pointer;padding:4px 8px;border-radius:var(--r-sm) } .x:hover{ background:var(--bg-hov);color:var(--text) }
-.chip{ display:inline-flex;align-items:center;gap:6px;padding:4px 9px;border-radius:999px;font:600 11px/1 ui-monospace;border:1px solid var(--line);color:var(--muted);background:var(--bg2) }
+.chip{ display:inline-flex;align-items:center;gap:6px;padding:4px 9px;border-radius:999px;font:600 11px/1 var(--font-mono);border:1px solid var(--line);color:var(--muted);background:var(--bg2) }
 .chip .dot{ width:6px;height:6px;border-radius:50%;background:currentColor }
 .chip.ok{ color:var(--ok);border-color:var(--ok-bd);background:var(--ok-bg) } .chip.err{ color:var(--err);border-color:var(--err-bd);background:var(--err-bg) }
 .src{ margin-top:14px; display:flex; align-items:center; justify-content:space-between; gap:10px }
 .seg{ display:inline-flex;padding:3px;gap:3px;background:var(--bg2);border:1px solid var(--line);border-radius:999px }
-.seg button{ border:0;background:transparent;color:var(--muted);font:600 12px system-ui;padding:6px 15px;border-radius:999px;cursor:pointer }
+.seg button{ border:0;background:transparent;color:var(--muted);font:600 12px var(--font-ui);padding:6px 15px;border-radius:999px;cursor:pointer }
 .seg button[aria-selected=true]{ background:var(--bg-hov);color:var(--text);box-shadow:var(--seg-shadow) }
-.cap{ font:500 11px ui-monospace;color:var(--muted);text-align:end } .cap b{ color:var(--gold) }
+.cap{ font:500 11px var(--font-mono);color:var(--muted);text-align:end } .cap b{ color:var(--gold) }
 .body{ flex:1;overflow:auto;padding:14px;display:flex;flex-direction:column;gap:13px }
 .body::-webkit-scrollbar{ width:9px } .body::-webkit-scrollbar-thumb{ background:var(--line);border-radius:var(--r);border:2px solid var(--bg) }
 .card{ background:var(--bg);border:1px solid var(--line);border-radius:var(--r-lg);padding:14px }
 .sh{ display:flex;align-items:baseline;gap:9px;margin-bottom:12px }
-.sh .n{ font:600 12px system-ui;color:var(--gold);width:20px;height:20px;border-radius:var(--r-sm);display:grid;place-items:center;background:var(--gold-chip) }
-.sh h3{ margin:0;font:600 13px system-ui } .sh .hint{ margin-inline-start:auto;font:500 11px ui-monospace;color:var(--dim) }
+.sh .n{ font:600 12px var(--font-ui);color:var(--gold);width:20px;height:20px;border-radius:var(--r-sm);display:grid;place-items:center;background:var(--gold-chip) }
+.sh h3{ margin:0;font:600 13px var(--font-ui) } .sh .hint{ margin-inline-start:auto;font:500 11px var(--font-mono);color:var(--dim) }
 .row{ display:grid;grid-template-columns:1fr 1fr;gap:10px }
-label.l{ display:block;font:600 10px ui-monospace;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);margin-bottom:5px }
-select,.ctl{ width:100%;padding:9px 11px;border-radius:var(--r-sm);background:var(--bg2);color:var(--text);border:1px solid var(--line);font:500 13px system-ui;appearance:none }
-input[type="date"].ctl{ appearance:auto;color-scheme:var(--scheme);direction:ltr;font:500 12px ui-monospace,monospace }
+label.l{ display:block;font:600 10px var(--font-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--dim);margin-bottom:5px }
+select,.ctl{ width:100%;padding:9px 11px;border-radius:var(--r-sm);background:var(--bg2);color:var(--text);border:1px solid var(--line);font:500 13px var(--font-ui);appearance:none }
+input[type="date"].ctl{ appearance:auto;color-scheme:var(--scheme);direction:ltr;font:500 12px var(--font-mono) }
 select:focus{ outline:none;border-color:var(--gold);box-shadow:0 0 0 3px var(--focus) }
 .chips{ display:flex;flex-wrap:wrap;gap:7px }
-.sc{ display:inline-flex;align-items:center;gap:6px;padding:5px 9px;border-radius:999px;border:1px solid var(--line);background:var(--bg2);color:var(--muted);font:600 11px ui-monospace;cursor:pointer;user-select:none }
+.sc{ display:inline-flex;align-items:center;gap:6px;padding:5px 9px;border-radius:999px;border:1px solid var(--line);background:var(--bg2);color:var(--muted);font:600 11px var(--font-mono);cursor:pointer;user-select:none }
 .sc input{ accent-color:var(--gold);margin:0 }
-.togg{ display:inline-flex;align-items:center;gap:8px;cursor:pointer;font:600 12px system-ui } .togg input{ accent-color:var(--gold) }
+.togg{ display:inline-flex;align-items:center;gap:8px;cursor:pointer;font:600 12px var(--font-ui) } .togg input{ accent-color:var(--gold) }
 .folder{ display:flex;align-items:center;gap:9px;padding:9px 11px;border:1px dashed var(--line);border-radius:var(--r-sm);background:var(--bg2);margin-top:12px }
-.folder svg{ width:16px;color:var(--teal) } .folder .p{ font:500 12px ui-monospace;color:var(--muted);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap }
-.btn{ font:600 13px system-ui;display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:10px 14px;border-radius:var(--r);cursor:pointer;border:1px solid var(--line);background:var(--bg-hov);color:var(--text) }
+.folder svg{ width:16px;color:var(--teal) } .folder .p{ font:500 12px var(--font-mono);color:var(--muted);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap }
+.btn{ font:600 13px var(--font-ui);display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:10px 14px;border-radius:var(--r);cursor:pointer;border:1px solid var(--line);background:var(--bg-hov);color:var(--text) }
 .btn:hover{ border-color:var(--line3) } .btn.primary{ background:linear-gradient(180deg,var(--gold2),var(--gold));color:var(--on-gold);border-color:var(--gold-bd) }
 .btn.sm{ padding:8px 11px;font-size:12px } .btn[disabled]{ opacity:.4;cursor:not-allowed }
 .stats{ display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--line2);border:1px solid var(--line2);border-radius:var(--r);overflow:hidden;margin-top:11px }
-.stat{ background:var(--bg2);padding:11px 12px } .stat .k{ font:600 10px ui-monospace;letter-spacing:.1em;text-transform:uppercase;color:var(--dim) } .stat .v{ font:600 21px ui-monospace;margin-top:2px }
+.stat{ background:var(--bg2);padding:11px 12px } .stat .k{ font:600 10px var(--font-mono);letter-spacing:.1em;text-transform:uppercase;color:var(--dim) } .stat .v{ font:600 21px var(--font-mono);margin-top:2px }
 .runbar{ display:flex;gap:8px } .runbar .btn{ flex:1 }
 .tracker{ display:flex;gap:7px;margin:12px 0 9px } .tk{ flex:1;text-align:center;padding:8px 4px;border-radius:var(--r-sm);background:var(--bg2);border:1px solid var(--line2) }
-.tk .v{ font:600 16px ui-monospace } .tk .k{ font:600 9px ui-monospace;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);margin-top:2px }
+.tk .v{ font:600 16px var(--font-mono) } .tk .k{ font:600 9px var(--font-mono);letter-spacing:.1em;text-transform:uppercase;color:var(--dim);margin-top:2px }
 .tk.ok .v{ color:var(--ok) } .tk.err .v{ color:var(--err) } .tk.left .v{ color:var(--teal) }
 .track{ height:8px;border-radius:999px;background:var(--bg2);border:1px solid var(--line2);overflow:hidden } .track>i{ display:block;height:100%;width:0;background:linear-gradient(90deg,var(--teal),var(--gold));transition:width .3s }
-.proc{ display:flex;align-items:baseline;justify-content:space-between;margin:9px 0 7px } .proc .pv{ font:600 19px ui-monospace;color:var(--text) } .proc .pv #procN{ color:var(--gold) } .proc .pl{ font:600 10px ui-monospace;letter-spacing:.1em;text-transform:uppercase;color:var(--dim) }
-.log{ margin-top:10px;padding:9px 11px;border-radius:var(--r-sm);background:var(--bg3);border:1px solid var(--line2);font:500 11px/1.55 ui-monospace;color:var(--muted);max-height:96px;overflow:auto;white-space:pre-wrap;word-break:break-word;direction:ltr;text-align:left;unicode-bidi:plaintext }   /* technical console stays an LTR island; Arabic words inside lines render RTL via the bidi algorithm */
-details.cols{ margin-top:13px } details.cols summary{ list-style:none;font:600 10px ui-monospace;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);cursor:pointer;user-select:none }
+.proc{ display:flex;align-items:baseline;justify-content:space-between;margin:9px 0 7px } .proc .pv{ font:600 19px var(--font-mono);color:var(--text) } .proc .pv #procN{ color:var(--gold) } .proc .pl{ font:600 10px var(--font-mono);letter-spacing:.1em;text-transform:uppercase;color:var(--dim) }
+.log{ margin-top:10px;padding:9px 11px;border-radius:var(--r-sm);background:var(--bg3);border:1px solid var(--line2);font:500 11px/1.55 var(--font-mono);color:var(--muted);max-height:96px;overflow:auto;white-space:pre-wrap;word-break:break-word;direction:ltr;text-align:left;unicode-bidi:plaintext }   /* technical console stays an LTR island; Arabic words inside lines render RTL via the bidi algorithm */
+details.cols{ margin-top:13px } details.cols summary{ list-style:none;font:600 10px var(--font-mono);letter-spacing:.08em;text-transform:uppercase;color:var(--dim);cursor:pointer;user-select:none }
 details.cols summary::-webkit-details-marker{ display:none }
 details.cols summary::before{ content:'▸ '; color:var(--gold) } details.cols[open] summary::before{ content:'▾ ' }
 details.cols .chips{ margin-top:9px }
-.ckline{ display:flex;justify-content:space-between;align-items:baseline;margin-top:10px;font:600 10px ui-monospace;letter-spacing:.06em;color:var(--dim) } .ckline .cknow{ color:var(--muted) }
+.ckline{ display:flex;justify-content:space-between;align-items:baseline;margin-top:10px;font:600 10px var(--font-mono);letter-spacing:.06em;color:var(--dim) } .ckline .cknow{ color:var(--muted) }
 .ckbar{ height:6px;border-radius:999px;background:var(--bg2);border:1px solid var(--line2);overflow:hidden;margin-top:6px } .ckbar>i{ display:block;height:100%;width:0;background:linear-gradient(90deg,var(--gold),var(--teal));transition:width .25s }
 .tools{ display:flex;gap:8px } .tools .btn{ flex:1 }
 .ft{ border-top:1px solid var(--line2);padding:12px 15px;display:flex;align-items:center;gap:10px;background:linear-gradient(0deg,var(--bg-ft),var(--bg)) }
 .ft .dot{ width:9px;height:9px;border-radius:50%;background:var(--dim);flex:0 0 auto } .ft.run .dot{ background:var(--gold) } .ft.ok .dot{ background:var(--ok) } .ft.err .dot{ background:var(--err) } .ft.wait .dot{ background:var(--teal) }
-.ft .msg{ font:500 12px system-ui;flex:1 }
+.ft .msg{ font:500 12px var(--font-ui);flex:1 }
 .gate{ min-height:100%;display:flex;flex-direction:column;justify-content:center;gap:11px;padding:6px 4px }
 .gate[hidden]{ display:none }   /* the class rule above sets display:flex, which otherwise overrides the [hidden] attribute — once registered, the gate must actually leave the layout so you land straight on the tool */
-.gate .g-head{ font:800 19px system-ui;color:var(--gold2);display:flex;align-items:center;gap:9px }
-.gate .g-sub{ font:500 12.5px system-ui;color:var(--gate-sub);margin:-3px 0 6px;line-height:1.45 }
-.gate input.rg{ width:100%;padding:11px 13px;border-radius:var(--r);background:var(--bg2);color:var(--text);border:1px solid var(--line);font:500 14px system-ui }
+.gate .g-head{ font:800 19px var(--font-ui);color:var(--gold2);display:flex;align-items:center;gap:9px }
+.gate .g-sub{ font:500 12.5px var(--font-ui);color:var(--gate-sub);margin:-3px 0 6px;line-height:1.45 }
+.gate input.rg{ width:100%;padding:11px 13px;border-radius:var(--r);background:var(--bg2);color:var(--text);border:1px solid var(--line);font:500 14px var(--font-ui) }
 .gate input.rg:focus{ outline:none;border-color:var(--gold);box-shadow:0 0 0 3px var(--focus2) }
-.gate .g-consent{ display:flex;align-items:flex-start;gap:9px;font:500 11.5px system-ui;color:var(--muted);line-height:1.45;cursor:pointer;margin-top:4px } .gate .g-consent input{ margin-top:2px;accent-color:var(--gold) } .gate .g-consent a{ color:var(--gold) }
-.gate button.rg-btn{ font:700 14px system-ui;padding:12px 14px;border-radius:var(--r);border:1px solid var(--gold-bd);background:linear-gradient(var(--gold2),var(--gold));color:var(--on-gold);cursor:pointer;margin-top:4px }
+.gate .g-consent{ display:flex;align-items:flex-start;gap:9px;font:500 11.5px var(--font-ui);color:var(--muted);line-height:1.45;cursor:pointer;margin-top:4px } .gate .g-consent input{ margin-top:2px;accent-color:var(--gold) } .gate .g-consent a{ color:var(--gold) }
+.gate button.rg-btn{ font:700 14px var(--font-ui);padding:12px 14px;border-radius:var(--r);border:1px solid var(--gold-bd);background:linear-gradient(var(--gold2),var(--gold));color:var(--on-gold);cursor:pointer;margin-top:4px }
 .gate button.rg-btn:hover{ filter:brightness(1.05) } .gate button.rg-btn:disabled{ opacity:.55;cursor:progress }
-.gate .g-msg{ font:600 11px ui-monospace;color:var(--err);margin-top:2px }
-.ann{ padding:9px 14px;font:600 12px system-ui;border-bottom:1px solid var(--line2);line-height:1.4 }
+.gate .g-msg{ font:600 11px var(--font-mono);color:var(--err);margin-top:2px }
+.ann{ padding:9px 14px;font:600 12px var(--font-ui);border-bottom:1px solid var(--line2);line-height:1.4 }
 .ann.info{ background:var(--info-bg);color:var(--info-tx) } .ann.warn{ background:var(--warn-bg);color:var(--warn-tx) } .ann.alert{ background:var(--err-bg);color:var(--err) }
 .bmodal-scrim{ position:fixed;inset:0;z-index:2147483647;display:grid;place-items:center;background:var(--mscrim);padding:20px }
 .bmodal{ width:100%;max-width:340px;background:var(--bg);border:1px solid var(--line);border-radius:var(--r-lg);padding:16px;box-shadow:var(--shadow) }
-.bmodal-t{ font:700 14px system-ui;margin-bottom:4px } .bmodal-s{ font:500 11px system-ui;color:var(--muted);margin-bottom:10px }
-.bmodal-ta{ width:100%;min-height:92px;resize:vertical;padding:9px 11px;border-radius:var(--r);background:var(--bg2);color:var(--text);border:1px solid var(--line);font:500 13px system-ui }
+.bmodal-t{ font:700 14px var(--font-ui);margin-bottom:4px } .bmodal-s{ font:500 11px var(--font-ui);color:var(--muted);margin-bottom:10px }
+.bmodal-ta{ width:100%;min-height:92px;resize:vertical;padding:9px 11px;border-radius:var(--r);background:var(--bg2);color:var(--text);border:1px solid var(--line);font:500 13px var(--font-ui) }
 .bmodal-ta:focus{ outline:none;border-color:var(--gold);box-shadow:0 0 0 3px var(--focus) }
 .bmodal-f{ display:flex;gap:8px;justify-content:flex-end;margin-top:12px }
 .rjlist{ max-height:300px;overflow:auto;margin-top:10px }
@@ -153,18 +167,18 @@ details.cols .chips{ margin-top:9px }
 .rjrow input[type=checkbox]{ accent-color:var(--err);margin-top:3px;flex:0 0 auto }
 .rjrow.off{ opacity:.55 }
 .rjmain{ flex:1;min-width:0 }
-.rjhead{ font:600 12px system-ui;display:flex;gap:7px;flex-wrap:wrap;align-items:baseline }
+.rjhead{ font:600 12px var(--font-ui);display:flex;gap:7px;flex-wrap:wrap;align-items:baseline }
 .rjhead .amt{ margin-inline-start:auto;color:var(--gold) }
-.rjmeta{ font:500 10px ui-monospace;color:var(--dim);margin-top:2px }
-.rjb{ display:inline-block;font:600 9px ui-monospace;padding:2px 7px;border-radius:999px;border:1px solid var(--err-bd);color:var(--err);background:var(--err-bg);margin:4px 4px 0 0 }
+.rjmeta{ font:500 10px var(--font-mono);color:var(--dim);margin-top:2px }
+.rjb{ display:inline-block;font:600 9px var(--font-mono);padding:2px 7px;border-radius:999px;border:1px solid var(--err-bd);color:var(--err);background:var(--err-bg);margin:4px 4px 0 0 }
 .rjb.flag{ border-color:var(--line);color:var(--warn-tx);background:var(--warn-bg) }
-.rjreason{ width:100%;margin-top:6px;padding:6px 9px;border-radius:var(--r-sm);background:var(--bg2);color:var(--text);border:1px solid var(--line);font:500 11px system-ui }
+.rjreason{ width:100%;margin-top:6px;padding:6px 9px;border-radius:var(--r-sm);background:var(--bg2);color:var(--text);border:1px solid var(--line);font:500 11px var(--font-ui) }
 .rjreason:focus{ outline:none;border-color:var(--gold);box-shadow:0 0 0 2px var(--focus) }
-.rjres{ font:600 10px ui-monospace;margin-top:3px } .rjres.ok{ color:var(--ok) } .rjres.err{ color:var(--err) }
+.rjres{ font:600 10px var(--font-mono);margin-top:3px } .rjres.ok{ color:var(--ok) } .rjres.err{ color:var(--err) }
 .rjfoot{ display:flex;gap:8px;align-items:center;margin-top:11px }
-.rjfoot .cnt{ font:600 11px ui-monospace;color:var(--muted);white-space:nowrap }
-.rjnum{ width:100%;padding:8px 10px;border-radius:var(--r-sm);background:var(--bg2);color:var(--text);border:1px solid var(--line);font:500 12px ui-monospace }
-.rjnote{ margin-top:10px;padding:8px 11px;border-radius:var(--r-sm);font:600 11px system-ui;background:var(--info-bg);color:var(--info-tx) }
+.rjfoot .cnt{ font:600 11px var(--font-mono);color:var(--muted);white-space:nowrap }
+.rjnum{ width:100%;padding:8px 10px;border-radius:var(--r-sm);background:var(--bg2);color:var(--text);border:1px solid var(--line);font:500 12px var(--font-mono) }
+.rjnote{ margin-top:10px;padding:8px 11px;border-radius:var(--r-sm);font:600 11px var(--font-ui);background:var(--info-bg);color:var(--info-tx) }
 .rjnote.warn{ background:var(--warn-bg);color:var(--warn-tx) }
 `;
 
@@ -183,12 +197,36 @@ function estMinutes(plan) {
 const fmtMin = (m) => (m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m`);
 const fmt = (n) => (n == null ? '—' : Number(n).toLocaleString('en-US'));
 
+// Register the bundled faces from BYTES. FontFace(name, ArrayBuffer) performs no fetch, so the ETA
+// portal's CSP — which has no font-src exemption for us and already blocks eval (see csp-shim.js) —
+// has nothing to refuse. Faces land in document.fonts, which shadow roots resolve against.
+// Best-effort by contract: any failure leaves the CSS stacks to fall back to system fonts, which is
+// exactly what the drawer rendered before they were bundled. Never throws, never blocks mount.
+let fontsInstalled = false;
+function installFonts() {
+  if (fontsInstalled) return;
+  fontsInstalled = true;
+  try {
+    if (typeof FontFace !== 'function' || !document.fonts || !document.fonts.add) return;
+    for (const f of FONT_BLOBS) {
+      try {
+        const bin = atob(f.b64);
+        const bytes = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+        const face = new FontFace(f.family, bytes.buffer, { weight: f.weight, style: 'normal', display: 'swap' });
+        face.load().then((loaded) => document.fonts.add(loaded)).catch(() => {});
+      } catch {}
+    }
+  } catch {}
+}
+
 export function mountUI() {
   if (document.getElementById('eta-bulk-host')) return;
   const host = document.createElement('div');
   host.id = 'eta-bulk-host';
   const root = host.attachShadow({ mode: 'open' });
   const st = document.createElement('style'); st.textContent = CSS; root.appendChild(st);
+  installFonts();
 
   const YEARS = ['2020', '2021', '2022', '2023', '2024', '2025', '2026'];
   root.innerHTML += `
@@ -216,7 +254,7 @@ export function mountUI() {
           <div id="gate-form">
             <div class="g-head" data-i18n="gate.head">🔒 Register to unlock bulk export</div>
             <div class="g-sub" data-i18n="gate.sub">Free · one-time. Auto-detected tax registration no. — enter your contact details below.</div>
-            <input class="rg" id="rg-rin-input" value="—" readonly aria-label="Tax registration number (auto-detected)" style="opacity:.7;cursor:not-allowed;font:700 14px ui-monospace">
+            <input class="rg" id="rg-rin-input" value="—" readonly aria-label="Tax registration number (auto-detected)" style="opacity:.7;cursor:not-allowed;font:700 14px var(--font-mono)">
             <input class="rg" id="rg-name" data-i18n-ph="gate.phName" placeholder="Full name" autocomplete="off">
             <input class="rg" id="rg-email" type="email" data-i18n-ph="gate.phEmail" placeholder="Email" autocomplete="off">
             <input class="rg" id="rg-phone" data-i18n-ph="gate.phPhone" placeholder="Phone" autocomplete="off">
@@ -248,7 +286,7 @@ export function mountUI() {
             <div><label class="l" data-i18n="ui.quickYear">Quick year</label><select id="year"><option value="" data-i18n="ui.rangeAbove">range above</option>${YEARS.map((y) => `<option value="${y}">${y}</option>`).join('')}</select></div>
             <div><label class="l" data-i18n="ui.lineItems">Line items</label><label class="togg" style="margin-top:4px"><input type="checkbox" id="details" checked> <span data-i18n="ui.details">Details</span></label></div>
           </div>
-          <label class="togg" style="margin-top:12px"><input type="checkbox" id="pdf"> <span data-i18n="ui.pdfToggle">Official ETA PDF per document</span> <span style="color:var(--dim);font:600 10px ui-monospace;margin-inline-start:3px" data-i18n="ui.pdfHint">→ pdfs/ · slower</span></label>
+          <label class="togg" style="margin-top:12px"><input type="checkbox" id="pdf"> <span data-i18n="ui.pdfToggle">Official ETA PDF per document</span> <span style="color:var(--dim);font:600 10px var(--font-mono);margin-inline-start:3px" data-i18n="ui.pdfHint">→ pdfs/ · slower</span></label>
           <div style="margin-top:12px"><label class="l" data-i18n="ui.status">Status</label><div class="chips" id="statuses">${ALL_STATUSES.map((s) => `<label class="sc"><input type="checkbox" id="st_${s}" checked>${s}</label>`).join('')}</div></div>
           <details class="cols"><summary><span data-i18n="ui.columns">Columns</span> <span id="colhint">· all</span></summary><div class="chips" id="cols"></div></details>
           <div class="folder"><span>${FOLDER_ICO}</span><span class="p" id="folder">No output folder</span><button class="btn sm" id="pick" data-i18n="ui.pick">Pick</button></div>
@@ -290,9 +328,9 @@ export function mountUI() {
                 <option value="block" data-i18n="rej.modeBlock">Blocklist → reject</option>
                 <option value="allow" data-i18n="rej.modeAllow">Trusted-only → flag others</option>
               </select></div>
-              <div><label class="l" data-i18n="rej.window">Window (days)</label><input type="number" class="rjnum" id="rj-window" min="1" max="365" value="14"><span id="rj-winsrc" style="display:block;font:600 9px ui-monospace;color:var(--dim);margin-top:3px"></span></div>
+              <div><label class="l" data-i18n="rej.window">Window (days)</label><input type="number" class="rjnum" id="rj-window" min="1" max="365" value="14"><span id="rj-winsrc" style="display:block;font:600 9px var(--font-mono);color:var(--dim);margin-top:3px"></span></div>
             </div>
-            <textarea class="rjreason" id="rj-tins" rows="2" data-i18n-ph="rej.tinsPh" placeholder="Tax registration numbers — one per line" style="margin-top:9px;direction:ltr;font-family:ui-monospace,monospace"></textarea>
+            <textarea class="rjreason" id="rj-tins" rows="2" data-i18n-ph="rej.tinsPh" placeholder="Tax registration numbers — one per line" style="margin-top:9px;direction:ltr;font-family:var(--font-mono)"></textarea>
             <div class="row" style="margin-top:9px">
               <div><label class="l"><input type="checkbox" id="rj-amt" style="accent-color:var(--gold);vertical-align:-2px"> <span data-i18n="rej.maxAmount">Reject above</span></label><input type="number" class="rjnum" id="rj-max" min="0" placeholder="—"></div>
               <div><label class="l" data-i18n="rej.minAmount">Reject below</label><input type="number" class="rjnum" id="rj-min" min="0" placeholder="—"></div>
