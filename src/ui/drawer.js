@@ -24,48 +24,62 @@ import { renderPoAnalytics, renderPoTemplate, poAnalyticsName } from '../reject/
 
 const CSS = `
 :host{ all:initial;
-  /* theme palette — dark is the original hand-tuned scheme, verbatim; light mirrors the admin
-     dashboard's light theme so both consoles feel related. data-theme on the host flips the set. */
-  --bg:#151a21; --bg2:#0f141a; --bg3:#0a0d11; --bg-hd:#1a212b; --bg-ft:#10151c; --bg-hov:#1b222c;
-  --line:#28303c; --line2:#1f2630; --line3:#3a4452;
-  --text:#e9e3d6; --muted:#99a3b1; --dim:#687181; --gate-sub:#b89a6a;
-  --gold:#e3a552; --gold2:#f0b765; --gold-bd:#caa052; --on-gold:#1a1206; --gold-chip:#3a2c14;
-  --teal:#62b6b2; --ok:#57c08a; --ok-bd:#234634; --ok-bg:#16301f; --err:#e5786b; --err-bd:#3f2421; --err-bg:#341a17;
-  --info-bg:#132a33; --info-tx:#9fd6e6; --warn-bg:#332714; --warn-tx:#f0b765;
-  --focus:rgba(227,165,82,.15); --focus2:rgba(227,165,82,.18); --scrim:rgba(6,8,11,.35); --mscrim:rgba(6,8,11,.55);
-  --shadow:0 18px 50px -12px rgba(0,0,0,.65); --glow:0 6px 16px -6px rgba(227,165,82,.5); --seg-shadow:0 8px 24px -8px rgba(0,0,0,.6);
+  /* Theme palette — omarsoliman.dev "clay & paper", dark set. The drawer stays dark on purpose: it is
+     injected into the ETA portal's white SPA and has to read as a separate instrument, so the site's
+     LIGHT paper palette is used only for the opt-in light theme below. data-theme flips the set.
+     Two values deviate from the source system, both for contrast — see test/theme.test.mjs:
+       --dim  the site's ink-4 (#7A715C) scores 3.70 on this background; AA needs 4.5 at 10-11px.
+       light --gold  the site's clay-5 (#C2603B) under cream text scores 4.10; clay-6 scores 5.89. */
+  --bg:#1a1712; --bg2:#131008; --bg3:#0d0b06; --bg-hd:#221e17; --bg-ft:#151209; --bg-hov:#2b261d;
+  --line:#3b3527; --line2:#2b261d; --line3:#564e3a;
+  --text:#f0eadb; --muted:#a39a84; --dim:#8e8571; --gate-sub:#d6b98a;
+  --gold:#e08358; --gold2:#ec9a74; --gold-bd:#c2603b; --on-gold:#1a1712; --gold-chip:#3a2a20;
+  --teal:#8fae97; --ok:#7cbe96; --ok-bd:#2c4a38; --ok-bg:#24342a; --err:#e08a7b; --err-bd:#4e312b; --err-bg:#3d241f;
+  --info-bg:#27332b; --info-tx:#8fae97; --warn-bg:#3c321a; --warn-tx:#d9b05e;
+  --focus:rgba(224,131,88,.15); --focus2:rgba(224,131,88,.18); --scrim:rgba(12,10,7,.35); --mscrim:rgba(12,10,7,.55);
+  --shadow:0 18px 50px -12px rgba(0,0,0,.65); --glow:0 6px 16px -6px rgba(224,131,88,.5); --seg-shadow:0 8px 24px -8px rgba(0,0,0,.6);
+  --r-lg:16px; --r:10px; --r-sm:6px;
+  --dur-1:.12s; --dur-2:.2s; --dur-3:.35s; --ease-out:cubic-bezier(.22,1,.36,1);
   --scheme:dark }
 :host([data-theme=light]){
-  --bg:#f2f5f9; --bg2:#ffffff; --bg3:#eef1f6; --bg-hd:#ffffff; --bg-ft:#eef1f6; --bg-hov:#e7ecf3;
-  --line:#d3dbe6; --line2:#e2e8f0; --line3:#b9c4d4;
-  --text:#1f2733; --muted:#647085; --dim:#8090a5; --gate-sub:#8a6a2e;
-  --gold:#b9822c; --gold2:#d29a3e; --gold-bd:#a9781f; --on-gold:#1a1206; --gold-chip:#f5e7cd;
-  --teal:#1d7d78; --ok:#177d54; --ok-bd:#bfe3d1; --ok-bg:#e6f5ee; --err:#c14434; --err-bd:#f0cdc6; --err-bg:#fbeae7;
-  --info-bg:#e4f2f7; --info-tx:#1d6f8b; --warn-bg:#fbf1dc; --warn-tx:#9a6a12;
-  --focus:rgba(185,130,44,.22); --focus2:rgba(185,130,44,.22); --scrim:rgba(31,41,51,.28); --mscrim:rgba(31,41,51,.45);
-  --shadow:0 18px 40px -14px rgba(31,41,51,.22); --glow:0 6px 16px -6px rgba(185,130,44,.35); --seg-shadow:0 2px 8px rgba(31,41,51,.12);
+  --bg:#faf6ee; --bg2:#fffdf7; --bg3:#f2ebdd; --bg-hd:#fffdf7; --bg-ft:#f2ebdd; --bg-hov:#e7dec9;
+  --line:#e3dac6; --line2:#efe8d8; --line3:#c9bea3;
+  --text:#231f18; --muted:#6b6453; --dim:#776e5b; --gate-sub:#7c381f;
+  --gold:#7c381f; --gold2:#a04a2a; --gold-bd:#6a2f1a; --on-gold:#fffdf7; --gold-chip:#f4e2d6;
+  /* The three status foregrounds are the design system's green-6 / red-6 / amber-6 darkened by a
+     few percent. On their own soft backgrounds the source values land at 4.18 / 4.43 / 3.96 — just
+     under AA, and these render 11px chip text. Nudged to 4.52 each; see test/theme.test.mjs. */
+  --teal:#44685a; --ok:#2c754b; --ok-bd:#c4dcc9; --ok-bg:#ddebdb; --err:#b03e2e; --err-bd:#e8c9bf; --err-bg:#f4ddd4;
+  --info-bg:#e2e9e0; --info-tx:#2f4f41; --warn-bg:#f3e6c2; --warn-tx:#89600e;
+  --focus:rgba(160,74,42,.22); --focus2:rgba(160,74,42,.22); --scrim:rgba(35,31,24,.28); --mscrim:rgba(35,31,24,.45);
+  --shadow:0 18px 40px -14px rgba(35,31,24,.22); --glow:0 6px 16px -6px rgba(160,74,42,.35); --seg-shadow:0 2px 8px rgba(35,31,24,.12);
   --scheme:light }
 *{ box-sizing:border-box }
 [hidden]{ display:none !important }   /* the hidden attribute must always win over any class display: rule (this bit .gate and #modal-root) */
 .pill{ position:fixed; right:16px; bottom:16px; z-index:2147483647; font:600 13px system-ui,sans-serif;
-  padding:10px 14px; border-radius:10px; border:1px solid var(--gold-bd); color:var(--on-gold); cursor:pointer;
+  padding:10px 14px; border-radius:var(--r); border:1px solid var(--gold-bd); color:var(--on-gold); cursor:pointer;
   background:linear-gradient(var(--gold2),var(--gold)); box-shadow:var(--glow) }
 .pill:hover{ filter:brightness(1.05) }
-.scrim{ position:fixed; inset:0; z-index:2147483646; background:var(--scrim); opacity:0; pointer-events:none; transition:.2s }
+.scrim{ position:fixed; inset:0; z-index:2147483646; background:var(--scrim); opacity:0; pointer-events:none; transition:var(--dur-2) var(--ease-out) }
 .scrim.on{ opacity:1; pointer-events:auto }
 .drawer{ position:fixed; top:0; right:0; bottom:0; z-index:2147483647; width:404px; max-width:100vw;
   display:flex; flex-direction:column; background:var(--bg); color:var(--text); border-left:1px solid var(--line);
-  box-shadow:var(--shadow); transform:translateX(100%); transition:transform .28s cubic-bezier(.2,.8,.2,1);
+  box-shadow:var(--shadow); transform:translateX(100%); transition:transform var(--dur-3) var(--ease-out);
   font-family:system-ui,-apple-system,Segoe UI,sans-serif }   /* direction comes from the dir attribute (ltr default, rtl in Arabic) */
 .drawer.on{ transform:none }
 .num{ font-family:ui-monospace,Menlo,Consolas,monospace; font-variant-numeric:tabular-nums; direction:ltr; unicode-bidi:isolate }   /* numbers/times stay LTR inside RTL text */
 .hd{ padding:16px 16px 13px; border-bottom:1px solid var(--line2); background:linear-gradient(180deg,var(--bg-hd),var(--bg)) }
 .hd-top{ display:flex; justify-content:space-between; align-items:center }
 .brand{ display:flex; align-items:center; gap:10px }
-.seal{ width:32px;height:32px;border-radius:9px;display:grid;place-items:center;color:var(--on-gold);background:linear-gradient(160deg,var(--gold2),var(--gold)) }
+.seal{ width:32px;height:32px;border-radius:var(--r);display:grid;place-items:center;color:var(--on-gold);background:linear-gradient(160deg,var(--gold2),var(--gold)) }
 .seal svg{ width:17px;height:17px }
-.wm{ font:700 18px/1 system-ui } .tag{ font:600 9px/1 ui-monospace; letter-spacing:.16em; text-transform:uppercase; color:var(--dim); margin-top:3px }
-.x{ background:transparent;border:0;color:var(--muted);font-size:20px;cursor:pointer;padding:4px 8px;border-radius:7px } .x:hover{ background:var(--bg-hov);color:var(--text) }
+.wm{ font:700 18px/1 system-ui }
+/* Byline. direction/unicode-bidi keep the Latin domain intact inside the Arabic RTL header, and
+   margin-inline-start flips with it. Deliberately NOT uppercase + tracked like the site's micro-labels:
+   letter-spacing breaks Arabic cursive joining, and this line sits in a bilingual header. */
+.by{ font:600 9px/1 ui-monospace; letter-spacing:.04em; color:var(--gold); margin-inline-start:7px;
+  vertical-align:2px; direction:ltr; unicode-bidi:isolate; white-space:nowrap } .tag{ font:600 9px/1 ui-monospace; letter-spacing:.16em; text-transform:uppercase; color:var(--dim); margin-top:3px }
+.x{ background:transparent;border:0;color:var(--muted);font-size:20px;cursor:pointer;padding:4px 8px;border-radius:var(--r-sm) } .x:hover{ background:var(--bg-hov);color:var(--text) }
 .chip{ display:inline-flex;align-items:center;gap:6px;padding:4px 9px;border-radius:999px;font:600 11px/1 ui-monospace;border:1px solid var(--line);color:var(--muted);background:var(--bg2) }
 .chip .dot{ width:6px;height:6px;border-radius:50%;background:currentColor }
 .chip.ok{ color:var(--ok);border-color:var(--ok-bd);background:var(--ok-bg) } .chip.err{ color:var(--err);border-color:var(--err-bd);background:var(--err-bg) }
@@ -75,34 +89,34 @@ const CSS = `
 .seg button[aria-selected=true]{ background:var(--bg-hov);color:var(--text);box-shadow:var(--seg-shadow) }
 .cap{ font:500 11px ui-monospace;color:var(--muted);text-align:end } .cap b{ color:var(--gold) }
 .body{ flex:1;overflow:auto;padding:14px;display:flex;flex-direction:column;gap:13px }
-.body::-webkit-scrollbar{ width:9px } .body::-webkit-scrollbar-thumb{ background:var(--line);border-radius:9px;border:2px solid var(--bg) }
-.card{ background:var(--bg);border:1px solid var(--line);border-radius:13px;padding:14px }
+.body::-webkit-scrollbar{ width:9px } .body::-webkit-scrollbar-thumb{ background:var(--line);border-radius:var(--r);border:2px solid var(--bg) }
+.card{ background:var(--bg);border:1px solid var(--line);border-radius:var(--r-lg);padding:14px }
 .sh{ display:flex;align-items:baseline;gap:9px;margin-bottom:12px }
-.sh .n{ font:600 12px system-ui;color:var(--gold);width:20px;height:20px;border-radius:6px;display:grid;place-items:center;background:var(--gold-chip) }
+.sh .n{ font:600 12px system-ui;color:var(--gold);width:20px;height:20px;border-radius:var(--r-sm);display:grid;place-items:center;background:var(--gold-chip) }
 .sh h3{ margin:0;font:600 13px system-ui } .sh .hint{ margin-inline-start:auto;font:500 11px ui-monospace;color:var(--dim) }
 .row{ display:grid;grid-template-columns:1fr 1fr;gap:10px }
 label.l{ display:block;font:600 10px ui-monospace;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);margin-bottom:5px }
-select,.ctl{ width:100%;padding:9px 11px;border-radius:7px;background:var(--bg2);color:var(--text);border:1px solid var(--line);font:500 13px system-ui;appearance:none }
+select,.ctl{ width:100%;padding:9px 11px;border-radius:var(--r-sm);background:var(--bg2);color:var(--text);border:1px solid var(--line);font:500 13px system-ui;appearance:none }
 input[type="date"].ctl{ appearance:auto;color-scheme:var(--scheme);direction:ltr;font:500 12px ui-monospace,monospace }
 select:focus{ outline:none;border-color:var(--gold);box-shadow:0 0 0 3px var(--focus) }
 .chips{ display:flex;flex-wrap:wrap;gap:7px }
 .sc{ display:inline-flex;align-items:center;gap:6px;padding:5px 9px;border-radius:999px;border:1px solid var(--line);background:var(--bg2);color:var(--muted);font:600 11px ui-monospace;cursor:pointer;user-select:none }
 .sc input{ accent-color:var(--gold);margin:0 }
 .togg{ display:inline-flex;align-items:center;gap:8px;cursor:pointer;font:600 12px system-ui } .togg input{ accent-color:var(--gold) }
-.folder{ display:flex;align-items:center;gap:9px;padding:9px 11px;border:1px dashed var(--line);border-radius:7px;background:var(--bg2);margin-top:12px }
+.folder{ display:flex;align-items:center;gap:9px;padding:9px 11px;border:1px dashed var(--line);border-radius:var(--r-sm);background:var(--bg2);margin-top:12px }
 .folder svg{ width:16px;color:var(--teal) } .folder .p{ font:500 12px ui-monospace;color:var(--muted);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap }
-.btn{ font:600 13px system-ui;display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:10px 14px;border-radius:10px;cursor:pointer;border:1px solid var(--line);background:var(--bg-hov);color:var(--text) }
+.btn{ font:600 13px system-ui;display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:10px 14px;border-radius:var(--r);cursor:pointer;border:1px solid var(--line);background:var(--bg-hov);color:var(--text) }
 .btn:hover{ border-color:var(--line3) } .btn.primary{ background:linear-gradient(180deg,var(--gold2),var(--gold));color:var(--on-gold);border-color:var(--gold-bd) }
 .btn.sm{ padding:8px 11px;font-size:12px } .btn[disabled]{ opacity:.4;cursor:not-allowed }
-.stats{ display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--line2);border:1px solid var(--line2);border-radius:10px;overflow:hidden;margin-top:11px }
+.stats{ display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--line2);border:1px solid var(--line2);border-radius:var(--r);overflow:hidden;margin-top:11px }
 .stat{ background:var(--bg2);padding:11px 12px } .stat .k{ font:600 10px ui-monospace;letter-spacing:.1em;text-transform:uppercase;color:var(--dim) } .stat .v{ font:600 21px ui-monospace;margin-top:2px }
 .runbar{ display:flex;gap:8px } .runbar .btn{ flex:1 }
-.tracker{ display:flex;gap:7px;margin:12px 0 9px } .tk{ flex:1;text-align:center;padding:8px 4px;border-radius:7px;background:var(--bg2);border:1px solid var(--line2) }
+.tracker{ display:flex;gap:7px;margin:12px 0 9px } .tk{ flex:1;text-align:center;padding:8px 4px;border-radius:var(--r-sm);background:var(--bg2);border:1px solid var(--line2) }
 .tk .v{ font:600 16px ui-monospace } .tk .k{ font:600 9px ui-monospace;letter-spacing:.1em;text-transform:uppercase;color:var(--dim);margin-top:2px }
 .tk.ok .v{ color:var(--ok) } .tk.err .v{ color:var(--err) } .tk.left .v{ color:var(--teal) }
 .track{ height:8px;border-radius:999px;background:var(--bg2);border:1px solid var(--line2);overflow:hidden } .track>i{ display:block;height:100%;width:0;background:linear-gradient(90deg,var(--teal),var(--gold));transition:width .3s }
 .proc{ display:flex;align-items:baseline;justify-content:space-between;margin:9px 0 7px } .proc .pv{ font:600 19px ui-monospace;color:var(--text) } .proc .pv #procN{ color:var(--gold) } .proc .pl{ font:600 10px ui-monospace;letter-spacing:.1em;text-transform:uppercase;color:var(--dim) }
-.log{ margin-top:10px;padding:9px 11px;border-radius:7px;background:var(--bg3);border:1px solid var(--line2);font:500 11px/1.55 ui-monospace;color:var(--muted);max-height:96px;overflow:auto;white-space:pre-wrap;word-break:break-word;direction:ltr;text-align:left;unicode-bidi:plaintext }   /* technical console stays an LTR island; Arabic words inside lines render RTL via the bidi algorithm */
+.log{ margin-top:10px;padding:9px 11px;border-radius:var(--r-sm);background:var(--bg3);border:1px solid var(--line2);font:500 11px/1.55 ui-monospace;color:var(--muted);max-height:96px;overflow:auto;white-space:pre-wrap;word-break:break-word;direction:ltr;text-align:left;unicode-bidi:plaintext }   /* technical console stays an LTR island; Arabic words inside lines render RTL via the bidi algorithm */
 details.cols{ margin-top:13px } details.cols summary{ list-style:none;font:600 10px ui-monospace;letter-spacing:.08em;text-transform:uppercase;color:var(--dim);cursor:pointer;user-select:none }
 details.cols summary::-webkit-details-marker{ display:none }
 details.cols summary::before{ content:'▸ '; color:var(--gold) } details.cols[open] summary::before{ content:'▾ ' }
@@ -117,18 +131,18 @@ details.cols .chips{ margin-top:9px }
 .gate[hidden]{ display:none }   /* the class rule above sets display:flex, which otherwise overrides the [hidden] attribute — once registered, the gate must actually leave the layout so you land straight on the tool */
 .gate .g-head{ font:800 19px system-ui;color:var(--gold2);display:flex;align-items:center;gap:9px }
 .gate .g-sub{ font:500 12.5px system-ui;color:var(--gate-sub);margin:-3px 0 6px;line-height:1.45 }
-.gate input.rg{ width:100%;padding:11px 13px;border-radius:9px;background:var(--bg2);color:var(--text);border:1px solid var(--line);font:500 14px system-ui }
+.gate input.rg{ width:100%;padding:11px 13px;border-radius:var(--r);background:var(--bg2);color:var(--text);border:1px solid var(--line);font:500 14px system-ui }
 .gate input.rg:focus{ outline:none;border-color:var(--gold);box-shadow:0 0 0 3px var(--focus2) }
 .gate .g-consent{ display:flex;align-items:flex-start;gap:9px;font:500 11.5px system-ui;color:var(--muted);line-height:1.45;cursor:pointer;margin-top:4px } .gate .g-consent input{ margin-top:2px;accent-color:var(--gold) } .gate .g-consent a{ color:var(--gold) }
-.gate button.rg-btn{ font:700 14px system-ui;padding:12px 14px;border-radius:10px;border:1px solid var(--gold-bd);background:linear-gradient(var(--gold2),var(--gold));color:var(--on-gold);cursor:pointer;margin-top:4px }
+.gate button.rg-btn{ font:700 14px system-ui;padding:12px 14px;border-radius:var(--r);border:1px solid var(--gold-bd);background:linear-gradient(var(--gold2),var(--gold));color:var(--on-gold);cursor:pointer;margin-top:4px }
 .gate button.rg-btn:hover{ filter:brightness(1.05) } .gate button.rg-btn:disabled{ opacity:.55;cursor:progress }
 .gate .g-msg{ font:600 11px ui-monospace;color:var(--err);margin-top:2px }
 .ann{ padding:9px 14px;font:600 12px system-ui;border-bottom:1px solid var(--line2);line-height:1.4 }
 .ann.info{ background:var(--info-bg);color:var(--info-tx) } .ann.warn{ background:var(--warn-bg);color:var(--warn-tx) } .ann.alert{ background:var(--err-bg);color:var(--err) }
 .bmodal-scrim{ position:fixed;inset:0;z-index:2147483647;display:grid;place-items:center;background:var(--mscrim);padding:20px }
-.bmodal{ width:100%;max-width:340px;background:var(--bg);border:1px solid var(--line);border-radius:13px;padding:16px;box-shadow:var(--shadow) }
+.bmodal{ width:100%;max-width:340px;background:var(--bg);border:1px solid var(--line);border-radius:var(--r-lg);padding:16px;box-shadow:var(--shadow) }
 .bmodal-t{ font:700 14px system-ui;margin-bottom:4px } .bmodal-s{ font:500 11px system-ui;color:var(--muted);margin-bottom:10px }
-.bmodal-ta{ width:100%;min-height:92px;resize:vertical;padding:9px 11px;border-radius:8px;background:var(--bg2);color:var(--text);border:1px solid var(--line);font:500 13px system-ui }
+.bmodal-ta{ width:100%;min-height:92px;resize:vertical;padding:9px 11px;border-radius:var(--r);background:var(--bg2);color:var(--text);border:1px solid var(--line);font:500 13px system-ui }
 .bmodal-ta:focus{ outline:none;border-color:var(--gold);box-shadow:0 0 0 3px var(--focus) }
 .bmodal-f{ display:flex;gap:8px;justify-content:flex-end;margin-top:12px }
 .rjlist{ max-height:300px;overflow:auto;margin-top:10px }
@@ -141,17 +155,19 @@ details.cols .chips{ margin-top:9px }
 .rjmeta{ font:500 10px ui-monospace;color:var(--dim);margin-top:2px }
 .rjb{ display:inline-block;font:600 9px ui-monospace;padding:2px 7px;border-radius:999px;border:1px solid var(--err-bd);color:var(--err);background:var(--err-bg);margin:4px 4px 0 0 }
 .rjb.flag{ border-color:var(--line);color:var(--warn-tx);background:var(--warn-bg) }
-.rjreason{ width:100%;margin-top:6px;padding:6px 9px;border-radius:6px;background:var(--bg2);color:var(--text);border:1px solid var(--line);font:500 11px system-ui }
+.rjreason{ width:100%;margin-top:6px;padding:6px 9px;border-radius:var(--r-sm);background:var(--bg2);color:var(--text);border:1px solid var(--line);font:500 11px system-ui }
 .rjreason:focus{ outline:none;border-color:var(--gold);box-shadow:0 0 0 2px var(--focus) }
 .rjres{ font:600 10px ui-monospace;margin-top:3px } .rjres.ok{ color:var(--ok) } .rjres.err{ color:var(--err) }
 .rjfoot{ display:flex;gap:8px;align-items:center;margin-top:11px }
 .rjfoot .cnt{ font:600 11px ui-monospace;color:var(--muted);white-space:nowrap }
-.rjnum{ width:100%;padding:8px 10px;border-radius:7px;background:var(--bg2);color:var(--text);border:1px solid var(--line);font:500 12px ui-monospace }
-.rjnote{ margin-top:10px;padding:8px 11px;border-radius:7px;font:600 11px system-ui;background:var(--info-bg);color:var(--info-tx) }
+.rjnum{ width:100%;padding:8px 10px;border-radius:var(--r-sm);background:var(--bg2);color:var(--text);border:1px solid var(--line);font:500 12px ui-monospace }
+.rjnote{ margin-top:10px;padding:8px 11px;border-radius:var(--r-sm);font:600 11px system-ui;background:var(--info-bg);color:var(--info-tx) }
 .rjnote.warn{ background:var(--warn-bg);color:var(--warn-tx) }
 `;
 
-const SEAL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 3l8 4v5c0 4.5-3.2 7.5-8 9-4.8-1.5-8-4.5-8-9V7z"/><path d="M9 12l2 2 4-4"/></svg>';
+// Brand mark: the omarsoliman.dev star (two squares, one rotated 45°) — assets/mark.svg from the
+// design system, redrawn in currentColor so .seal's cream-on-clay treatment carries it.
+const SEAL = '<svg viewBox="0 0 24 24" fill="currentColor"><g transform="translate(12 12)"><rect x="-6.2" y="-6.2" width="12.4" height="12.4"/><rect x="-6.2" y="-6.2" width="12.4" height="12.4" transform="rotate(45)"/></g></svg>';
 const FOLDER_ICO = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 7a2 2 0 012-2h4l2 2h8a2 2 0 012 2v8a2 2 0 01-2 2H5a2 2 0 01-2-2z"/></svg>';
 
 // Rough pre-run guess only — replaced by the live measured rows/sec rate once the run starts.
@@ -178,7 +194,7 @@ export function mountUI() {
     <aside class="drawer" id="drawer" dir="ltr" role="dialog" aria-modal="true" aria-label="ETA Bulk Export">
       <header class="hd">
         <div class="hd-top">
-          <div class="brand"><div class="seal">${SEAL}</div><div><div class="wm">ETA&nbsp;Bulk</div><div class="tag" data-i18n="ui.tag">export console</div></div></div>
+          <div class="brand"><div class="seal">${SEAL}</div><div><div class="wm">ETA&nbsp;Bulk<span class="by">by omarsoliman.dev</span></div><div class="tag" data-i18n="ui.tag">export console</div></div></div>
           <div style="display:flex;align-items:center;gap:8px"><span class="chip" id="tok"><span class="dot"></span><span class="num">—</span></span><button class="x" id="langBtn" data-i18n-title="ui.langTitle" title="العربية / English" aria-label="Language" style="font-size:13px;font-weight:700">ع</button><button class="x" id="themeBtn" data-i18n-title="ui.themeTitle" title="Light / dark theme" aria-label="Toggle theme" style="font-size:15px">🌙</button><button class="x" id="close" aria-label="Close">×</button></div>
         </div>
         <div class="src" id="srcrow">
