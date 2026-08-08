@@ -6,14 +6,15 @@
 > Track: STANDARD · Started: 2026-07-27 (Agent OS adopted mid-project at v0.3.0) · Client: internal
 
 ## NEXT ACTION
-→ USER SMOKE TEST, then package v0.4.1. F-10..F-14 are all code-complete and unit-green (245/245)
+→ USER SMOKE TEST, then package v0.4.1. F-10..F-15 are all code-complete and unit-green (252/252)
 but NONE has been exercised against real portal data. Load the rebuilt extension and, in one
 session: (1) Merge the big folder that used to fail — confirm it completes and leaves no .jsonl;
 (2) Merge again immediately — must say "Already up to date" and write nothing; (3) sync a day, merge
 — must say "Incremental" and rewrite only the last part; (4) point the tool at a folder belonging to
 a DIFFERENT company — must refuse and name the owner; (5) kill the tab mid-run and check
-eta_runlog_*.log holds the narrative. Report anything that differs. Only then bump the version and
-package.
+eta_runlog_*.log holds the narrative; (6) MOST IMPORTANT — open both COMBINED files in real Excel.
+F-15 replaced ExcelJS with our own xlsx writer for merge output, so Excel's own verdict is the one
+test the suite cannot run. Report anything that differs. Only then bump the version and package.
 
 Parked (user smoke, not blocking): overnight smoke below; plus confirm the F-10 merge fix against
 the real big folder that used to fail.
@@ -48,7 +49,8 @@ portal smoke + the documenttypes/LIVE_REJECT_PATH DevTools captures into the sam
 | F-11 | TIN-scoped export folders (block a second company) | VALIDATED | SPEC-010 | T-076..T-090; suite 202→213. Guard in ensureDir+start+resume+plan; merge may proceed logged-out on a claimed folder |
 | F-12 | Run log persisted to the folder | VALIDATED | SPEC-011 | T-091..T-102; suite 213→226. Batched open/append/close (NOT a held stream — FSA is only durable on close) |
 | F-13 | Incremental merge (only new chunk files) | VALIDATED | SPEC-012 | T-103..T-114; suite 226→238. Stable COMBINED names; T-111 pins incremental output == full rebuild |
-| F-14 | Period-labeled, day-aligned COMBINED parts | VALIDATED | SPEC-013 | T-115..T-121; suite 238→245. Day alignment bounded at 1.5x cap so memory still wins |
+| F-14 | Period-labeled, day-aligned output | VALIDATED | SPEC-013 | T-115..T-121; period now REPORTED (log + state), not in filenames — names stay stable so increments don't rename |
+| F-15 | Streaming xlsx writer — one file, not 17 | VALIDATED | SPEC-014 | T-122..T-128; suite 245→252. Own zip+SpreadsheetML writer; 1M rows at 22MB heap; summary/details are separate single-sheet files |
 
 ## Blockers
 - none (live-verification items are post-merge follow-ups, not blockers: portal documenttypes

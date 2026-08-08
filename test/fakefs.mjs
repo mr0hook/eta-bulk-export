@@ -20,6 +20,9 @@ export function fakeDir() {
             stream: () => new ReadableStream({ start(c) { c.enqueue(d); c.close(); } }),
           };
         },
+        // FileSystemFileHandle.move() — Chrome ships it, and the streaming writer uses it to put a
+        // finished .writing.xlsx in place without copying the bytes.
+        async move(to) { if (!files.has(name)) throw new Error('not found'); files.set(to, files.get(name)); files.delete(name); },
         async createWritable(o) {
           const chunks = o?.keepExistingData && files.has(name) ? [files.get(name)] : [];
           return {

@@ -36,6 +36,12 @@ function fakeDir() {
   };
 }
 
+const sumFile = (dir) => [...dir.files.keys()].find((n) => /COMBINED_SUMMARY.*\.xlsx$/.test(n));
+const detFile = (dir) => [...dir.files.keys()].find((n) => /COMBINED_DETAILS.*\.xlsx$/.test(n));
+const sumFiles = (dir) => [...dir.files.keys()].filter((n) => /COMBINED_SUMMARY.*\.xlsx$/.test(n));
+const detFiles = (dir) => [...dir.files.keys()].filter((n) => /COMBINED_DETAILS.*\.xlsx$/.test(n));
+const load = async (dir, nm) => { const wb = new ExcelJS.Workbook(); await wb.xlsx.load((await (await dir.getFileHandle(nm)).getFile()).arrayBuffer()); return wb.worksheets[0]; };
+
 async function putXlsx(dir, name, headerSum, rowsSum, headerLine, rowsLine) {
   const wb = new ExcelJS.Workbook();
   const s0 = wb.addWorksheet('جميع الفواتير'); s0.addRow(headerSum); rowsSum.forEach((r) => s0.addRow(r));
@@ -59,11 +65,8 @@ test('merge: dedup by uuid + header union + continuous serial', async () => {
   const log = [];
   await mergeFolder(ExcelJS, dir, { onStatus: (m) => log.push(m) });
 
-  const combinedName = [...dir.files.keys()].find((n) => /COMBINED.*\.xlsx$/.test(n));
-  assert.ok(combinedName, 'combined xlsx written');
-  const wb = new ExcelJS.Workbook();
-  await wb.xlsx.load((await (await dir.getFileHandle(combinedName)).getFile()).arrayBuffer());
-  const s0 = wb.getWorksheet('جميع الفواتير');
+  assert.ok(sumFile(dir), 'combined summary xlsx written');
+  const s0 = await load(dir, sumFile(dir));
   const dataRows = s0.actualRowCount - 1;
   assert.equal(dataRows, 3, 'deduped to 3 unique invoices (U1,U2,U3)');
   const header = s0.getRow(1).values.slice(1);
@@ -92,10 +95,7 @@ test('T-006 merge: line-sheet header union when only the newer part carries ال
 
   await mergeFolder(ExcelJS, dir, { onStatus: () => {} });
 
-  const combinedName = [...dir.files.keys()].find((n) => /COMBINED.*\.xlsx$/.test(n));
-  const wb = new ExcelJS.Workbook();
-  await wb.xlsx.load((await (await dir.getFileHandle(combinedName)).getFile()).arrayBuffer());
-  const s1 = wb.getWorksheet('بيانات الفواتير');
+  const s1 = await load(dir, detFile(dir));
   const header = s1.getRow(1).values.slice(1);
   assert.ok(header.includes(REF), 'line-sheet header union includes الرقم المرجعي from the new part');
   const refCol = header.indexOf(REF) + 1;
@@ -119,11 +119,9 @@ test('T-059 merge: header union when only the newer part carries رقم الفا
 
   await mergeFolder(ExcelJS, dir, { onStatus: () => {} });
 
-  const combinedName = [...dir.files.keys()].find((n) => /COMBINED.*\.xlsx$/.test(n));
-  const wb = new ExcelJS.Workbook();
-  await wb.xlsx.load((await (await dir.getFileHandle(combinedName)).getFile()).arrayBuffer());
-  for (const sheet of ['جميع الفواتير', 'بيانات الفواتير']) {
-    const s = wb.getWorksheet(sheet);
+  for (const [label, nm] of [['summary', sumFile(dir)], ['details', detFile(dir)]]) {
+    const sheet = label;
+    const s = await load(dir, nm);
     const header = s.getRow(1).values.slice(1);
     assert.ok(header.includes(NUM), `${sheet}: header union includes ${NUM}`);
     const numCol = header.indexOf(NUM) + 1;
@@ -168,50 +166,43 @@ test('T-073 merge: the scratch .jsonl is cleaned up even when Phase 2 fails', as
   assert.deepEqual(left, [], `scratch removed on the failure path too, got ${JSON.stringify(left)}`);
 });
 
-test('T-074 merge: parts split on the row caps that keep a part inside browser memory', async () => {
+test('T-074 output rolls over to a new file at the row cap, without losing or renumbering rows', async () => {
   const dir = fakeDir();
   const U = 'الرقم الإلكترونى';
-  // 5 invoices, 2 line rows each, in one source file
   const sum = [], lines = [];
   for (let i = 1; i <= 5; i++) { sum.push([i, 'U' + i]); lines.push(['L' + i + 'a', 'U' + i], ['L' + i + 'b', 'U' + i]); }
   await putXlsx(dir, 'eInvoices_2026_Sent_a.xlsx', ['مسلسل', U], sum, ['رقم الفاتورة', U], lines);
 
-  await mergeFolder(ExcelJS, dir, { onStatus: () => {}, partSum: 2, partLine: 1e9 });
+  await mergeFolder(ExcelJS, dir, { onStatus: () => {}, rowCap: 2 });
 
-  const parts = [...dir.files.keys()].filter((n) => /COMBINED.*\.xlsx$/.test(n)).sort();
-  assert.equal(parts.length, 3, `5 invoices at 2 per part -> 3 parts, got ${JSON.stringify(parts)}`);
+  const files = sumFiles(dir);
+  assert.equal(files.length, 3, `5 invoices at 2 per file -> 3 summary files, got ${JSON.stringify(files)}`);
 
-  // serial numbering stays continuous 1..5 across the parts, and every invoice survives exactly once
   const serials = [], uuids = [];
-  for (const nm of [parts.find((n) => !/_part/.test(n)), ...parts.filter((n) => /_part/.test(n))]) {
-    const wb = new ExcelJS.Workbook();
-    await wb.xlsx.load((await (await dir.getFileHandle(nm)).getFile()).arrayBuffer());
-    const s0 = wb.worksheets[0], hdr = s0.getRow(1).values.slice(1);
+  for (const nm of files.sort()) {
+    const s0 = await load(dir, nm);
+    const hdr = s0.getRow(1).values.slice(1);
     for (let rn = 2; rn <= s0.actualRowCount; rn++) { const v = s0.getRow(rn).values; serials.push(v[1]); uuids.push(v[hdr.indexOf(U) + 1]); }
   }
-  assert.deepEqual(serials, [1, 2, 3, 4, 5], 'serial runs continuously across parts');
-  assert.deepEqual(uuids.sort(), ['U1', 'U2', 'U3', 'U4', 'U5'], 'no invoice dropped or duplicated at a part boundary');
+  assert.deepEqual(serials.sort((a, b) => a - b), [1, 2, 3, 4, 5], 'serial runs continuously across files');
+  assert.deepEqual(uuids.sort(), ['U1', 'U2', 'U3', 'U4', 'U5'], 'no invoice dropped or duplicated at a boundary');
 });
 
-test('T-075 merge: line rows alone can trigger a split (invoices with many lines)', async () => {
+test('T-075 the details file rolls over on its own, independently of the summary', async () => {
   const dir = fakeDir();
   const U = 'الرقم الإلكترونى';
   const sum = [], lines = [];
   for (let i = 1; i <= 4; i++) { sum.push([i, 'U' + i]); for (let k = 0; k < 3; k++) lines.push(['L' + i + '-' + k, 'U' + i]); }
   await putXlsx(dir, 'eInvoices_2026_Sent_a.xlsx', ['مسلسل', U], sum, ['رقم الفاتورة', U], lines);
 
-  // summary cap is out of reach; only the line cap can split this
-  await mergeFolder(ExcelJS, dir, { onStatus: () => {}, partSum: 1e9, partLine: 3 });
+  await mergeFolder(ExcelJS, dir, { onStatus: () => {}, rowCap: 4 });
 
-  const parts = [...dir.files.keys()].filter((n) => /COMBINED.*\.xlsx$/.test(n));
-  assert.ok(parts.length > 1, `line-row cap splits the run, got ${parts.length} part(s)`);
+  // 4 summary rows fit one file; 12 line rows cannot — the two split independently (SPEC-014)
+  assert.equal(sumFiles(dir).length, 1, 'summary stays a single file');
+  assert.ok(detFiles(dir).length > 1, `details rolled over, got ${detFiles(dir).length}`);
   let total = 0;
-  for (const nm of parts) {
-    const wb = new ExcelJS.Workbook();
-    await wb.xlsx.load((await (await dir.getFileHandle(nm)).getFile()).arrayBuffer());
-    total += wb.worksheets[1].actualRowCount - 1;
-  }
-  assert.equal(total, 12, 'every line row lands in exactly one part');
+  for (const nm of detFiles(dir)) total += (await load(dir, nm)).actualRowCount - 1;
+  assert.equal(total, 12, 'every line row lands in exactly one file');
 });
 
 test('merge: HIGH regression — an unreadable chunk is surfaced, not silently counted as merged (#2)', async () => {
@@ -229,5 +220,5 @@ test('merge: HIGH regression — an unreadable chunk is surfaced, not silently c
   const final = log[log.length - 1];
   assert.match(final, /INCOMPLETE/, 'final status refuses to claim success');
   assert.match(final, /1\/2 files/, 'reports the REAL read count (1/2), not files.length');
-  assert.ok([...dir.files.keys()].some((n) => /COMBINED.*\.xlsx$/.test(n)), 'the readable rows still produce a combined file');
+  assert.ok(sumFile(dir), 'the readable rows still produce a combined file');
 });

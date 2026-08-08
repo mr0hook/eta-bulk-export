@@ -73,8 +73,8 @@ export const EN = {
   'merge.driftRebuild': '↻ Rebuilding every part so all headers match.',
   'merge.superseded': 'ℹ️ {n} older timestamped COMBINED file(s) are superseded — safe to delete.',
   // SPEC-013 — period-labeled parts
-  'merge.phase2Period': 'Phase 2 — wrote {name} · {from} → {to} · {sum} invoices, {line} line rows',
-  'merge.split': '✂️ Split at {at} (row cap) — {sum} invoices, {line} line rows',
+  'merge.wrote': 'Wrote {name} · {rows} rows',
+  'merge.wrotePeriod': 'Wrote {name} · {from} → {to} · {rows} rows',
   'repair.noFiles': 'No xlsx files in that folder.',
   'repair.corrupt': 'CORRUPT: {name}',
   'repair.repaired': 'REPAIRED: {name} (backup .corrupt.bak)',
@@ -307,8 +307,8 @@ export const AR = {
   'merge.driftRebuild': '↻ إعادة بناء كل جزء لتوحيد العناوين.',
   'merge.superseded': 'ℹ️ يوجد {n} ملف COMBINED قديم بتاريخ — لم يعد مستخدمًا ويمكن حذفه.',
   // SPEC-013 — أجزاء موسومة بالفترة
-  'merge.phase2Period': 'المرحلة 2 — كُتب {name} · {from} ← {to} · {sum} فاتورة، {line} صف بنود',
-  'merge.split': '✂️ تقسيم عند {at} (حد الصفوف) — {sum} فاتورة، {line} صف بنود',
+  'merge.wrote': 'كُتب {name} · {rows} صف',
+  'merge.wrotePeriod': 'كُتب {name} · {from} ← {to} · {rows} صف',
   'repair.noFiles': 'لا توجد ملفات xlsx في هذا المجلد.',
   'repair.corrupt': 'تالف: {name}',
   'repair.repaired': 'تم الإصلاح: {name} (نسخة احتياطية ‎.corrupt.bak)',

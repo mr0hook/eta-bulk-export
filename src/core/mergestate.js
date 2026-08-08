@@ -5,20 +5,22 @@
 import { readText, writeText, listFiles } from './fs.js';
 
 export const STATE = 'eta_merge_state.json';
-const V = 1;
+const V = 2;   // v2: two single-sheet files + the streaming writer (SPEC-014)
 
 // SPEC-013: a part is named for the period it covers, so the folder says what is in each file
 // without opening any of them. Falls back to part numbers when the issue-date column was excluded.
 // `taken` disambiguates the case where two parts cover the same single day (a day bigger than one
 // part's cap), which would otherwise collide on one filename.
-export function combinedName(prefix, part, from, to, taken) {
-  if (!from || !to) return part <= 1 ? `${prefix}_COMBINED.xlsx` : `${prefix}_COMBINED_part${part}.xlsx`;
-  const base = `${prefix}_COMBINED_${from}_${to}.xlsx`;
-  if (!taken || !taken.has(base)) return base;
-  return `${prefix}_COMBINED_${from}_${to}_p${part}.xlsx`;
-}
-// Pre-SPEC-012 output: every merge minted a NEW timestamp-stamped set and abandoned the last one.
-// Anchored on the ISO timestamp shape (…T14-55-21-919Z) so SPEC-013's period names never match.
+// SPEC-014: summary and details are SEPARATE single-sheet files, so the small one you actually
+// browse opens instantly no matter how huge the detail set gets, and the two split independently.
+// COMBINED stays in the name because the merge input glob excludes it — rename it and the output
+// would be re-consumed as input on the next merge.
+export const KIND = { SUM: 'SUMMARY', DET: 'DETAILS' };
+export const combinedName = (prefix, kind, idx) =>
+  (idx <= 1 ? prefix + '_COMBINED_' + kind + '.xlsx' : prefix + '_COMBINED_' + kind + '_part' + idx + '.xlsx');
+export const workingName = (prefix, kind, idx) => combinedName(prefix, kind, idx).replace(/\.xlsx$/, '.writing.xlsx');
+export const WORKING_RE = /\.writing\.xlsx$/i;
+
 export const DATED_RE = /^e(Invoices|Receipts)_COMBINED_\d{4}-\d{2}-\d{2}T[\d-]+Z(_part\d+)?\.xlsx$/i;
 
 export async function readState(dir) {
@@ -27,7 +29,11 @@ export async function readState(dir) {
     if (!raw) return null;
     const j = JSON.parse(raw);
     if (!j || typeof j !== 'object' || j.v !== V) return null;
-    if (!Array.isArray(j.consumed) || !Array.isArray(j.uuids) || !Array.isArray(j.parts)) return null;
+    if (!Array.isArray(j.consumed) || !Array.isArray(j.uuids)) return null;
+    if (!j.parts || !Array.isArray(j.parts.summary) || !Array.isArray(j.parts.details)) return null;
+    // Parts written by the old ExcelJS path use sharedStrings; the streaming top-up copies raw row
+    // XML and would produce garbage against them. Force one rebuild instead.
+    if (j.writer !== 'stream-v1') return null;
     return j;
   } catch { return null; }
 }
@@ -50,7 +56,7 @@ export async function fileSizes(dir, names) {
 export function decideMode(state, files, sizes, prefix) {
   if (!state) return { mode: 'full', reason: 'no-state', newFiles: files };
   if (state.prefix !== prefix) return { mode: 'full', reason: 'prefix-changed', newFiles: files };
-  if (!state.parts.length) return { mode: 'full', reason: 'no-parts', newFiles: files };
+  if (!state.parts.summary.length) return { mode: 'full', reason: 'no-parts', newFiles: files };
 
   const consumed = new Map((state.consumed || []).map((c) => [c.name, c.size]));
   for (const [name, size] of consumed) {
@@ -66,5 +72,5 @@ export function decideMode(state, files, sizes, prefix) {
 // A part the user deleted (or that never landed) means the set on disk no longer matches the state.
 export async function partsIntact(dir, state) {
   const present = new Set(await listFiles(dir, /\.xlsx$/i));
-  return (state.parts || []).every((p) => present.has(p.name));
+  return [...state.parts.summary, ...state.parts.details].every((p) => present.has(p.name));
 }
