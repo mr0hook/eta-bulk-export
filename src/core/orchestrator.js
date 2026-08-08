@@ -8,6 +8,8 @@ import { safeName } from './time.js';
 import { renderWorkbook, XLSX_MIME } from '../export/xlsx.js';
 import { resolveReferenceNumbers } from './refs.js';
 import * as store from './store.js';
+import * as folder from './folder.js';
+import { taxpayerId, taxpayerName } from './registration.js';
 import * as fs from './fs.js';
 import * as keepalive from './keepalive.js';
 import { createSessionKeeper } from './session.js';
@@ -34,11 +36,11 @@ const TOKEN_WAIT_POLL_MS = 15 * 1000;          // how often to re-read the token
 const TOKEN_WAIT_MAX_POLLS = 1920;
 
 export function createOrchestrator(hooks = {}) {
-  const { onStatus = () => {}, onProgress = () => {}, onPlan = () => {}, onToken = () => {}, onCount = () => {}, onChunk = () => {}, guard = async () => true } = hooks;
+  const { onStatus = () => {}, onProgress = () => {}, onPlan = () => {}, onToken = () => {}, onCount = () => {}, onChunk = () => {}, guard = async () => true, confirmFolder = async () => false } = hooks;
   // onStatus(msg, meta) — meta { level:'ok'|'err'|'warn'|'wait'|'run'|'info', terminal?, kind? } lets the UI
   // classify without string-sniffing; kind marks high-frequency lines the run log coalesces (rate/page/probe).
   const rate = (w) => onStatus(t('orch.rateWait', { s: Math.round(w / 1000) }), { level: 'wait', kind: 'rate' });
-  let dirHandle = null, running = false, currentCtrl = null;
+  let dirHandle = null, running = false, currentCtrl = null, folderOk = null;
   const flags = { paused: false, halted: false };
   // SPEC-009 — keeps the portal SESSION host alive for the length of a run (see session.js). The
   // run itself only ever talks to the API host, which is exactly why the session idles out.
@@ -55,7 +57,40 @@ export function createOrchestrator(hooks = {}) {
   const stop = (v) => { flags.paused = flags.paused || v === 'pause'; flags.halted = flags.halted || v === 'halt'; currentCtrl?.abort(); };
 
   async function pickFolder() { dirHandle = await fs.pickFolder(); await fs.ensurePermission(dirHandle); try { await fs.idbSet('dh_last', dirHandle); } catch {} return dirHandle.name; }
-  function setFolder(h) { dirHandle = h; }
+  function setFolder(h) { dirHandle = h; folderOk = null; }
+
+  // SPEC-010: an export folder belongs to ONE taxpayer. This must gate every path that writes —
+  // and it lives here rather than in pickFolder() because drawer.js restores the last handle from
+  // IndexedDB through setFolder(), which never goes near pickFolder(). Cached per handle so a
+  // multi-hour run doesn't re-read the stamp on every chunk.
+  async function folderAllowed({ allowUnverified = false } = {}) {
+    if (!dirHandle) return false;
+    if (folderOk === dirHandle) return true;
+    const rin = taxpayerId(), company = taxpayerName();
+    let v;
+    try { v = await folder.verify(dirHandle, rin); }
+    catch (e) { onStatus(t('folder.checkFailed', { msg: String(e?.message || e) }), { level: 'err' }); return false; }
+    if (v.state === 'fresh') { try { await folder.claim(dirHandle, rin, company); } catch {} v = { state: 'ok' }; }
+    else if (v.state === 'needsConfirm') {
+      const yes = await confirmFolder({ rin, company });
+      if (!yes) { onStatus(t('folder.declined'), { level: 'warn' }); return false; }
+      try { await folder.claim(dirHandle, rin, company); } catch {}
+      v = { state: 'ok' };
+    }
+    if (v.state === 'blocked') {
+      onStatus(t('folder.blocked', { company: v.company || t('folder.unnamed'), rin: v.owner }), { level: 'err', terminal: true });
+      return false;
+    }
+    if (v.state === 'unverified') {
+      // Merge reads files the user already has and writes only derived output, so it must stay
+      // usable while logged out — but only on a folder someone has already claimed, and it says so.
+      // Deliberately NOT cached: the next call re-checks once the user logs back in.
+      if (allowUnverified && v.owner) { onStatus(t('folder.mergeUnverified'), { level: 'warn' }); return true; }
+      onStatus(t('folder.unverified'), { level: 'warn' }); return false;
+    }
+    folderOk = dirHandle;
+    return true;
+  }
   const folderName = () => dirHandle?.name || null;
 
   async function plan(sel) {
@@ -79,7 +114,7 @@ export function createOrchestrator(hooks = {}) {
       from, to, cap: SRC.cap, totalRows, biggest, chunks, doneIds: [], failedIds: [], excludeColumns: sel.excludeColumns || [], downloadPdf: !!sel.downloadPdf,
     };
     store.saveState(p);
-    if (dirHandle) await store.writeProgress(dirHandle, p, 'planned');
+    if (dirHandle && await folderAllowed()) await store.writeProgress(dirHandle, p, 'planned');
     onPlan(p);
     return p;
   }
@@ -89,6 +124,7 @@ export function createOrchestrator(hooks = {}) {
     if (!window.ExcelJS) { onStatus(t('orch.noExcel'), { level: 'err' }); return; }
     if (!dirHandle) { onStatus(t('orch.pickFolder'), { level: 'warn' }); return; }
     if (!(await fs.ensurePermission(dirHandle))) { onStatus(t('orch.permLost'), { level: 'err' }); return; }
+    if (!(await folderAllowed())) return;   // SPEC-010: never write into another taxpayer's folder
     running = true; keepalive.start(); session.start();
     const SRC = SOURCES[plan.source] || SOURCES.invoices;
     const sp = statusPlan(plan.statuses, SRC);
@@ -274,6 +310,9 @@ export function createOrchestrator(hooks = {}) {
     // A folder handle restored from IndexedDB after a reload comes back in 'prompt' state — re-request within
     // the click gesture BEFORE reading it, else dir.entries() throws NotAllowedError and wedges the UI.
     if (!(await fs.ensurePermission(dirHandle))) { onStatus(t('orch.permResume'), { level: 'warn' }); return null; }
+    // Before readProgress/scanDoneFromFolder — those are the exact calls that would adopt another
+    // taxpayer's plan and mark their chunk files as ours (SPEC-010).
+    if (!(await folderAllowed())) return null;
     const prog = await store.readProgress(dirHandle);
     if (!prog?.chunks) { onStatus(t('orch.noProgress'), { level: 'warn' }); return null; }
     const SRC = SOURCES[prog.source] || SOURCES.invoices;
@@ -292,6 +331,7 @@ export function createOrchestrator(hooks = {}) {
   return {
     pickFolder, setFolder, folderName, plan, start, resume,
     pause: () => stop('pause'), halt: () => stop('halt'), tokenStatus, SOURCES,
-    dir: () => dirHandle, ensureDir: async () => { if (!dirHandle) await pickFolder(); return dirHandle; },
+    dir: () => dirHandle,
+    ensureDir: async (opts) => { if (!dirHandle) await pickFolder(); return (await folderAllowed(opts)) ? dirHandle : null; },
   };
 }

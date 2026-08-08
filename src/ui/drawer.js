@@ -361,6 +361,9 @@ export function mountUI() {
   const logLine = (m, meta) => { rlog.push(m, meta); renderLog(); saveLogSoon(meta && meta.terminal); };
 
   const orch = createOrchestrator({
+    // SPEC-010: a folder holding exports but no owner stamp is the one case the tool must not guess
+    // about — it is exactly where a pre-fix run may already have mixed two companies. Ask once.
+    confirmFolder: ({ rin, company }) => confirmModal(t('folder.confirmTitle'), t('folder.confirmBody', { company: company || t('folder.unnamed'), rin })),
     onStatus: (m, meta) => {
       const clean = !!(meta && meta.kind === 'done' && meta.level === 'ok');   // completed with zero failed chunks
       if (meta && meta.terminal) logRun = clean ? 'done' : 'resumable';   // set BEFORE logLine so its terminal flush persists the state
@@ -596,7 +599,7 @@ export function mountUI() {
   $('resume').onclick = async () => { setBusy(true); try { const p = await orch.resume(); if (p) { currentPlan = p; $('start').disabled = false; } } catch (e) { logLine(t('ft.resumeFailed', { msg: e?.message || e }), { level: 'err' }); } finally { setBusy(false); } };
   $('merge').onclick = async () => {
     setBusy(true);
-    try { const d = await orch.ensureDir(); if (d) { $('folder').textContent = d.name; await mergeFolder(window.ExcelJS, d, { onStatus: (m) => { logLine(m); setFt('run', m); } }); } }
+    try { const d = await orch.ensureDir({ allowUnverified: true }); if (d) { $('folder').textContent = d.name; await mergeFolder(window.ExcelJS, d, { onStatus: (m) => { logLine(m); setFt('run', m); } }); } }
     catch (e) { logLine(t('ft.mergeFailed', { msg: e?.message || e }), { level: 'err' }); setFt('err', t('ft.mergeFailedShort')); }
     setBusy(false);
   };

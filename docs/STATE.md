@@ -6,12 +6,12 @@
 > Track: STANDARD · Started: 2026-07-27 (Agent OS adopted mid-project at v0.3.0) · Client: internal
 
 ## NEXT ACTION
-→ Build F-11 (SPEC-010, TIN-scoped folders): write test/folder.test.mjs T-076..T-083 first, watch
-them fail, then src/core/folder.js, then the ensureDir guard (T-084/T-085), then the drawer confirm
-+ i18n. This jumps the queue ahead of F-12..F-14 because it is a live silent-corruption bug, not a
-feature: resume decides what is already downloaded by filename alone (store.js:49 →
-orchestrator.js:286), so a second company in the same folder gets an export containing the first
-company's invoices with no error shown.
+→ Build F-12 (run log persisted to the folder), spec-first as SPEC-011. User directive: a tab kill
+loses the run log while eta_progress_*.json survives. Key constraint found during design: an FSA
+writable does not durably land until close(), so the crash-safe shape is open/append/close in small
+batches (the OPPOSITE of the long-lived stream F-10 used for the merge scratch) — and the folder log
+must be append-only, since runlog.js is ring-bounded to 200 entries and would otherwise lose history.
+Then F-13 (incremental merge), then F-14 (period-labeled parts).
 
 Parked (user smoke, not blocking): overnight smoke below; plus confirm the F-10 merge fix against
 the real big folder that used to fail.
@@ -43,7 +43,7 @@ portal smoke + the documenttypes/LIVE_REJECT_PATH DevTools captures into the sam
 | F-08 | Note reference → original invoice NUMBER | VALIDATED | SPEC-008 | T-049..T-059; free from the corpus, cached lookup otherwise; merged 0a18559 |
 | F-09 | Overnight session keep-warm | TESTING | SPEC-009 | T-060..T-071 green; unit-complete, but only an overnight run can confirm the real cause — user smoke pending |
 | F-10 | Merge survives big folders + never strands scratch files | VALIDATED | (fix, no spec) | T-072..T-075; root cause = OOM part sizes + O(n²) append + happy-path-only cleanup; suite 198→202 |
-| F-11 | TIN-scoped export folders (block a second company) | SPEC'D | SPEC-010 | T-076..T-085; live silent-corruption bug — resume matches chunks by filename with no owner check |
+| F-11 | TIN-scoped export folders (block a second company) | VALIDATED | SPEC-010 | T-076..T-090; suite 202→213. Guard in ensureDir+start+resume+plan; merge may proceed logged-out on a claimed folder |
 | F-12 | Run log persisted to the folder | PLANNED | — | runlog.js is in-memory + localStorage only; lost on tab kill. Note: FSA needs periodic close() to be crash-safe |
 | F-13 | Incremental merge (only new chunk files) | PLANNED | — | Design agreed 2026-08-08: stable COMBINED names, eta_merge_state.json, auto full rebuild on column drift |
 | F-14 | Period-labeled, day-aligned COMBINED parts | PLANNED | — | Parts named/logged by the date range they cover; boundaries prefer day edges |

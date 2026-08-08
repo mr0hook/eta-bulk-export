@@ -29,7 +29,10 @@ const { createOrchestrator } = await import('../src/core/orchestrator.js');
 
 const b64url = (o) => Buffer.from(JSON.stringify(o)).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 const jwt = (exp) => `h.${b64url({ exp })}.s`;
-const setTokenMinutes = (mins) => lsBag.set('USER_DATA', JSON.stringify({ access_token: jwt(Math.floor(Date.now() / 1000) + mins * 60) }));
+// A real portal session always carries the logged-in taxpayer's TaxRin; SPEC-010's folder guard
+// refuses to write into a folder it can't attribute, so the fixture has to model that.
+const TEST_RIN = '100000001';
+const setTokenMinutes = (mins) => lsBag.set('USER_DATA', JSON.stringify({ access_token: jwt(Math.floor(Date.now() / 1000) + mins * 60), profile: { TaxRin: TEST_RIN } }));
 
 const GOOD_DETAIL = invoices[0].detail;
 const okResp = (body) => ({ status: 200, ok: true, json: async () => body, headers: { get: () => null } });
