@@ -68,6 +68,15 @@ portal smoke + the documenttypes/LIVE_REJECT_PATH DevTools captures into the sam
 - (resolved) refreshLicense ungated-branch rj-scan gap — fixed in F-06.
 
 ## Session log
+- 2026-08-09 · Anti-tamper direction explored (no code changes). Findings: the current cheapest
+  bypass needs no patching at all — `reg_verdict` is hand-editable localStorage and `graceVerdict`
+  (registration.js:150) honours it whenever the worker is unreachable. Direction agreed so far:
+  move the chunk planner server-side (its answers are data-dependent, so they can't be replayed,
+  and a naive re-implementation silently drops invoices), add server-side job records + progress
+  checkpointing, keep invoice content in the browser. Resume scope settled: same-machine crash
+  recovery + admin visibility only — NOT cross-device. Planning offline = hard fail with retry.
+  Wrote docs/specs/2026-08-09-admin-backend-roadmap.md (A0..A6 menu, not approved). The S1/S2
+  design is still mid-brainstorm — section 1 (architecture/boundaries) presented, awaiting sign-off.
 - 2026-07-27 · v0.4 design approved + plan validated; Agent OS adopted; git baseline; STATE created
 - 2026-07-27 · F-01..F-06 built spec-first (SPEC-001..006, T-001..T-038); suite 126→161 green;
   v0.4.0 packaged (eta-bulk-export-v0.4.0.zip); remaining: user portal smoke + live captures
