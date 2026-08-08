@@ -195,7 +195,7 @@ test('the light theme stays opt-in — the drawer defaults to dark', () => {
 });
 
 test('the byline is RTL-safe and not translated', () => {
-  assert.ok(SRC.includes('<div class="tag">omarsoliman.dev</div>'), 'byline markup missing');
+  assert.ok(SRC.includes('<div class="tag">by omarsoliman.dev</div>'), 'byline markup missing');
   assert.ok(!SRC.includes('data-i18n="ui.tag"'), 'the byline must not be swapped by the translator');
   const i = SRC.indexOf('.tag{');
   const rule = SRC.slice(i, SRC.indexOf('}', i));

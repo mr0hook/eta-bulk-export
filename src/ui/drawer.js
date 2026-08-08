@@ -62,8 +62,12 @@ const CSS = `
 *{ box-sizing:border-box }
 [hidden]{ display:none !important }   /* the hidden attribute must always win over any class display: rule (this bit .gate and #modal-root) */
 .pill{ position:fixed; right:16px; bottom:16px; z-index:2147483647; font:600 13px var(--font-ui);
+  display:inline-flex; align-items:center; gap:8px;
   padding:10px 14px; border-radius:var(--r); border:1px solid var(--gold-bd); color:var(--on-gold); cursor:pointer;
   background:linear-gradient(var(--gold2),var(--gold)); box-shadow:var(--glow) }
+/* The brand star replaces the 📥 emoji: an emoji renders in the OS colour font, which ignores the
+   palette entirely and looks different on every machine. The mark inherits currentColor. */
+.pill svg{ width:15px; height:15px; flex:none }
 .pill:hover{ filter:brightness(1.05) }
 .scrim{ position:fixed; inset:0; z-index:2147483646; background:var(--scrim); opacity:0; pointer-events:none; transition:var(--dur-2) var(--ease-out) }
 .scrim.on{ opacity:1; pointer-events:auto }
@@ -230,12 +234,12 @@ export function mountUI() {
 
   const YEARS = ['2020', '2021', '2022', '2023', '2024', '2025', '2026'];
   root.innerHTML += `
-    <button class="pill" id="pill">📥 ETA Bulk</button>
+    <button class="pill" id="pill">${SEAL} ETA Bulk</button>
     <div class="scrim" id="scrim"></div>
     <aside class="drawer" id="drawer" dir="ltr" role="dialog" aria-modal="true" aria-label="ETA Bulk Export">
       <header class="hd">
         <div class="hd-top">
-          <div class="brand"><div class="seal">${SEAL}</div><div><div class="wm">ETA&nbsp;Bulk</div><div class="tag">omarsoliman.dev</div></div></div>
+          <div class="brand"><div class="seal">${SEAL}</div><div><div class="wm">ETA&nbsp;Bulk</div><div class="tag">by omarsoliman.dev</div></div></div>
           <div style="display:flex;align-items:center;gap:8px"><span class="chip" id="tok"><span class="dot"></span><span class="num">—</span></span><button class="x" id="langBtn" data-i18n-title="ui.langTitle" title="العربية / English" aria-label="Language" style="font-size:13px;font-weight:700">ع</button><button class="x" id="themeBtn" data-i18n-title="ui.themeTitle" title="Light / dark theme" aria-label="Toggle theme" style="font-size:15px">🌙</button><button class="x" id="close" aria-label="Close">×</button></div>
         </div>
         <div class="src" id="srcrow">
