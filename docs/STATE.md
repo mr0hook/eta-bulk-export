@@ -5,6 +5,13 @@
 > credit/debit-note reference linkage.
 > Track: STANDARD · Started: 2026-07-27 (Agent OS adopted mid-project at v0.3.0) · Client: internal
 
+## Vocabulary — two different "merges", do not confuse them
+- **merge (client)** — `src/core/merge.js`. Combines the per-chunk xlsx files in the USER'S FOLDER
+  into the COMBINED output. Incremental (F-13). Never leaves the device.
+- **migration (server)** — SPEC-017. A one-time reshuffle of the backend's OWN account records
+  (name/email/company/TRN/quota) from KV into D1 so a user is one row instead of one per browser.
+  Touches no export files and no invoice data. Nothing a taxpayer's documents ever pass through.
+
 ## NEXT ACTION
 → DECIDE TWO THINGS so the next phase can start. Both are yours; everything unblocked is done.
   (1) The S1/S2 planner design — architecture section presented (planner leaves the extension, jobs
