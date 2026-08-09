@@ -11,7 +11,7 @@ code{padding:1px 5px;border-radius:4px;background:#eef1f6;font-family:ui-monospa
 .tag{display:inline-block;font:600 11px ui-monospace;padding:2px 8px;border-radius:999px;background:#e6f5ee;color:#177d54;border:1px solid #bfe3d1}
 </style></head><body>
 <h1>ETA Bulk Export — Privacy Policy</h1>
-<p class="sub">Last updated: 12 July 2026 &middot; Data controller: <b>Omar Soliman</b></p>
+<p class="sub">Last updated: 9 August 2026 &middot; Data controller: <b>Omar Soliman</b></p>
 
 <p>ETA Bulk Export is a Chrome extension that lets an Egyptian taxpayer bulk-export <b>their own</b> e-invoices
 and e-receipts from the Egyptian Tax Authority (ETA) portal to Excel/JSON files. This policy explains exactly
@@ -32,6 +32,8 @@ Cloudflare):</p>
 <tr><td>On registration</td><td>Name, email, phone, company (typed by you); your tax registration number (RIN) and taxpayer legal name (read automatically from the ETA portal); a random device identifier; the extension version.</td><td>To create your account, bind it to your RIN, and let the operator contact you about the tool.</td></tr>
 <tr><td>Automatically by the server</td><td>Your IP address and the country derived from it (via Cloudflare); the result of an email-deliverability check performed by a third-party service (Disify).</td><td>Abuse prevention (rate limiting) and rejecting invalid/disposable email addresses.</td></tr>
 <tr><td>On each licence check-in</td><td>Your RIN, the extension version, and cumulative usage counters — the number of export runs, the number of documents exported, the number of PDFs downloaded, and the time of the last export. Counts only: the contents of your invoices and receipts are never sent.</td><td>Access-control enforcement (lock, disable, require a newer version, block a voided registration number) and understanding how much the tool is used.</td></tr>
+<tr><td>When you run an export</td><td>A record of the export itself: your tax registration number, which document type and date range you asked for, and how many documents each part of that range contained. As the run proceeds, the same progress messages the tool displays to you (for example &ldquo;Chunk 3 of 412 fetching 200/1000&rdquo;) &mdash; capped at the most recent 200 lines. <b>No invoice or receipt content, and no document numbers.</b></td><td>To plan the export on the server so it can stay within the Tax Authority&rsquo;s per-search limits, to let you resume an interrupted export, and to let the operator see why an export failed without asking you to send a log.</td></tr>
+<tr><td>When an export finishes successfully</td><td>The detailed part-by-part breakdown and the progress messages are <b>deleted</b>. A summary row is kept: when it ran, the date range, the document type and the totals.</td><td>The summary is what your account history and support enquiries are answered from. The working detail has no further purpose once the files exist on your computer.</td></tr>
 <tr><td>If you submit a bug report</td><td>The message you type; your browser's user-agent string; the extension version; the extension's recent activity log (status messages such as "Chunk 3/12 fetching…" — never invoice or receipt contents); and a run summary (date range, chunk/row counts). The report form states this before you send.</td><td>To diagnose and fix the issue.</td></tr>
 </table>
 
@@ -44,6 +46,10 @@ named here (Cloudflare for hosting and storage; Disify for email validation).</p
 <p>Account records are kept until you request deletion or the account is removed by the operator. Administrative
 action logs auto-expire after 180 days. Server error logs auto-expire after 30 days. Anti-abuse counters
 expire automatically within hours.</p>
+<p><b>Export records:</b> the part-by-part breakdown of a date range and the progress messages are deleted as
+soon as that export completes successfully. They are kept while an export is unfinished, because they are
+exactly what lets you resume it &mdash; deleting them early would lose your place. The summary row (date, range,
+document type, totals) is kept with your account.</p>
 
 <h2>Your choices &amp; rights</h2>
 <p>Registration is required only for bulk export; you can stop using the extension and request deletion of your
