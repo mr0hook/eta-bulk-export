@@ -6,6 +6,7 @@ import { buildUrl, apiGet, probeCount, fetchAllRows, fetchDetails, fetchPdf, map
 import { planViaServer } from './planclient.js';   // SPEC-016: the server decides where to cut; chunker.js is now test-only
 import { safeName } from './time.js';
 import { renderWorkbook, XLSX_MIME } from '../export/xlsx.js';
+import { refreshMapping } from '../export/mapsync.js';   // SPEC-021: column mapping served by the worker, bundled fallback
 import { resolveReferenceNumbers } from './refs.js';
 import * as store from './store.js';
 import * as folder from './folder.js';
@@ -177,6 +178,13 @@ export function createOrchestrator(hooks = {}) {
     // SPEC-008: run-level uuid→invoice-number cache for credit/debit note references. Shared across
     // chunks on purpose — one original is resolved once however many notes point at it.
     if (plan.source === 'invoices') opts.refNumbers = new Map();
+    // SPEC-021: confirm the column mapping with the worker ONCE per run, before the first sheet is
+    // built, so every chunk of one export uses the same headers. Best-effort by contract: if the
+    // server is unreachable the bundled mapping renders a correct export and we say so rather than
+    // failing the run. (The plan, by contrast, HARD-requires the server — see planclient.js.)
+    const map = await refreshMapping(plan.source);
+    if (map.origin !== 'server') onStatus(t('orch.mapBundled'), { level: 'warn' });
+    else if (!map.fetched) onStatus(t('orch.mapCached'), { level: 'warn' });
     const done = new Set(plan.doneIds || []); const failed = new Set(plan.failedIds || []);
     let rowsFetched = plan.chunks.filter((c) => done.has(c.id)).reduce((s, c) => s + Math.min(c.count, plan.cap || 1e12), 0);
     onCount(rowsFetched, plan.totalRows);   // seed from already-completed chunks (resume-aware)

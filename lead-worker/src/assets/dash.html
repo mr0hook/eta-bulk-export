@@ -470,6 +470,62 @@ tr.wedged > td:first-child{box-shadow:inset 3px 0 0 var(--bad)}
 .custed{border:1px solid color-mix(in srgb,var(--accent) 45%,transparent);border-radius:var(--r);
   padding:var(--s4);background:var(--accent-soft);margin-top:var(--s3)}
 
+/* ── Slice 4: bug reports, the job join, and the audit trail ──────────────── */
+/* A MATCHED run and a GUESSED run must never look alike. Solid pill = the report's
+   own diagnostics identified that run. Dashed pill with a question mark = the
+   server offered the nearest run this browser touched and LABELLED it a guess;
+   the portal repeats the label instead of quietly promoting it to a fact. */
+.pill.guess{background:transparent;border-style:dashed}
+.pill.guess::before{content:"? "}
+.callout.guess{border-style:dashed}
+
+/* Who was holding the token. `token` is the shared bearer secret and names nobody.
+   An Access identity is a name the request HEADER asserted — never verified here —
+   so it carries its own marker and a dotted rule, and is never given the green of
+   something checked. Two shapes, told apart at a glance, neither flattering. */
+.who{display:inline-flex;align-items:center;gap:6px;font:600 11.5px var(--font-mono);letter-spacing:.02em;max-width:100%}
+.who .nm{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
+.who.tok .nm{color:var(--muted);font-weight:500;font-style:italic}
+.who.acc .nm{color:var(--text2);border-bottom:1px dotted var(--line2);padding-bottom:1px}
+.who .as{flex:none;font:500 9px/1.7 var(--font-mono);text-transform:uppercase;letter-spacing:.08em;
+  color:var(--warn);border:1px dashed var(--warnln);border-radius:var(--r-sm);padding:0 5px;background:var(--warnbg)}
+.who .as.derived{color:var(--faint);border-color:var(--line2);background:transparent}
+/* On a timeline the actor sits in a fixed-width rail, so an address long enough to
+   shove the entry sideways is truncated instead — the marker beside it is the part
+   that must never be lost, since it is what says the name is only asserted. */
+.tl .tk .who{max-width:190px}
+
+/* before → after. The whole point of the trail: an entry recording only that a
+   button was pressed cannot answer "who set this to 1". */
+.diff{display:flex;align-items:center;gap:7px;flex-wrap:wrap;font-size:12.5px}
+.diff .fld{font:500 9.5px/1.7 var(--font-mono);text-transform:uppercase;letter-spacing:.08em;
+  color:var(--muted);border:1px solid var(--line);border-radius:var(--r-sm);padding:0 5px;background:var(--panel2)}
+.diff .b4{color:var(--muted)}
+.diff .b4 b{font-weight:500}
+.diff .arw{color:var(--accent);font-weight:700}
+.diff .af b{color:var(--text)}
+.dctx{display:flex;gap:4px 14px;flex-wrap:wrap;margin-top:5px;font-size:11px;color:var(--muted)}
+.dctx b{color:var(--text2);font-weight:600}
+
+/* The run log around the report — a tail, read like a terminal, not a table. */
+.log{margin:0;border:1px solid var(--line);border-radius:var(--r);background:var(--well);
+  max-height:430px;overflow:auto;padding:var(--s2) 0}
+.log .ln{display:grid;grid-template-columns:74px 54px minmax(0,1fr);gap:var(--s3);
+  padding:2px var(--s4);font:500 11.5px/1.6 var(--font-mono);color:var(--text2)}
+.log .ln:hover{background:var(--panel2)}
+.log .ln .t{color:var(--faint)}
+.log .ln .lv{text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-size:9.5px;line-height:2}
+.log .ln .tx{word-break:break-word;white-space:pre-wrap}
+.log .ln.bad{background:var(--badbg)} .log .ln.bad .lv{color:var(--bad)}
+.log .ln.warn .lv{color:var(--warn)}
+/* The moment the report was filed, drawn INTO the tail — the line the operator is
+   looking for is "what was on screen when they pressed the button". */
+.filed{display:flex;align-items:center;gap:var(--s3);padding:6px var(--s4);
+  font:500 9.5px var(--font-mono);text-transform:uppercase;letter-spacing:.09em;color:var(--accent)}
+.filed::before,.filed::after{content:"";flex:1;height:1px;background:color-mix(in srgb,var(--accent) 45%,transparent)}
+pre.log{padding:12px var(--s4);white-space:pre-wrap;word-break:break-word;
+  font:500 11.5px/1.6 var(--font-mono);color:var(--text2)}
+
 /* ── Responsive: laptop first, then narrow ────────────────────────────────── */
 @media(max-width:1180px){
   :root{--rail:64px}
@@ -576,6 +632,12 @@ var S = {
   feats:[], featsErr:'', featsDone:false, featEdit:null, featRefused:null,
   custEdit:null,
   reqs:[], bugs:[], voids:[], audit:[], errs:[], trash:[], snaps:[],
+  /* Bugs are server-filtered, server-paged and server-joined (slice 4). `bjoined`
+     records whether this answer actually carried the joins — without a D1 binding
+     the server hands /api/bugs back to the legacy KV reader, which carries none. */
+  btotal:0, bpage:1, bpages:1, bopen:0, bq:'', bugsErr:'', bjoined:false,
+  bug:null, bugSel:'', bugErr:'',
+  aud:null, audErr:'', apage:1, aactor:'', atarget:'', aaction:'',
   insights:null, health:null, cfg:{}, stats:null,
   rfilter:'all', bfilter:'all',
   autoTimer:null, lastLoad:0
@@ -684,6 +746,7 @@ var ICON = {
   activation:'<path d="M12 2.9l7.3 2.9v5.5c0 4.5-3 7.9-7.3 9.6-4.3-1.7-7.3-5.1-7.3-9.6V5.8z"/><path d="M8.9 12.1l2.1 2.2 4.1-4.4"/>',
   features:'<path d="M4 7.5l7.3-4.2a1.4 1.4 0 011.4 0L20 7.5v9l-7.3 4.2a1.4 1.4 0 01-1.4 0L4 16.5z"/><path d="M4 7.5l8 4.6 8-4.6"/><path d="M12 12.1V21"/>',
   activity:'<path d="M2.8 12.4h4.1L9.4 6l4 13.2 2.4-6.8h5.4"/>',
+  audit:'<path d="M6 3.4h8.6L19 7.8V20a1 1 0 01-1 1H6a1 1 0 01-1-1V4.4a1 1 0 011-1z"/><path d="M14 3.6v4.6h4.7"/><path d="M8.2 12.4h7M8.2 16h4.6"/>',
   tools:'<circle cx="12" cy="12" r="3.2"/><path d="M12 3v2.3M12 18.7V21M21 12h-2.3M5.3 12H3M18.4 5.6L16.8 7.2M7.2 16.8L5.6 18.4M18.4 18.4l-1.6-1.6M7.2 7.2L5.6 5.6"/>'
 };
 function ic(k,cls){ return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"'+(cls?' class="'+cls+'"':'')+' aria-hidden="true">'+ICON[k]+'</svg>'; }
@@ -699,19 +762,21 @@ var SECTIONS = [
   {group:'Signals', items:[
     {id:'insights',  label:'Insights',  icon:'insights',  title:'Insights',   sub:'Aggregates from the nightly snapshot'},
     {id:'requests',  label:'Requests',  icon:'requests',  title:'RIN requests', sub:'Access requests waiting on a decision'},
-    {id:'bugs',      label:'Bugs',      icon:'bugs',      title:'Bug reports', sub:'Reported from inside the extension'},
-    {id:'activity',  label:'Activity',  icon:'activity',  title:'Activity',   sub:'Admin action log and extension-facing errors'}
+    {id:'bugs',      label:'Bugs',      icon:'bugs',      title:'Bug reports', sub:'Every report joined to the person, the browser and the run it came out of'},
+    {id:'activity',  label:'Activity',  icon:'activity',  title:'Activity',   sub:'The newest admin actions, and the errors extensions hit against this server'}
   ]},
   {group:'System', items:[
     {id:'activation', label:'Activation', icon:'activation', title:'Activation', sub:'Plans, allowances and expiry — what a licence actually grants'},
     {id:'features',  label:'Features',  icon:'features',  title:'Feature catalogue', sub:'The vocabulary every plan and account is allowed to grant'},
+    {id:'audit',     label:'Audit',     icon:'audit',     title:'Audit trail', sub:'Every admin action, what it changed, and where the actor name came from'},
     {id:'tools',     label:'Tools',     icon:'tools',     title:'Tools',      sub:'Configuration, migration, backup, trash'}
   ]}
 ];
 var DETAIL = {
   user:   {title:'User',   sub:'Clients, devices, jobs, bugs and history on one page', parent:'users'},
   client: {title:'Client', sub:'Who exports for this taxpayer, and everything they ran', parent:'clients'},
-  job:    {title:'Export run', sub:'The chunk timeline — what the run did, and where it stopped', parent:'jobs'}
+  job:    {title:'Export run', sub:'The chunk timeline — what the run did, and where it stopped', parent:'jobs'},
+  bug:    {title:'Bug report', sub:'The report, the person, the browser, and the run it belongs to', parent:'bugs'}
 };
 function sectionMeta(id){
   if(DETAIL[id]) return DETAIL[id];
@@ -720,7 +785,9 @@ function sectionMeta(id){
 }
 function renderNav(){
   var pending = S.reqs.filter(function(r){ return r.status==='pending'; }).length;
-  var open = S.bugs.filter(function(g){ return g.status==='open'; }).length;
+  /* The open count comes from the server when the server counts it — the list on
+     screen is one filtered page and cannot be counted for a rail badge. */
+  var open = S.bjoined ? S.bopen : S.bugs.filter(function(g){ return (g.status||'open')==='open'; }).length;
   /* The wedged count rides on the rail so "is anything stuck" is answered from
      every section, not only from the two that happen to list jobs. */
   var counts = {requests:pending, bugs:open, jobs:stuckIds().length};
@@ -745,6 +812,7 @@ function go(section, arg){
   S.section = section;
   if(section==='user') S.userEmail = arg || S.userEmail;
   if(section==='client') S.clientRin = arg || S.clientRin;
+  if(section==='bug') S.bugSel = arg || S.bugSel;
   var m = sectionMeta(section);
   $('ptitle').textContent = m.title;
   $('psub').textContent = m.sub;
@@ -769,6 +837,18 @@ function repaint(section){
   var a=document.activeElement;
   if(a && /INPUT|TEXTAREA|SELECT/.test(a.tagName) && a.closest && a.closest('#views')){ S._stale=section; return; }
   paint();
+}
+/* The same guard is wrong for a FILTER box, whose entire job is to redraw the list
+   underneath it as you type. This repaint draws anyway and puts the caret back
+   exactly where it was — the results arrive, the half-typed query survives. */
+function repaintKeep(section){
+  if(S.section!==section) return;
+  var a=document.activeElement, id=null, s=null, e=null;
+  if(a && a.id && a.closest && a.closest('#views') && /INPUT|TEXTAREA/.test(a.tagName)){
+    id=a.id; try{ s=a.selectionStart; e=a.selectionEnd; }catch(err){}
+  }
+  paint();
+  if(id){ var el=$(id); if(el){ try{ el.focus(); if(s!=null) el.setSelectionRange(s,e); }catch(err){} } }
 }
 function stamp(){ S.lastLoad=Date.now(); $('stamp').textContent = 'Updated '+new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}); }
 
@@ -859,7 +939,52 @@ function loadFeatures(){
 }
 function loadStats(){ return api('/api/stats').then(function(j){ if(!guard(j)) return; if(j.ok){ S.stats=j.stats; S.cfg=j.cfg||{}; setConn('on'); repaint('tools'); } }); }
 function loadReqs(){ return api('/api/requests').then(function(j){ S.reqs=j.requests||[]; renderNav(); repaint('requests'); }); }
-function loadBugs(){ return api('/api/bugs').then(function(j){ S.bugs=j.bugs||[]; renderNav(); repaint('bugs'); }); }
+/* Bugs (slice 4). Status, search and paging all belong to the server, which also
+   does the joins — a page of reports comes back already carrying its people, its
+   browsers and its runs. */
+function bugsQuery(){
+  return '/api/bugs?status='+encodeURIComponent(S.bfilter==='all'?'':S.bfilter)
+       + '&q='+encodeURIComponent(S.bq)+'&page='+S.bpage;
+}
+function loadBugs(){
+  return api(bugsQuery()).then(function(j){
+    if(!guard(j)) return;
+    if(j.ok){
+      S.bugs=j.bugs||[]; S.bugsErr='';
+      /* Without a D1 binding the server hands this path back to the legacy KV
+         reader, whose answer has no paging, no open count and no joins. Detect
+         that from the answer rather than assuming, and say so on the page. */
+      S.bjoined = (j.pages!=null || j.openCount!=null);
+      S.btotal  = (j.total!=null ? j.total : S.bugs.length);
+      S.bpages  = (j.pages!=null ? j.pages : 1);
+      S.bopen   = (j.openCount!=null ? j.openCount
+                  : S.bugs.filter(function(g){ return (g.status||'open')==='open'; }).length);
+    } else { S.bugs=[]; S.btotal=0; S.bpages=1; S.bopen=0; S.bjoined=false; S.bugsErr=j.error||'unavailable'; }
+    renderNav(); repaintKeep('bugs');
+  });
+}
+function loadBug(id){
+  S.bug=null; S.bugErr=''; repaint('bug');
+  return api('/api/bug?id='+encodeURIComponent(id)).then(function(j){
+    if(!guard(j)) return;
+    S.bug = j.ok ? j : null; S.bugErr = j.ok ? '' : (j.error||'unavailable');
+    repaint('bug');
+  });
+}
+/* The trail. Filtering it is a SCAN — the keys carry a descending timestamp and no
+   index — so the answer reports how much it read and whether it hit its ceiling,
+   and the section repeats both rather than presenting a partial list as complete. */
+function auditQuery(){
+  return '/api/audit?page='+S.apage+'&actor='+encodeURIComponent(S.aactor)
+       + '&target='+encodeURIComponent(S.atarget)+'&action='+encodeURIComponent(S.aaction);
+}
+function loadAuditPage(){
+  return api(auditQuery()).then(function(j){
+    if(!guard(j)) return;
+    if(j.ok){ S.aud=j; S.audErr=''; } else { S.aud=null; S.audErr=j.error||'unavailable'; }
+    repaintKeep('audit');
+  });
+}
 function loadVoids(){ return api('/api/voids').then(function(j){ S.voids=j.voids||[]; repaint('tools'); }); }
 function loadAudit(){ return api('/api/audit').then(function(j){ S.audit=j.audit||[]; repaint('activity'); }); }
 function loadErrs(){ return api('/api/errors').then(function(j){ S.errs=j.errors||[]; repaint('activity'); }); }
@@ -872,10 +997,11 @@ function loadAll(){
   setConn('run');
   Promise.all([loadDashboard(), loadStats(), loadReqs(), loadBugs()]).then(stamp);
   loadUsers(); loadClients(); loadJobs(); loadPlans(); loadFeatures();
-  loadVoids(); loadAudit(); loadErrs(); loadTrash(); loadSnaps(); loadInsights(); loadHealth();
+  loadVoids(); loadAudit(); loadAuditPage(); loadErrs(); loadTrash(); loadSnaps(); loadInsights(); loadHealth();
   if(S.section==='user'&&S.userEmail) loadUser(S.userEmail);
   if(S.section==='client'&&S.clientRin) loadClient(S.clientRin);
   if(S.section==='job'&&S.jobId) loadJob(S.jobId);
+  if(S.section==='bug'&&S.bugSel) loadBug(S.bugSel);
 }
 function loadLive(){ loadDashboard(); loadJobs(); loadStats(); loadReqs(); loadBugs(); stamp(); }
 
@@ -889,6 +1015,8 @@ function logout(){
   S.jobs=[]; S.job=null; S.jobId=''; S.jpage=1; S.jstate=''; S.juser=''; S.jrin=''; S.jstuck=0;
   S.plans=[]; S.plansDone=false; S.planEdit=null; S.planRefused=null;
   S.feats=[]; S.featsDone=false; S.featEdit=null; S.featRefused=null; S.custEdit=null;
+  S.bugs=[]; S.bug=null; S.bugSel=''; S.bpage=1; S.bq=''; S.bfilter='all'; S.bopen=0; S.bjoined=false;
+  S.aud=null; S.apage=1; S.aactor=''; S.atarget=''; S.aaction='';
   $('shell').hidden=true; $('login').hidden=false; $('token').value=''; $('err').textContent='';
   setConn(''); $('stamp').textContent='';
 }
@@ -1256,6 +1384,16 @@ function pager(id,page,total){
   if(total<=PAGE) return '';
   return '<div class="pager"><button class="btn tiny" data-pg="'+id+':prev"'+(page<=1?' disabled':'')+'>&larr; Prev</button>'
     + '<span>Page '+page+' / '+pages+' &middot; '+n(total)+' rows</span>'
+    + '<button class="btn tiny" data-pg="'+id+':next"'+(page>=pages?' disabled':'')+'>Next &rarr;</button></div>';
+}
+/* A pager for the endpoints that report their own page count. The client's PAGE is
+   not the server's, so a list that is told `pages` must be paged by that number and
+   never by a local division — the two disagreeing is how a last page goes missing. */
+function pagerN(id,page,pages,total,noun){
+  pages=Math.max(1,Number(pages)||1);
+  if(pages<=1) return '';
+  return '<div class="pager"><button class="btn tiny" data-pg="'+id+':prev"'+(page<=1?' disabled':'')+'>&larr; Prev</button>'
+    + '<span>Page '+page+' / '+pages+' &middot; '+n(total)+' '+esc(noun||'rows')+'</span>'
     + '<button class="btn tiny" data-pg="'+id+':next"'+(page>=pages?' disabled':'')+'>Next &rarr;</button></div>';
 }
 function sortPage(rows,sort){
@@ -1751,19 +1889,50 @@ RENDER.user = function(){
       : '<div style="padding:4px 20px 18px" class="muted">No export runs recorded.</div>')
     + '</div>';
 
-  var bugsPanel = '<div class="panel"><div class="eyebrow">Bug reports &middot; <b>'+bs.length+'</b></div>'
-    + (bs.length ? bs.map(function(g){
-        return '<div class="callout '+(g.status==='open'?'warn':'ok')+'"><span class="cl">'+esc(g.status||'open')+'</span>'
-          + '<span class="cb">'+esc(g.message||'')+'<div class="ref">'+esc(rel(g.at)||'')+(g.rin?' &middot; '+esc(g.rin):'')+'</div></span></div>';
-      }).join('') : '<div class="muted" style="font-size:13px">None reported.</div>')
+  /* Slice 4. /api/user hands back the report RECORDS — the same rows the Bugs list
+     starts from, but without its joins: no person, no browser, and above all no run.
+     So this panel is a doorway, not a summary. It shows enough to recognise a report
+     and opens the one page that has done the joining, rather than inventing a run
+     match here from data that does not carry one. */
+  var bugsPanel = '<div class="panel"><div class="eyebrow">Bug reports &middot; <b>'+bs.length+'</b>'
+      + (bs.filter(function(g){ return (g.status||'open')==='open'; }).length
+         ? ' &middot; <b style="color:var(--warn)">'+bs.filter(function(g){ return (g.status||'open')==='open'; }).length+' open</b>' : '')+'</div>'
+    + (bs.length
+      ? bs.map(function(g){
+          var open=(g.status||'open')==='open', ver=(g.diag&&g.diag.version)||'';
+          return '<div class="callout '+(open?'warn':'ok')+'" style="cursor:pointer" data-bopen="'+esc(g.id||'')+'" title="Open the report — the person, the browser and the run it came out of">'
+            + '<span class="cl">'+(open?'open':'closed')+'</span>'
+            + '<span class="cb">'+esc(firstLine(g.message,96)||'(no message)')
+            + '<div class="ref">'+esc(rel(g.at)||cairo(g.at))
+              + (g.rin?' &middot; TRN '+esc(g.rin):'')
+              + (ver?' &middot; v'+esc(ver):'')
+              + (g.note?' &middot; noted':'')
+              + ' &middot; '+esc(String(g.id||'').slice(0,16))+'</div></span></div>';
+        }).join('')
+        + '<p class="hint" style="margin:14px 0 0">These are the records as filed. The run each one came out of is worked out on the report itself — open one to see the match, the log around the moment it was filed, and to resolve, note or delete it.</p>'
+      : '<div class="muted" style="font-size:13px">None reported.</div>')
     + '</div>';
 
+  /* The same trail the Audit section shows, filtered to this account — so it is
+     rendered by the same two functions and not by a second, poorer copy. An actor
+     name asserted by an Access header must not look verified merely because it is
+     being read on a user page instead of in the trail. */
   var auditPanel = '<div class="panel"><div class="eyebrow">History &middot; <b>'+au.length+'</b></div>'
     + (au.length ? '<ul class="tl">'+au.map(function(a){
+        /* `.tx` is a div here, not a span: auditDiff returns block-level markup and
+           the two must not be nested the wrong way round. The CSS keys off the
+           class, so nothing about the timeline changes. */
         return '<li class="'+eventClass(a.action||a.kind)+'"><span class="tt">'+esc(rel(a.at)||'—')+'</span>'
-          + '<span class="tx">'+esc(a.action||a.kind||'')+(a.detail?' <span class="mono faint">'+esc(typeof a.detail==='string'?a.detail:JSON.stringify(a.detail))+'</span>':'')+'</span>'
-          + '<span class="tk"><span class="pill muted">'+esc(a.actor||'token')+'</span></span></li>';
+          + '<div class="tx"><b>'+esc(a.action||a.kind||'—')+'</b>'+auditDiff(a)+'</div>'
+          + '<span class="tk">'+auditWho(a)+'</span></li>';
       }).join('')+'</ul>' : '<div class="muted" style="font-size:13px">No recorded admin actions against this account.</div>')
+    /* Said out loud for the same reason the Audit section reports its scan ceiling:
+       the trail has no index, so this is a filtered TAIL of the newest records, not
+       a complete history — and a short list here is not evidence that nothing else
+       happened. The button hands the question to the section that can say how far
+       it actually looked. */
+    + '<p class="hint" style="margin:14px 0 0">A tail, not a history: the server filters the newest slice of the trail to this account and returns at most 50 entries — so nothing here is evidence that nothing older happened. '
+    + '<button class="btn tiny ghost" data-audit="'+esc(u.email||S.userEmail||'')+'">Search the trail for this account</button></p>'
     + '</div>';
 
   var message = '<div class="panel"><div class="eyebrow">Message to user</div>'
@@ -1803,6 +1972,9 @@ WIRE.user = function(){
   q('#views tr.click[data-jopen]', function(tr){ tr.onclick=function(e){ if(e.target.closest('button,a,input')) return; openJob(tr.getAttribute('data-jopen')); }; });
   q('#views [data-cact]', function(b){ b.onclick=function(e){ e.stopPropagation(); clientAction(b.getAttribute('data-cact'), b.getAttribute('data-r'), function(){ loadUser(email); }); }; });
   q('#views [data-uf]', function(b){ b.onclick=function(){ toggleFeature(email,b.getAttribute('data-uf')); }; });
+  q('#views [data-bopen]', function(el){ el.onclick=function(e){
+    if(e.target.closest('button,a,input')) return; openBug(el.getAttribute('data-bopen')); }; });
+  q('#views [data-audit]', function(b){ b.onclick=function(){ openAudit(b.getAttribute('data-audit')); }; });
   if($('ufclear')) $('ufclear').onclick=function(){ clearOverride(email); };
   /* The plan selector. A cancelled warning has to put the <select> back, which is
      what the paint() inside changePlan() is for — the control must never show a
@@ -2801,56 +2973,411 @@ WIRE.requests = function(){
 };
 
 /* ═══ BUGS ════════════════════════════════════════════════════════════════ */
+/* SPEC-017 slice 4. The old list was a flat KV scan — a message, a name, a device
+   id — which answers "somebody is unhappy" and nothing else. This one asks the
+   server, which joins each report to the PERSON who filed it, the BROWSER it came
+   from, and where it can be worked out, the RUN that was in flight when they
+   pressed the button. The last join is the one that has to be handled carefully:
+   the server grades it `exact` or `inferred`, and `inferred` is a guess. The
+   portal repeats that grading everywhere the run appears and never launders it. */
+
+/* First line only, for a list row: a report is prose and the table is a scan. */
+function firstLine(s,max){
+  var raw=String(s==null?'':s);
+  var t=raw.split(/\r?\n/)[0].trim();
+  max=max||118;
+  return t.length>max ? t.slice(0,max-1)+'…' : t;
+}
+function moreLines(s){
+  var lines=String(s==null?'':s).split(/\r?\n/).filter(function(l){ return l.trim(); });
+  return lines.length>1 ? lines.length-1 : 0;
+}
+/* Solid = the report identified this run. Dashed with a question mark = the server
+   offered its best guess and said so. `none` is not a failure — most reports are
+   not about an export at all. */
+function jobMatchPill(m){
+  m=String(m||'none');
+  if(m==='exact')    return '<span class="pill ok">run matched</span>';
+  if(m==='inferred') return '<span class="pill warn guess">run guessed</span>';
+  return '<span class="pill muted">no run</span>';
+}
+function bugStatusPill(g){
+  return (g.status||'open')==='open'
+    ? '<span class="pill warn">open</span>'
+    : '<span class="pill">resolved</span>';
+}
+
 RENDER.bugs = function(){
-  var query=(S._bq||'').toLowerCase().trim();
-  var rows=S.bugs.filter(function(g){ return S.bfilter==='all'||g.status===S.bfilter; })
-    .filter(function(g){ return !query || [g.name,g.email,g.rin,g.message,g.diag&&g.diag.version].join(' ').toLowerCase().indexOf(query)>=0; });
-  var head='<div class="toolbar"><input id="bsearch" class="search" placeholder="Search bug reports…" value="'+esc(S._bq||'')+'">'
+  var head = '<div class="toolbar">'
+    + '<input id="bsearch" class="search" placeholder="Search name, email, TRN, message, device, version…" aria-label="Search bug reports" value="'+esc(S.bq)+'">'
     + '<div class="chips" id="bchips">'+[['all','All'],['open','Open'],['resolved','Resolved']].map(function(d){
         return '<button class="chip'+(S.bfilter===d[0]?' on':'')+'" data-bf="'+d[0]+'">'+d[1]+'</button>'; }).join('')+'</div>'
+    + (S.bopen ? '<span class="pill warn">'+n(S.bopen)+' open</span>' : '<span class="pill">nothing open</span>')
     + '<span class="sp"></span><button class="btn" id="bexport">Bugs CSV</button></div>';
-  if(!rows.length) return head+'<div class="empty"><span class="mlabel">Bug reports</span><div class="big">Nothing reported</div>Reports raised from inside the extension land here with their diagnostics.</div>';
-  return head + '<div class="tablewrap"><table class="wide"><thead><tr><th>When</th><th>User</th><th>RIN</th><th>Report</th><th>Status</th><th></th></tr></thead><tbody>'
-    + rows.map(function(g){
-        var dg='';
-        if(g.diag){
-          var p=g.diag.plan;
-          var sum='diagnostics · v'+(g.diag.version||'?')+(p?' · '+(p.source||'')+' '+(p.year||'')+' · '+(p.done|0)+'/'+(p.chunks|0)+' chunks · '+(p.failed|0)+' failed · '+(p.rows|0)+' rows'+(p.pdf?' · pdf':''):'');
-          dg='<details class="usub" style="margin-top:6px"><summary style="cursor:pointer" class="mono">'+esc(sum)+'</summary>'
-            + (g.diag.last?'<div class="usub" style="margin-top:5px">last: '+esc(g.diag.last)+'</div>':'')
-            + '<pre class="mono" style="white-space:pre-wrap;max-height:220px;overflow:auto;margin:7px 0 0;font-size:11px;background:var(--well);padding:10px;border-radius:8px">'+esc((g.diag.log||[]).join('\n'))+'</pre></details>';
-        }
-        return '<tr><td class="usub">'+when(g.at)+'</td>'
-          + '<td><div class="uname">'+esc(g.name||'—')+'</div><div class="usub mono">'+esc(g.email||'')+'</div></td>'
-          + '<td class="num">'+esc(g.rin||'')+'</td>'
-          + '<td class="msg">'+esc(g.message||'')+(g.ua?'<div class="usub" style="margin-top:5px">'+esc(g.ua)+'</div>':'')+dg+'</td>'
-          + '<td>'+(g.status==='open'?'<span class="pill warn">open</span>':'<span class="pill">resolved</span>')+'</td>'
-          + '<td><div class="act">'+(g.status==='open'?'<button class="btn tiny" data-rs="'+esc(g.id)+'">Resolve</button>':'<button class="btn tiny" data-ro="'+esc(g.id)+'">Reopen</button>')
-          + '<button class="btn tiny danger" data-bd="'+esc(g.id)+'">Delete</button></div></td></tr>';
-      }).join('')+'</tbody></table></div>';
+
+  /* An unjoined answer is the legacy KV reader, not this endpoint. Say which one
+     is talking rather than showing empty join columns as if nobody matched. */
+  var degraded = (!S.bjoined && S.bugs.length)
+    ? '<div class="callout warn"><span class="cl">unjoined</span><span class="cb">'
+      + '<b>These rows came back from the legacy reader.</b> The portal&rsquo;s own list needs a D1 binding to resolve each report to its user, its browser and its run; this environment has none, so those columns are blank because nothing was looked up — not because nothing matched. '
+      + 'Status, search and paging are being done here in the page rather than by the server.</span></div>'
+    : '';
+
+  if(S.bugsErr){
+    return head + '<div class="empty"><span class="mlabel">Bug reports</span>'
+      + '<div class="big">GET /api/bugs returned <span class="mono">'+esc(S.bugsErr)+'</span></div>'
+      + 'Reports live in KV and survive this — the list is what is unavailable, not the records.</div>';
+  }
+  /* The legacy reader returns everything, unfiltered and unpaged. Do the filtering
+     here rather than let a chip that says "Open" sit above a list that is not —
+     the callout above promises this, and a promise the page does not keep is worse
+     than the missing binding it is explaining. */
+  var list=S.bugs;
+  if(!S.bjoined){
+    var lq=String(S.bq||'').toLowerCase().trim();
+    list=list.filter(function(g){ return S.bfilter==='all' || (g.status||'open')===S.bfilter; })
+      .filter(function(g){ return !lq || [g.name,g.email,g.rin,g.message,g.deviceId,(g.diag&&g.diag.version)].join(' ').toLowerCase().indexOf(lq)>=0; });
+  }
+
+  if(!list.length){
+    return head + degraded + '<div class="empty"><span class="mlabel">Bug reports</span><div class="big">'
+      + (S.bq||S.bfilter!=='all' ? 'Nothing matches that filter' : 'Nothing reported')+'</div>'
+      + (S.bq||S.bfilter!=='all'
+        ? 'The search runs on name, email, TRN, message, device id and extension version.'
+        : 'Reports raised from inside the extension land here with their diagnostics, and are joined to the person, the browser and the run they came out of.')+'</div>';
+  }
+
+  /* "Nothing matched" and "nothing was looked up" are different answers, and only
+     one of them is a finding. When the joins did not run, the two columns that
+     depend on them say so instead of reporting the absence as a determination —
+     otherwise the legacy reader would quietly tell an operator that a report has no
+     account and no run, which is a statement it is in no position to make. */
+  var rows = list.map(function(g){
+    var u=g.user||null, extra=moreLines(g.message);
+    var company = (u&&u.company) || '';
+    return '<tr class="click" data-bopen="'+esc(g.id)+'">'
+      + '<td class="usub nowrap">'+when(g.at)+'</td>'
+      + '<td><div class="uname">'+esc(g.name||(u&&u.name)||'—')+'</div>'
+        + '<div class="usub mono">'+esc(g.email||(u&&u.email)||'no address on the report')+'</div>'
+        + (company?'<div class="usub">'+esc(company)+'</div>':'')
+        + (u?'':'<div class="usub"><span class="faint">'+(S.bjoined?'no account matched':'not looked up')+'</span></div>')+'</td>'
+      + '<td class="num">'+esc(g.rin||'—')+'</td>'
+      + '<td class="msg">'+esc(firstLine(g.message)||'(no message)')
+        + (extra?'<div class="usub" style="margin-top:4px">+'+extra+' more line'+(extra===1?'':'s')+'</div>':'')
+        + (g.note?'<div class="usub" style="margin-top:4px"><span class="pill muted">noted</span></div>':'')+'</td>'
+      + '<td>'+(S.bjoined
+          ? jobMatchPill(g.jobMatch)
+          : '<span class="pill muted" title="The joins need a D1 binding this environment has not got. Nothing was looked up, so nothing can be said about a run.">not looked up</span>')
+        + (g.job?'<div class="usub mono" style="margin-top:4px">'+esc(String(g.job.jobId||'').slice(0,14))+'</div>':'')+'</td>'
+      + '<td>'+bugStatusPill(g)+'</td>'
+      + '<td><div class="act">'
+        + ((g.status||'open')==='open'
+            ? '<button class="btn tiny" data-bact="resolve" data-b="'+esc(g.id)+'">Resolve</button>'
+            : '<button class="btn tiny" data-bact="reopen" data-b="'+esc(g.id)+'">Reopen</button>')
+        + '<button class="btn tiny danger" data-bact="delete" data-b="'+esc(g.id)+'">Delete</button>'
+      + '</div></td></tr>';
+  }).join('');
+
+  return head + degraded
+    + '<div class="tablewrap"><table class="wide"><thead><tr>'
+    + '<th style="width:118px">When</th><th style="width:210px">Reporter</th><th style="width:110px">TRN</th>'
+    + '<th>Report</th><th style="width:132px">Run</th><th style="width:98px">Status</th><th style="width:176px"></th>'
+    + '</tr></thead><tbody>'+rows+'</tbody></table></div>'
+    + (S.bjoined ? pagerN('b', S.bpage, S.bpages, S.btotal, 'reports') : '');
 };
 WIRE.bugs = function(){
-  if($('bsearch')) $('bsearch').oninput=function(){ S._bq=$('bsearch').value; paint(); var el=$('bsearch'); el.focus(); el.setSelectionRange(el.value.length,el.value.length); };
-  q('#bchips [data-bf]', function(b){ b.onclick=function(){ S.bfilter=b.getAttribute('data-bf'); paint(); }; });
+  var si=$('bsearch');
+  if(si){
+    si.oninput=function(){ S.bq=si.value; S.bpage=1; clearTimeout(WIRE._bt); WIRE._bt=setTimeout(loadBugs,240); };
+    si.onkeydown=function(e){ if(e.key==='Enter'){ clearTimeout(WIRE._bt); loadBugs(); } };
+  }
+  q('#bchips [data-bf]', function(b){ b.onclick=function(){ S.bfilter=b.getAttribute('data-bf'); S.bpage=1; loadBugs(); }; });
   if($('bexport')) $('bexport').onclick=function(){ download('/export?type=bugs','eta-bulk-bugs.csv'); };
-  q('#views [data-rs]', function(b){ b.onclick=function(){ b.disabled=true; post('/api/bug',{id:b.getAttribute('data-rs'),action:'resolve'}).then(function(j){ if(j.ok){ toast('Resolved','ok'); loadBugs(); } else b.disabled=false; }); }; });
-  q('#views [data-ro]', function(b){ b.onclick=function(){ b.disabled=true; post('/api/bug',{id:b.getAttribute('data-ro'),action:'reopen'}).then(function(j){ if(j.ok){ toast('Reopened','ok'); loadBugs(); } else b.disabled=false; }); }; });
-  q('#views [data-bd]', function(b){ b.onclick=function(){ confirmDanger('Delete report?','','Delete').then(function(v){ if(v) post('/api/bug',{id:b.getAttribute('data-bd'),action:'delete'}).then(function(j){ if(j.ok){ toast('Deleted','ok'); loadBugs(); } }); }); }; });
+  q('#views [data-pg]', function(b){ b.onclick=function(){
+    var d=b.getAttribute('data-pg').split(':')[1];
+    S.bpage = d==='next' ? S.bpage+1 : Math.max(1,S.bpage-1); loadBugs(); }; });
+  q('#views tr.click[data-bopen]', function(tr){ tr.onclick=function(e){
+    if(e.target.closest('button,a,input')) return; openBug(tr.getAttribute('data-bopen')); }; });
+  wireBugActions();
+};
+function wireBugActions(){
+  q('#views [data-bact]', function(b){ b.onclick=function(e){
+    e.stopPropagation(); bugAction(b.getAttribute('data-b'), b.getAttribute('data-bact')); }; });
+}
+function openBug(id){ if(!id) return; S.bugSel=id; S.bug=null; go('bug',id); loadBug(id); }
+
+/* resolve · reopen · note · delete. Every one of them is audited by the server —
+   which the handler these replace did for none of them, so a report could be
+   destroyed with no record that it had ever existed. */
+function bugAction(id,action){
+  if(!id) return Promise.resolve();
+  if(action==='delete') return bugDelete(id);
+  if(action==='note') return bugNote(id);
+  return post('/api/bug',{id:id,action:action}).then(function(j){
+    if(!j.ok) return;
+    toast(action==='resolve'?'Resolved':'Reopened','ok');
+    afterBugChange(id);
+  });
+}
+function afterBugChange(id){
+  loadBugs(); loadAudit(); loadAuditPage(); loadDashboard();
+  if(S.section==='bug' && S.bugSel===id) loadBug(id);
+}
+function bugNote(id){
+  return modal({
+    title:'Note on this report',
+    message:'Kept ON the report, where whoever picks it up next will see it. The audit trail records that a note was written and how long it was — never the text: it is free prose about a named person, and the trail lives 180 days and is read by more people than this report is.',
+    confirmText:'Save note',
+    input:{type:'textarea',label:'Note',placeholder:'e.g. Reproduced on 0.4.1 — it is the merge step, not the fetch.'}
+  }).then(function(v){
+    v=String(v==null?'':v).trim();
+    if(!v) return;
+    return post('/api/bug',{id:id,action:'note',value:v}).then(function(j){
+      if(!j.ok) return;
+      toast('Note saved on the report','ok');
+      afterBugChange(id);
+    });
+  });
+}
+/* The one action that cannot be taken back. It says so in full: what goes, what
+   does not follow it into the trail, and that there is no trash to fish it out of. */
+function bugDelete(id){
+  return modal({
+    title:'Delete report '+String(id).slice(0,22)+'?',
+    message:'The report is gone for good. It is not moved to trash and there is no undo — the message, the diagnostics and the log tail the user attached all go with it. '
+          + 'The audit trail will record that it was deleted, who deleted it, and which reporter and browser it belonged to. It will NOT record the message: those are the user’s own words about their own tax data, and deleting a report must not copy them somewhere that outlives it.',
+    confirmText:'Delete for good', danger:true
+  }).then(function(v){
+    if(!v) return;
+    return post('/api/bug',{id:id,action:'delete'}).then(function(j){
+      if(!j.ok) return;
+      toast('Report deleted — gone for good','ok');
+      if(S.section==='bug' && S.bugSel===id){ S.bug=null; S.bugSel=''; go('bugs'); }
+      loadBugs(); loadAudit(); loadAuditPage(); loadDashboard();
+    });
+  });
+}
+
+/* ═══ BUG DETAIL ══════════════════════════════════════════════════════════ */
+/* Clock only — the log tail already sits under a header that carries the date, and
+   seconds are what a log is read by. */
+function clock(iso){
+  if(!iso) return '—';
+  try{ return new Date(iso).toLocaleTimeString('en-GB',{timeZone:'Africa/Cairo',hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}); }
+  catch(e){ return String(iso).slice(11,19); }
+}
+/* The run log with the moment of the report drawn INTO it. "What was happening
+   when it broke" is a question about the lines either side of one instant, so the
+   instant is marked rather than left for the reader to find by timestamp. */
+function logTail(ev,atIso){
+  var at=Date.parse(atIso||'')||0, marked=false, out='', i, e, t, lv, cls;
+  for(i=0;i<ev.length;i++){
+    e=ev[i]; t=Date.parse(e.at||'')||0;
+    if(at && !marked && t>=at){ out+='<div class="filed">report filed</div>'; marked=true; }
+    lv=String(e.level||'info').toLowerCase();
+    cls = /err|fail|fatal/.test(lv) ? ' bad' : /warn/.test(lv) ? ' warn' : '';
+    out+='<div class="ln'+cls+'"><span class="t">'+esc(clock(e.at))+'</span>'
+      + '<span class="lv">'+esc(lv)+'</span>'
+      + '<span class="tx">'+(e.kind?'<span class="faint">'+esc(e.kind)+'</span> ':'')+esc(e.text||'')+'</span></div>';
+  }
+  if(at && !marked) out+='<div class="filed">report filed</div>';
+  return '<div class="log">'+out+'</div>';
+}
+/* The three gradings, written out. `inferred` gets the longest paragraph on this
+   page on purpose: it is the one an operator can act on wrongly. */
+function matchNote(m){
+  if(m==='exact') return {c:'ok', l:'exact', t:
+    '<b>This is the run the report is about.</b> The diagnostics the client attached carry the plan summary the user had on screen — source, date range and chunk count — and they identify this run and no other. Treat it as fact.'};
+  if(m==='inferred') return {c:'warn guess', l:'inferred', t:
+    '<b>This run is a guess, not a fact.</b> The report carried nothing that identified a run, so the server offered the newest export this browser touched within six hours of the report and labelled it <span class="mono">inferred</span>. '
+    + 'It may well be the wrong run: a user can file a report about yesterday, or about something that is not an export at all. Check the range and the log below before acting on it, and never quote it back to them as the run that failed.'};
+  return {c:'info', l:'none', t:
+    '<b>No run is attached to this report.</b> This browser had made no export by the time it was filed. That is the correct answer for most reports — they are about the extension, not about a particular export.'};
+}
+
+RENDER.bug = function(){
+  var back='<button class="back" data-back="bugs">&larr; All reports</button>';
+  if(!S.bug){
+    return back + '<div class="empty"><span class="mlabel">Bug report</span><div class="big">'
+      + (S.bugErr
+        ? 'GET /api/bug returned <span class="mono">'+esc(S.bugErr)+'</span>'
+        : 'Loading '+esc(String(S.bugSel).slice(0,22))+'…')+'</div>'
+      + (S.bugErr && /D1/.test(S.bugErr)
+        ? 'The report itself lives in KV and can still be resolved, noted or deleted from the list. What needs the binding is the join — the person, the browser and the run.'
+        : '')+'</div>';
+  }
+  var g=S.bug.bug||{},
+      u=S.bug.user||g.user||null,
+      dv=S.bug.device||g.device||null,
+      jb=S.bug.job||g.job||null,
+      m=String(S.bug.jobMatch||g.jobMatch||'none'),
+      ev=S.bug.events||[],
+      mins=Math.max(1,Math.round(Number(S.bug.eventWindowMs||600000)/60000));
+  var open=(g.status||'open')==='open', bid=g.id||S.bugSel;
+
+  var header = '<div class="dhead"><div style="min-width:0">'
+    + '<h2 class="mono" style="font-size:21px">'+esc(bid)+' <button class="copy" data-copy="'+esc(bid)+'">copy</button></h2>'
+    + '<div class="dsub">'+esc(g.name||'unnamed')
+      + (g.email?' &middot; <a href="#" data-uopen="'+esc(g.email)+'">'+esc(g.email)+'</a>':'')
+      + ' &middot; filed '+esc(cairo(g.at))+' <span class="usub">'+esc(rel(g.at)||'')+'</span></div>'
+    + '<div class="pills"><span class="pill '+(open?'warn':'ok')+'">'+(open?'open':'resolved')+'</span>'
+      + (g.rin?' <span class="pill muted">TRN '+esc(g.rin)+'</span>':'')
+      + (g.version?' <span class="pill moss">v'+esc(g.version)+'</span>':'')
+      + ' '+jobMatchPill(m)+'</div></div>'
+    + '<div class="acts">'
+      + (open
+        ? '<button class="btn good" data-bact="resolve" data-b="'+esc(bid)+'">Resolve</button>'
+        : '<button class="btn" data-bact="reopen" data-b="'+esc(bid)+'">Reopen</button>')
+      + '<button class="btn" data-bact="note" data-b="'+esc(bid)+'">Add note</button>'
+      /* Resolve, reopen, note and delete are all audited now — the handler these
+         replaced audited none of them, so a report could be destroyed with nothing
+         left to say it had existed. That is worth one click to check. */
+      + '<button class="btn ghost" data-audit="'+esc(bid)+'" title="Every action taken on this report, and who took it">History</button>'
+      + '<button class="btn danger" data-bact="delete" data-b="'+esc(bid)+'">Delete</button>'
+    + '</div></div>';
+
+  var report = '<div class="panel"><div class="eyebrow">The report</div>'
+    + '<div class="msg" style="font-size:13.5px;line-height:1.65">'+esc(g.message||'(no message)')+'</div>'
+    + '<div class="kv" style="margin-top:18px">'
+      + '<span class="k">Filed</span><span class="v">'+esc(cairo(g.at))+' <span class="usub">'+esc(rel(g.at)||'')+'</span></span>'
+      + '<span class="k">TRN</span><span class="v num">'+esc(g.rin||'—')+'</span>'
+      + '<span class="k">Browser</span><span class="v usub">'+esc(g.ua||'not recorded')+'</span>'
+      + (g.resolvedAt?'<span class="k">Resolved</span><span class="v">'+esc(cairo(g.resolvedAt))+'</span>':'')
+    + '</div>'
+    + (g.note
+      ? '<div class="callout info" style="margin-top:16px"><span class="cl">note</span><span class="cb">'
+        + esc(g.note.text||'')+'<div class="ref">'+esc(g.note.by||'token')+' &middot; '+esc(cairo(g.note.at))+'</div></span></div>'
+      : '<div class="muted" style="font-size:12.5px;margin-top:14px">No admin note on this report yet.</div>')
+    + '</div>';
+
+  var person = '<div class="panel"><div class="eyebrow">The person</div>'
+    + (u
+      ? '<div class="kv">'
+        + '<span class="k">Name</span><span class="v"><b>'+esc(u.name||'—')+'</b></span>'
+        + '<span class="k">Account</span><span class="v"><a href="#" data-uopen="'+esc(u.email||'')+'" class="mono">'+esc(u.email||'')+'</a></span>'
+        + '<span class="k">Company</span><span class="v">'+esc(u.company||'—')+'</span>'
+        + '<span class="k">Plan</span><span class="v">'+esc(u.plan||'free')+' &middot; '+n(u.clientCount)+' of '+n(u.quota)+' clients</span>'
+        + '<span class="k">Status</span><span class="v"><span class="pill '+(u.status==='active'?'':u.status==='killed'?'bad':'warn')+'">'+esc(u.status||'active')+'</span></span>'
+        + '<span class="k">Last seen</span><span class="v">'+esc(cairo(u.lastSeen))+' <span class="usub">'+esc(rel(u.lastSeen)||'')+'</span></span>'
+        + '</div>'
+        + '<div style="margin-top:16px"><button class="btn tiny" data-uopen2="'+esc(u.email||'')+'">Open their user page</button></div>'
+      : '<div class="callout warn"><span class="cl">no match</span><span class="cb">'
+        + '<b>This report is not attached to an account.</b> The join looks up the address on the report first and the owner of the browser second; neither found a user. '
+        + 'What the report itself carries is '
+        + (g.email?'<span class="mono">'+esc(g.email)+'</span>':'<b>no address</b>')
+        + (g.deviceId?' and browser <span class="mono">'+esc(String(g.deviceId).slice(0,14))+'</span>':' and no browser id')
+        + '. A report filed before that person was migrated, or after their record was deleted, looks exactly like this.</span></div>')
+    + '</div>';
+
+  var device = '<div class="panel"><div class="eyebrow">The browser</div>'
+    + (dv
+      ? '<div class="kv">'
+        + '<span class="k">Device</span><span class="v mono">'+esc(dv.deviceId||'')+' <button class="copy" data-copy="'+esc(dv.deviceId||'')+'">copy</button></span>'
+        + '<span class="k">Version now</span><span class="v mono">'+esc(dv.version||'—')+'</span>'
+        + '<span class="k">Country</span><span class="v">'+esc(dv.country||'—')+'</span>'
+        + '<span class="k">Last seen</span><span class="v">'+esc(cairo(dv.lastSeen))+' <span class="usub">'+esc(rel(dv.lastSeen)||'')+'</span></span>'
+        + '<span class="k">Last TRN</span><span class="v num">'+esc(dv.lastRin||'—')+'</span>'
+        + '<span class="k">Exports</span><span class="v num">'+n(dv.exports)+' &middot; '+n(dv.docs)+' documents</span>'
+        + '</div>'
+        + (g.version && dv.version && g.version!==dv.version
+          ? '<div class="callout info" style="margin-top:16px"><span class="cl">version</span><span class="cb">'
+            + 'Filed from <b>'+esc(g.version)+'</b>; this browser has since checked in on <b>'+esc(dv.version)+'</b>. Whatever this report is about may already be behind a released fix.</span></div>'
+          : '')
+      : '<div class="muted" style="font-size:13px">'
+        + (g.deviceId
+          ? 'The report names browser <span class="mono">'+esc(String(g.deviceId).slice(0,16))+'</span>, but no registration for it survives — an unmigrated or deleted browser.'
+          : 'The report carries no browser id, so there is nothing to look up and no run can be joined to it. Reports filed before the extension started attaching one look like this.')
+        + '</div>')
+    + '</div>';
+
+  var mn=matchNote(m);
+  var run = '<div class="panel"><div class="eyebrow">The run &middot; <b>'+esc(m)+'</b></div>'
+    + '<div class="callout '+mn.c+'"><span class="cl">'+mn.l+'</span><span class="cb">'+mn.t+'</span></div>'
+    + (jb
+      ? '<div class="kv" style="margin-top:16px">'
+        + '<span class="k">Run</span><span class="v mono">'+esc(jb.jobId||'')+'</span>'
+        + '<span class="k">Source</span><span class="v">'+esc(jb.source||'—')+'</span>'
+        + '<span class="k">Range</span><span class="v num">'+dayRange(jb.from,jb.to)+'</span>'
+        + '<span class="k">State</span><span class="v"><span class="pill '+jobStateClass(jb.state)+'">'+esc(jb.state||'—')+'</span></span>'
+        + '<span class="k">Progress</span><span class="v num">'+n(jb.done)+' / '+n(jb.total)+' chunks'
+          + (jb.failed?' &middot; '+n(jb.failed)+' failed':'')+'</span>'
+        + '<span class="k">Started</span><span class="v">'+esc(cairo(jb.createdAt))+' <span class="usub">'+esc(rel(jb.createdAt)||'')+'</span></span>'
+        + '</div>'
+        + '<div style="margin-top:16px"><button class="btn tiny" data-jopen3="'+esc(jb.jobId||'')+'">Open the run</button>'
+        + (m==='inferred'?' <span class="usub">— check its range against the report before you rely on it</span>':'')+'</div>'
+      : '')
+    + '</div>';
+
+  var p = g.diag && g.diag.plan;
+  var diagPanel = g.diag
+    ? '<div class="panel"><div class="eyebrow">Diagnostics attached to the report</div>'
+      + '<p class="hint">What the client packed inside the report. The <b>plan summary</b> is what the run above was scored against — source, from and to are worth 2 each and the chunk count 3; five or more identifies a run <b>exactly</b>, anything less leaves only a guess. This is why a report with no plan summary can never match exactly.</p>'
+      + '<div class="kv">'
+        + '<span class="k">Version</span><span class="v mono">'+esc(g.diag.version||'—')+'</span>'
+        + (p
+          ? '<span class="k">Source</span><span class="v">'+esc(p.source||'—')+'</span>'
+            + '<span class="k">Range</span><span class="v num">'+dayRange(p.from,p.to)+'</span>'
+            + '<span class="k">Chunks</span><span class="v num">'+n(p.done)+' of '+n(p.chunks)
+              + (p.failed?' &middot; '+n(p.failed)+' failed':'')+'</span>'
+            + '<span class="k">Rows</span><span class="v num">'+n(p.rows)+'</span>'
+          : '<span class="k">Plan</span><span class="v"><span class="faint">none attached — which is exactly why the run above can only be a guess</span></span>')
+        + (g.diag.last?'<span class="k">Last step</span><span class="v">'+esc(g.diag.last)+'</span>':'')
+      + '</div></div>'
+    : '';
+
+  var clientLog = (g.diag && g.diag.log && g.diag.log.length) ? g.diag.log : null;
+  var logPanel = '<div class="panel"><div class="eyebrow">Run log around the report'
+      + (ev.length?' &middot; <b>'+ev.length+'</b> lines':'')+'</div>'
+    + '<p class="hint">What the server recorded for this run in the '+mins+' minutes either side of the moment the report was filed — the answer to &ldquo;what was happening when it broke&rdquo;. The moment itself is marked in the tail.</p>'
+    + (ev.length
+      ? logTail(ev,g.at)
+      : '<div class="callout '+(jb?'info':'warn')+'"><span class="cl">'+(jb?'purged':'no run')+'</span><span class="cb">'
+        + (jb
+          ? 'No server log lines survive for this run. The log is dropped when a run reaches <span class="mono">done</span>, along with its chunks — so a report about a finished export has none. That is retention working, not a missing record.'
+          : 'No run is attached to this report, so there is no server log to fetch.')
+        + '</span></div>')
+    + (clientLog
+      ? '<div class="eyebrow" style="margin-top:24px">What the browser shipped &middot; <b>'+clientLog.length+'</b> lines</div>'
+        + '<p class="hint">The tail the client attached INSIDE the report. It outlives the server&rsquo;s retention because it is part of the report — and it is what the <b>user</b> saw, which is not always what the server saw.</p>'
+        + '<pre class="log">'+esc(clientLog.join('\n'))+'</pre>'
+      : '')
+    + '</div>';
+
+  return back + header
+    + '<div class="grid2">'+report+person+'</div>'
+    + '<div class="grid2">'+run+device+'</div>'
+    + diagPanel + logPanel;
+};
+WIRE.bug = function(){
+  wireCommon();
+  wireBugActions();
+  q('#views [data-uopen]', function(a){ a.onclick=function(e){
+    e.preventDefault(); var v=a.getAttribute('data-uopen'); if(v) openUser(v); }; });
+  q('#views [data-uopen2]', function(b){ b.onclick=function(){
+    var v=b.getAttribute('data-uopen2'); if(v) openUser(v); }; });
+  q('#views [data-jopen3]', function(b){ b.onclick=function(){
+    var v=b.getAttribute('data-jopen3'); if(v) openJob(v); }; });
+  q('#views [data-audit]', function(b){ b.onclick=function(){ openAudit(b.getAttribute('data-audit')); }; });
 };
 
 /* ═══ ACTIVITY ════════════════════════════════════════════════════════════ */
 function auditPill(a){ if(/kill|delete|void|deny/.test(a)) return 'bad'; if(/lock|config/.test(a)) return 'warn'; if(/super|approve|unvoid|revive|unlock|move/.test(a)) return ''; return 'muted'; }
 function errPill(k){ if(/exception|sig_fail/.test(k)) return 'bad'; if(/rate_limit/.test(k)) return 'warn'; return 'muted'; }
 RENDER.activity = function(){
-  var a1='<div class="panel"><div class="eyebrow">Admin action log</div>'
-    + '<p class="hint">Every lock, kill, void, quota change, delete, RIN move, config edit and request decision — newest first, kept 180 days. Each entry carries the actor that made it.</p></div>'
-    + (S.audit.length
-      ? '<div class="tablewrap"><table class="wide"><thead><tr><th>When</th><th>Action</th><th>Actor</th><th>Target</th><th>Detail</th></tr></thead><tbody>'
-        + S.audit.map(function(a){
-            var det=a.detail&&Object.keys(a.detail).length?JSON.stringify(a.detail):'';
-            return '<tr><td class="usub">'+when(a.at)+'</td><td><span class="pill '+auditPill(a.action||'')+'">'+esc(a.action)+'</span></td>'
-              + '<td class="mono usub">'+esc(a.actor||'token')+'</td><td class="mono usub">'+esc(String(a.target||'').slice(0,24))+'</td>'
-              + '<td class="msg usub mono">'+esc(det)+'</td></tr>';
+  /* The newest few, as a glance. The full trail — filters, paging, what each entry
+     CHANGED, and where the actor's name came from — is its own section; two tables
+     of the same records, one of them worse, is how a reader learns to trust the
+     wrong one. */
+  var tail=S.audit.slice(0,12);
+  var a1='<div class="panel"><div class="eyebrow">Admin action log &middot; <b>newest '+tail.length+'</b></div>'
+    + '<p class="hint">Every lock, kill, void, quota change, delete, RIN move, config edit, bug decision and request decision — newest first, kept 180 days. This is the glance; <b>Audit</b> under System is the same trail with filters, paging, the before/after of each change, and where the actor came from.</p>'
+    + '<div class="inline"><button class="btn tiny" data-go2="audit">Open the audit trail</button></div></div>'
+    + (tail.length
+      ? '<div class="tablewrap"><table class="wide"><thead><tr><th>When</th><th>Action</th><th>Actor</th><th>Target</th><th>What changed</th></tr></thead><tbody>'
+        + tail.map(function(a){
+            return '<tr><td class="usub nowrap">'+when(a.at)+'</td><td><span class="pill '+auditPill(a.action||'')+'">'+esc(a.action)+'</span></td>'
+              + '<td>'+auditWho(a)+'</td><td class="mono usub">'+esc(String(a.target||'').slice(0,24))+'</td>'
+              + '<td>'+auditDiff(a)+'</td></tr>';
           }).join('')+'</tbody></table></div>'
       : '<div class="empty"><span class="mlabel">Audit</span><div class="big">No admin actions recorded yet</div></div>');
   var a2='<div class="panel" style="margin-top:24px"><div class="eyebrow">Extension-facing errors</div>'
@@ -2866,7 +3393,189 @@ RENDER.activity = function(){
       : '<div class="empty"><span class="mlabel">Errors</span><div class="big">Clean</div>No extension-facing errors in the last 30 days.</div>');
   return a1+a2;
 };
-WIRE.activity = function(){};
+WIRE.activity = function(){ wireCommon(); };
+/* ═══ AUDIT TRAIL ═════════════════════════════════════════════════════════ */
+/* Two things this section refuses to blur.
+ *
+ * 1. WHAT CHANGED. An entry that records only that `setQuota` happened cannot
+ *    answer "who set this to 1", which is the only question the trail is ever
+ *    opened to answer. `detail.field` with `before` → `after` IS the entry; the
+ *    action name is just its heading. Where an entry carries no before/after, the
+ *    cell says so rather than dressing the remaining keys up as a change.
+ *
+ * 2. WHO — and how much that name is worth. `via` records where the actor's name
+ *    came from. 'token' is the shared admin bearer secret: it names nobody, and
+ *    the trail does not pretend otherwise. 'access' is an address that Cloudflare
+ *    Access stamped on the request HEADER. That is a label, not proof — verifying
+ *    it means validating the Access JWT against the team's public keys, which this
+ *    deployment does not do. So an asserted name is rendered as asserted: dotted,
+ *    marked, and never given the green of something checked. Nobody reading this
+ *    table should be able to mistake one for the other, and nobody should be able
+ *    to quote an asserted name as an established fact. */
+
+function auditVal(v){
+  if(v===undefined||v===null||v==='') return '<span class="faint">not set</span>';
+  if(v===true) return '<b>on</b>';
+  if(v===false) return '<b>off</b>';
+  if(Array.isArray(v)) return v.length
+    ? v.map(function(x){ return '<span class="tag">'+esc(String(x))+'</span>'; }).join('')
+    : '<span class="faint">none</span>';
+  if(typeof v==='object') return '<b class="mono">'+esc(JSON.stringify(v))+'</b>';
+  return '<b class="mono">'+esc(String(v))+'</b>';
+}
+/* The detail keys that are NOT the change — who the report belonged to, how many
+   rows a migration touched, how long a note was. Context, shown as context. */
+function auditCtx(d,skip){
+  var out=[], k, v;
+  for(k in d){
+    if(!Object.prototype.hasOwnProperty.call(d,k)) continue;
+    if(skip.indexOf(k)>=0) continue;
+    v=d[k];
+    if(v===''||v===null||v===undefined) continue;
+    out.push('<span>'+esc(k)+' <b>'+esc(v&&typeof v==='object'?JSON.stringify(v):String(v))+'</b></span>');
+  }
+  return out.length ? '<div class="dctx mono">'+out.join('')+'</div>' : '';
+}
+function auditDiff(a){
+  var d=(a&&a.detail)||{}, has=Object.prototype.hasOwnProperty;
+  var hasB=has.call(d,'before'), hasA=has.call(d,'after');
+  var ctx=auditCtx(d,['before','after','field']);
+  if(!hasB && !hasA){
+    /* Said plainly. An entitlement change without both sides is a gap in the
+       trail, and a gap that looks like a record is worse than a blank. */
+    return ctx
+      ? ctx+'<div class="usub" style="margin-top:3px">no before/after on this entry</div>'
+      : '<span class="faint">nothing recorded — this entry logged no detail</span>';
+  }
+  return '<div class="diff">'
+    + (d.field?'<span class="fld">'+esc(d.field)+'</span>':'')
+    + '<span class="b4">'+auditVal(d.before)+'</span>'
+    + '<span class="arw">&rarr;</span>'
+    + '<span class="af">'+auditVal(d.after)+'</span>'
+    + '</div>' + ctx;
+}
+function auditWho(a){
+  var who=String((a&&a.actor)||'token');
+  var declared=!!(a&&a.via);
+  var via=String((a&&a.via) || (who==='token'?'token':'access'));
+  if(via==='token'){
+    return '<span class="who tok" title="No Cloudflare Access identity was on this request. Something holding the shared admin bearer token did it — the trail cannot say which person, and does not guess.">'
+      + '<span class="nm">shared token</span></span>';
+  }
+  /* The full address leads the tooltip: on a timeline the name is capped and
+     ellipsised, and a truncated actor nobody can read back is its own small version
+     of the failure this column exists to prevent. */
+  return '<span class="who acc" title="'
+    + esc(who) + ' — asserted by the Cf-Access-Authenticated-User-Email header on the request'
+    + (declared ? '' : ' (this entry predates the via field, so the portal is reading the rule rather than a recorded value)')
+    + '. The bearer token authorised the action; the header only names who was holding it. It is NOT verified against the Access JWT, so treat it as a label, not proof.">'
+    + '<span class="nm">'+esc(who)+'</span>'
+    + '<span class="as'+(declared?'':' derived')+'">'+(declared?'asserted':'asserted?')+'</span></span>';
+}
+
+/* Jump into the trail already filtered to one thing — an account, a TRN, a report.
+   The other two filters are CLEARED rather than kept: arriving at a list that is
+   silently still narrowed by whatever was typed here twenty minutes ago is how a
+   reader concludes that nothing happened. What is being searched is visible in the
+   filter boxes, and the scan banner above the table says how far the search got. */
+function openAudit(target){
+  S.atarget=String(target||''); S.aactor=''; S.aaction=''; S.apage=1;
+  go('audit'); loadAuditPage();
+}
+
+RENDER.audit = function(){
+  var A=S.aud, filtered=!!(S.aactor||S.atarget||S.aaction);
+  var head='<div class="toolbar">'
+    + '<input id="aactor" class="filt" placeholder="Actor — token, or an address" aria-label="Filter by actor" value="'+esc(S.aactor)+'">'
+    + '<input id="atarget" class="filt" placeholder="Target — an email, a TRN, a run id" aria-label="Filter by target" value="'+esc(S.atarget)+'">'
+    + '<input id="aaction" class="filt" placeholder="Action — user:, bug:, setQuota" aria-label="Filter by action" value="'+esc(S.aaction)+'">'
+    + '<button class="btn" id="aclear"'+(filtered?'':' disabled')+'>Clear</button>'
+    + '<span class="sp"></span><span class="mlabel">substring match &middot; case-insensitive</span></div>';
+
+  /* The legend is not decoration. The distinction it draws is the one thing a
+     reader of this table can get wrong in a way that matters. */
+  var legend='<div class="panel"><div class="eyebrow">Who is in the actor column</div>'
+    + '<p class="hint">Every mutating call records an actor, and <span class="mono">via</span> records where that name came from. The two are not the same kind of thing, and this table never lets them look alike.</p>'
+    + '<div class="feats">'
+    + '<div class="feat"><div class="fh">'+auditWho({actor:'token',via:'token'})+'</div>'
+      + '<div class="fw">No Cloudflare Access identity on the request. Something holding the <b>shared admin bearer token</b> did this. The trail cannot say which person, and does not guess.</div></div>'
+    + '<div class="feat ovr"><div class="fh">'+auditWho({actor:'name@example.com',via:'access'})+'</div>'
+      + '<div class="fw">Cloudflare Access stamped that address on the request header. It is a <b>label, not proof</b> — verifying it means validating the Access JWT against the team&rsquo;s public keys, which this deployment does not do. The bearer token authorised the action; the header only says who was holding it. Do not quote it as established.</div></div>'
+    + '</div></div>';
+
+  if(S.audErr){
+    return head + legend + '<div class="empty"><span class="mlabel">Audit</span>'
+      + '<div class="big">GET /api/audit returned <span class="mono">'+esc(S.audErr)+'</span></div>'
+      + 'The trail lives in KV and is answered before the D1 gate, so this is the request failing, not the records.</div>';
+  }
+  if(!A){
+    return head + legend + '<div class="empty"><span class="mlabel">Audit</span><div class="big">Loading the trail…</div></div>';
+  }
+
+  var rows=A.entries||A.audit||[];
+  /* How much of the history this answer actually read. A filtered list that quietly
+     stopped early is worse than a refusal, so the ceiling is stated either way. */
+  var scan;
+  if(A.scanned==null){
+    scan='<div class="callout info"><span class="cl">unknown</span><span class="cb">'
+      + 'This answer did not say how much of the trail it read, so nothing here can be treated as a complete history.</span></div>';
+  } else if(A.truncated){
+    scan='<div class="callout warn"><span class="cl">truncated</span><span class="cb">'
+      + '<b>This view read the newest '+n(A.scanned)+' entries and stopped there.</b> The trail carries a descending timestamp and no index, so a filter is a scan and the scan is bounded. '
+      + 'Anything older than those '+n(A.scanned)+' records was <b>not searched</b> — so a short or empty result here is not evidence that nothing else happened. '
+      + 'Narrow by action or target rather than reading this list as the whole history.</span></div>';
+  } else {
+    scan='<div class="callout ok"><span class="cl">complete</span><span class="cb">'
+      + 'Read all <b>'+n(A.scanned)+'</b> entries the trail holds — the scan did not hit its ceiling, so this <b>is</b> the whole history.'
+      + (filtered?' <b>'+n(A.total)+'</b> of them match the filter.':'')+'</span></div>';
+  }
+
+  var table = rows.length
+    ? '<div class="tablewrap"><table class="wide"><thead><tr>'
+      + '<th style="width:118px">When</th><th style="width:158px">Action</th><th style="width:210px">Actor</th>'
+      + '<th style="width:198px">Target</th><th>What changed</th>'
+      + '</tr></thead><tbody>'
+      + rows.map(function(a){
+          return '<tr><td class="usub nowrap">'+when(a.at)+'</td>'
+            + '<td><span class="pill '+auditPill(a.action||'')+'">'+esc(a.action||'—')+'</span></td>'
+            + '<td>'+auditWho(a)+'</td>'
+            + '<td class="mono usub" style="word-break:break-all">'
+              + (a.target
+                ? esc(String(a.target).slice(0,48))+' <button class="copy" data-copy="'+esc(a.target)+'">copy</button>'
+                : '<span class="faint">—</span>')+'</td>'
+            + '<td>'+auditDiff(a)+'</td></tr>';
+        }).join('')+'</tbody></table></div>'
+      + pagerN('a', A.page||S.apage, A.pages||1, A.total==null?rows.length:A.total, 'entries')
+    : '<div class="empty"><span class="mlabel">Audit</span><div class="big">'
+      + (filtered?'Nothing matches that filter':'No admin actions recorded yet')+'</div>'
+      + (filtered
+        ? 'Actor, target and action are substring matches.'+(A.truncated?' And the scan was truncated — older entries were never searched, so this is not a "no".':'')
+        : 'Every lock, kill, quota change, plan or feature edit, void, RIN move, run abandon, bug decision and config edit lands here and is kept 180 days.')
+      + '</div>';
+
+  /* Why a `chars 71` with no text is not a bug in this table. */
+  var what='<div class="panel"><div class="eyebrow">What is deliberately not here</div>'
+    + '<p class="hint">The trail lives 180 days and is read by more people than the secret store is, so four things never reach it: <b>secrets</b> (a redactor strips any detail key whose <i>name</i> looks like one, so this stays true when a field is added in a hurry); the <b>body</b> of a support or admin note, which records its length instead and lives on the record where the next reader will see it; the <b>message</b> of a deleted bug report, because destroying the user&rsquo;s own words must not preserve them somewhere longer-lived; and admin&nbsp;&rarr;&nbsp;device text beyond a 60-character subject.</p></div>';
+
+  return head + legend + scan + table + what;
+};
+WIRE.audit = function(){
+  wireCommon();
+  ['aactor','atarget','aaction'].forEach(function(id){
+    var el=$(id);
+    if(!el) return;
+    el.oninput=function(){
+      S[id]=el.value; S.apage=1;
+      clearTimeout(WIRE._at); WIRE._at=setTimeout(loadAuditPage,260);
+    };
+    el.onkeydown=function(e){ if(e.key==='Enter'){ clearTimeout(WIRE._at); loadAuditPage(); } };
+  });
+  if($('aclear')) $('aclear').onclick=function(){
+    S.aactor=''; S.atarget=''; S.aaction=''; S.apage=1; loadAuditPage(); };
+  q('#views [data-pg]', function(b){ b.onclick=function(){
+    var d=b.getAttribute('data-pg').split(':')[1];
+    S.apage = d==='next' ? S.apage+1 : Math.max(1,S.apage-1); loadAuditPage(); }; });
+};
 
 /* ═══ TOOLS ═══════════════════════════════════════════════════════════════ */
 RENDER.tools = function(){
@@ -3084,7 +3793,15 @@ function demoGet(p){
             {jobId:'job_9c0b7744',rin:'318772041',source:'Purchases',state:'failed',done:14,total:30,createdAt:iso(1400)}],
       entitlement:{plan:'free',custom:false,clients:1,devices:1,features:[],planClients:1,planDevices:1,
                    devicesUsed:1,overDevices:false,source:{clients:'plan',devices:'plan',features:'plan'}},
-      bugs:[], audit:[{at:iso(1200),action:'setValidUntil',actor:'token',detail:{to:day(9)}}]};
+      /* The report records as /api/user hands them over: the raw KV rows, with NO
+         user/device/job keys on them. The panel is a doorway to the joined page and
+         must be seen working from exactly this much. */
+      bugs:[{id:'bug_9912',at:iso(64),status:'open',rin:'318772041',deviceId:'dev_77aa10bb42',
+             name:'Karim Adel',email:'karim@adel.eg',ua:'Chrome/128 · Windows 10',note:null,resolvedAt:'',
+             message:'The Purchases export stopped at chunk 12 of 40 and the bar has not moved for half an hour.\nI left it running overnight and it was in the same place this morning.',
+             diag:{version:'0.3.9'}}],
+      audit:[{at:iso(1200),action:'user:setValidUntil',actor:'token',via:'token',target:'karim@adel.eg',
+              detail:{field:'valid_until',before:'',after:day(9)}}]};
     /* The negotiated account: every number comes from the account, and it is over its
        device allowance — grandfathered, not broken. */
     if(em==='adel@sabry.eg') return {ok:true,
@@ -3098,7 +3815,18 @@ function demoGet(p){
                {deviceId:'dev_aa03',version:'0.3.9',country:'EG',lastRin:'204918377',exports:40,docs:120000,lastSeen:iso(9000)},
                {deviceId:'dev_aa04',version:'0.3.9',country:'EG',lastRin:'204918377',exports:20,docs:60000,lastSeen:iso(14000)},
                {deviceId:'dev_aa05',version:'0.3.7',country:'EG',lastRin:'204918377',exports:14,docs:22004,lastSeen:iso(41000)}],
-      jobs:[], bugs:[], audit:[{at:iso(5000),action:'setDeviceQuota',actor:'token',detail:{value:3}}]};
+      jobs:[],
+      bugs:[{id:'bug_9701',at:iso(2600),status:'resolved',rin:'',deviceId:'dev_aa05',
+             name:'Adel Sabry',email:'adel@sabry.eg',ua:'Firefox/131 · Windows 11',diag:null,
+             note:{text:'Their plan is fine — it was the lock, not the expiry.',at:iso(2450),by:'ops@omarsoliman.dev'},
+             resolvedAt:iso(2400),
+             message:'The sign-in drawer says my plan expired but the portal shows it valid until next year.'}],
+      /* One entry from before this slice, with no `via` recorded — so the derived
+         marker is reachable on the user page and not only in the trail. */
+      audit:[{at:iso(58),action:'user:lock',actor:'ops@omarsoliman.dev',via:'access',target:'adel@sabry.eg',
+              detail:{field:'status',before:'active',after:'locked'}},
+             {at:iso(5000),action:'user:setDeviceQuota',actor:'someone@omarsoliman.dev',target:'adel@sabry.eg',
+              detail:{field:'device_quota',before:null,after:3}}]};
     if(em==='nour@fahmy.eg') return {ok:true,
       user:{email:'nour@fahmy.eg',name:'Nour Fahmy',company:'Fahmy Tax',phone:'',plan:'standard',quota:5,clientCount:3,deviceCount:1,jobCount:44,docs:60110,status:'active',superadmin:0,validUntil:day(-6),country:'EG',note:'',tags:[],features:null,createdAt:'2026-01-19T12:00:00Z',lastSeen:iso(90)},
       clients:[{rin:'552019887',company:'Delta Textiles',voided:0,jobCount:44,docs:60110,lastExportAt:iso(90)}],
@@ -3123,9 +3851,19 @@ function demoGet(p){
        the plan — the "your override is not larger, so it does not win" line. */
     entitlement:{plan:'pro',custom:false,clients:25,devices:10,features:['auto-reject'],planClients:25,planDevices:10,
                  devicesUsed:2,overDevices:false,source:{clients:'plan',devices:'plan',features:'override'}},
-    bugs:[{id:'bug_1',status:'open',at:iso(600),rin:'204918377',message:'Merge stalled at chunk 12 of 40.'}],
-    audit:[{at:iso(31),action:'client.move',actor:'token',detail:{rin:'204918377'}},
-           {at:iso(900),action:'setQuota',actor:'token',detail:{from:3,to:5}}]};
+    bugs:[{id:'bug_9880',at:iso(300),status:'open',rin:'552019887',deviceId:'dev_5510cc9081',
+           name:'Hala Mansour',email:'hala@mansour.co',ua:'Chrome/129 · macOS 14',resolvedAt:'',
+           note:{text:'Excel on Windows, not the file — ask which encoding they open with.',at:iso(180),by:'ops@omarsoliman.dev'},
+           message:'Arabic company names come out as question marks when I open the workbook in Excel.',
+           diag:{version:'0.4.1'}}],
+    /* The shape every mutating call writes since slice 4: the field that moved and
+       the value on both sides of it, plus where the actor's name came from. */
+    audit:[{at:iso(31),action:'client:move',actor:'token',via:'token',target:'204918377',
+            detail:{field:'user_email',before:'karim@adel.eg',after:'hala@mansour.co'}},
+           {at:iso(120),action:'user:setFeatures',actor:'ops@omarsoliman.dev',via:'access',target:'hala@mansour.co',
+            detail:{field:'features',before:['auto-reject','po-analytics'],after:['auto-reject']}},
+           {at:iso(900),action:'user:setQuota',actor:'ops@omarsoliman.dev',via:'access',target:'hala@mansour.co',
+            detail:{field:'quota',before:3,after:5}}]};
   }
   if(p.indexOf('/api/clients')===0) return {ok:true,total:3,clients:[
     {rin:'204918377',company:'Nile Foods',userEmail:'hala@mansour.co',userName:'Hala Mansour',voided:0,jobCount:31,docs:98220,lastExportAt:iso(6)},
@@ -3171,6 +3909,37 @@ function demoGet(p){
     {id:'bulk-pdf',     name:'Bulk PDF download',description:'Official PDFs alongside the workbook',       active:1, createdAt:'2026-08-01T00:00:00Z'},
     {id:'po-analytics', name:'PO reconciliation',description:'The purchase-order matching card',           active:1, createdAt:'2026-06-01T00:00:00Z'},
     {id:'legacy-xml',   name:'Raw XML export',   description:'Withdrawn in 0.4 — kept for the accounts that still hold it', active:0, createdAt:'2025-11-02T00:00:00Z'}]};
+  /* Slice 4 — bugs and the trail. Three reports on purpose: one the diagnostics
+     identify EXACTLY, one the server could only guess at, and one from a browser
+     that had never run an export. The three gradings are the whole section. */
+  if(p.indexOf('/api/bugs')===0){
+    var bl=demoBugs(iso,day);
+    var qb=function(k){ var m=new RegExp('[?&]'+k+'=([^&]*)').exec(p); return m?decodeURIComponent(m[1]).toLowerCase():''; };
+    var bst=qb('status'), bq=qb('q'), openN=bl.filter(function(g){ return g.status==='open'; }).length;
+    var bout=bl.filter(function(g){
+      if(bst && g.status!==bst) return false;
+      if(bq && [g.name,g.email,g.rin,g.message,g.deviceId,g.version].join(' ').toLowerCase().indexOf(bq)<0) return false;
+      return true;
+    });
+    return {ok:true,bugs:bout,total:bout.length,page:1,pages:1,openCount:openN};
+  }
+  if(p.indexOf('/api/bug?')===0){
+    var wid=decodeURIComponent((/[?&]id=([^&]*)/.exec(p)||[])[1]||'');
+    var bg=demoBugs(iso,day).filter(function(g){ return g.id===wid; })[0]||demoBugs(iso,day)[0];
+    return {ok:true,bug:bg,user:bg.user,device:bg.device,job:bg.job,jobMatch:bg.jobMatch,
+      events:bg.job?demoEvents(iso,bg):[], eventWindowMs:600000};
+  }
+  if(p.indexOf('/api/audit')===0){
+    var ae=demoAudit(iso,day);
+    var qa=function(k){ var m=new RegExp('[?&]'+k+'=([^&]*)').exec(p); return m?decodeURIComponent(m[1]).toLowerCase():''; };
+    var fa=qa('actor'), ft=qa('target'), fc=qa('action');
+    var ao=ae.filter(function(e){
+      return (!fa||String(e.actor||'').toLowerCase().indexOf(fa)>=0)
+          && (!ft||String(e.target||'').toLowerCase().indexOf(ft)>=0)
+          && (!fc||String(e.action||'').toLowerCase().indexOf(fc)>=0);
+    });
+    return {ok:true,entries:ao,audit:ao,total:ao.length,page:1,pages:1,scanned:ae.length,truncated:false};
+  }
   if(p.indexOf('/api/stats')===0) return {ok:true,stats:{},cfg:{defaultQuota:1,globalKill:false,minVersion:'',killedVersions:[]}};
   if(p.indexOf('/api/health')===0) return {ok:true,health:{locksBound:true,kvOk:true,adminTokenSet:true,globalKill:false,minVersion:'',killedVersions:0,announcementActive:false}};
   return {ok:true,requests:[],bugs:[],voids:[],audit:[],errors:[],trash:[],snaps:[]};
@@ -3198,6 +3967,78 @@ function demoJobs(iso){
     {jobId:'job_1188ef',user:'adel@sabry.eg',rin:'204918377',source:'Sales',dateField:'issue',dir:'desc',
      from:'2026-01-01',to:'2026-01-31',state:'done',done:31,failed:0,total:31,rows:120480,probes:2,version:'0.3.7',
      createdAt:iso(41000),updatedAt:iso(40800)}
+  ];
+}
+function demoBugs(iso,day){
+  return [
+    /* EXACT: the diag plan summary pins source, both dates and the chunk count. */
+    {id:'bug_9912', at:iso(64), status:'open', rin:'318772041', deviceId:'dev_77aa10bb42',
+     name:'Karim Adel', email:'karim@adel.eg', ua:'Chrome/128 · Windows 10', version:'0.3.9',
+     message:'The Purchases export stopped at chunk 12 of 40 and the bar has not moved for half an hour.\nI left it running overnight and it was in the same place this morning.\nNothing downloaded.',
+     note:null, resolvedAt:'',
+     diag:{version:'0.3.9', last:'chunk 12 → retry 3 of 3',
+       plan:{source:'Purchases',from:'2026-05-01',to:'2026-05-31',chunks:40,done:11,failed:1,rows:9120},
+       log:['plan accepted — 40 chunks','chunk 11 done — 284 rows','chunk 12 attempt 1 → HTTP 500','chunk 12 attempt 2 → HTTP 500','chunk 12 attempt 3 → HTTP 500','chunk 12 left for retry']},
+     user:{email:'karim@adel.eg',name:'Karim Adel',company:'Adel Accounting',plan:'free',quota:1,clientCount:1,deviceCount:1,status:'active',validUntil:day(9),lastSeen:iso(220)},
+     device:{deviceId:'dev_77aa10bb42',version:'0.4.1',country:'EG',lastSeen:iso(220),lastRin:'318772041',exports:8,docs:9120},
+     job:{jobId:'job_7b02c1d5',user:'karim@adel.eg',rin:'318772041',source:'Purchases',from:'2026-05-01',to:'2026-05-31',state:'running',done:11,failed:1,total:40,rows:9120,createdAt:iso(96),updatedAt:iso(46)},
+     jobMatch:'exact'},
+    /* INFERRED: no plan summary at all, so the newest run this browser touched is
+       offered as a guess — the case the detail page argues with at length. */
+    {id:'bug_9880', at:iso(300), status:'open', rin:'552019887', deviceId:'dev_5510cc9081',
+     name:'Nour Fahmy', email:'nour@fahmy.eg', ua:'Chrome/129 · macOS 14', version:'0.4.1',
+     message:'Arabic company names come out as question marks when I open the workbook in Excel.',
+     note:{text:'Excel on Windows, not the file — ask which encoding they open with.',at:iso(180),by:'ops@omarsoliman.dev'}, resolvedAt:'',
+     diag:{version:'0.4.1', last:'workbook written', plan:null, log:['merge complete — 91,204 rows','workbook written — 12.4 MB']},
+     user:{email:'nour@fahmy.eg',name:'Nour Fahmy',company:'Fahmy Tax',plan:'standard',quota:5,clientCount:3,deviceCount:1,status:'active',validUntil:day(-6),lastSeen:iso(90)},
+     device:{deviceId:'dev_5510cc9081',version:'0.4.1',country:'EG',lastSeen:iso(90),lastRin:'552019887',exports:44,docs:60110},
+     job:{jobId:'job_3d19aa20',user:'nour@fahmy.eg',rin:'552019887',source:'Sales',from:'2026-06-01',to:'2026-06-30',state:'merging',done:36,failed:0,total:36,rows:91204,createdAt:iso(358),updatedAt:iso(302)},
+     jobMatch:'inferred'},
+    /* NONE: a browser that had never run an export. Correct, and the common case. */
+    {id:'bug_9701', at:iso(2600), status:'resolved', rin:'', deviceId:'dev_aa05',
+     name:'Adel Sabry', email:'adel@sabry.eg', ua:'Firefox/131 · Windows 11', version:'0.3.7',
+     message:'The sign-in drawer says my plan expired but the portal shows it valid until next year.',
+     note:null, resolvedAt:iso(2400), diag:null,
+     user:{email:'adel@sabry.eg',name:'Adel Sabry',company:'Sabry Audit',plan:'custom',quota:12,clientCount:12,deviceCount:5,status:'locked',validUntil:day(150),lastSeen:iso(2900)},
+     device:{deviceId:'dev_aa05',version:'0.3.7',country:'EG',lastSeen:iso(41000),lastRin:'204918377',exports:0,docs:0},
+     job:null, jobMatch:'none'}
+  ];
+}
+/* The server's own log for the matched run, straddling the moment of the report. */
+function demoEvents(iso,g){
+  var m=64;
+  return [
+    {at:iso(m+8), level:'info', kind:'chunk', text:'chunk 11 done — 284 rows in 2.1s'},
+    {at:iso(m+5), level:'info', kind:'chunk', text:'chunk 12 requested — 2026-05-13 → 2026-05-15'},
+    {at:iso(m+4), level:'error',kind:'http',  text:'ETA returned 500 (attempt 1 of 3)'},
+    {at:iso(m+2), level:'warn', kind:'retry', text:'backing off 90s before attempt 2'},
+    {at:iso(m+1), level:'error',kind:'http',  text:'ETA returned 500 (attempt 2 of 3)'},
+    {at:iso(m-1), level:'error',kind:'http',  text:'ETA returned 500 (attempt 3 of 3) — chunk left for retry'},
+    {at:iso(m-3), level:'info', kind:'state', text:'run holding at 11 of 40 chunks'}
+  ];
+}
+function demoAudit(iso,day){
+  return [
+    {at:iso(4),  action:'user:setQuota',   actor:'ops@omarsoliman.dev', via:'access', target:'hala@mansour.co',
+     detail:{field:'quota', before:3, after:5}},
+    {at:iso(19), action:'bug:resolve',     actor:'ops@omarsoliman.dev', via:'access', target:'bug_9701',
+     detail:{email:'adel@sabry.eg', rin:'', device:'dev_aa05', before:'open', after:'resolved'}},
+    {at:iso(31), action:'client:move',     actor:'token', via:'token', target:'204918377',
+     detail:{field:'user_email', before:'karim@adel.eg', after:'hala@mansour.co'}},
+    {at:iso(58), action:'user:lock',       actor:'token', via:'token', target:'adel@sabry.eg',
+     detail:{field:'status', before:'active', after:'locked'}},
+    {at:iso(120),action:'user:setFeatures',actor:'ops@omarsoliman.dev', via:'access', target:'hala@mansour.co',
+     detail:{field:'features', before:['auto-reject','po-analytics'], after:['auto-reject']}},
+    {at:iso(190),action:'bug:note',        actor:'ops@omarsoliman.dev', via:'access', target:'bug_9880',
+     detail:{email:'nour@fahmy.eg', device:'dev_5510', chars:71, before:'(note)', after:'(note)'}},
+    {at:iso(240),action:'user:setValidUntil',actor:'token', via:'token', target:'nour@fahmy.eg',
+     detail:{field:'valid_until', before:'', after:day(-6)}},
+    /* An entry from before the slice: no via recorded, so the portal reads the rule
+       and marks the reading as derived rather than presenting it as recorded. */
+    {at:iso(900),action:'setDeviceQuota',  actor:'someone@omarsoliman.dev', target:'adel@sabry.eg',
+     detail:{field:'device_quota', before:null, after:3}},
+    /* And one that recorded nothing but the fact — the gap this slice closed. */
+    {at:iso(1600),action:'config',         actor:'token', via:'token', target:'', detail:{}}
   ];
 }
 function demoChunks(j){

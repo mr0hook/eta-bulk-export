@@ -170,6 +170,10 @@ export function jobCheckpoint(body) { return signedPost('/job/checkpoint', body)
 // the caller drops the batch on anything other than ok, and signedPost already resolves rather than
 // rejecting on a network failure.
 export function jobLog(body) { return signedPost('/job/log', body); }
+// SPEC-021 — the export column mapping (sheet names + [key, header, width] tuples). Signed like
+// every other extension call, so an unauthorised fork gets nothing from it. Carries no invoice
+// data in either direction: the request is a source name and the hash the client already holds.
+export function exportMapping(body) { return signedPost('/export/mapping', body); }
 export function jobResumable() { return signedPost('/job/resumable', {}); }
 export function jobPlan(jobId) { return signedPost('/job/plan', { jobId: String(jobId || '') }); }
 

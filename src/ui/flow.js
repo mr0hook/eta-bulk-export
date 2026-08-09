@@ -146,8 +146,21 @@ export function resumeEntry(res) {
     state: String(j.state || ''),
     kind: kindOf(j.source, j.dir),
     from: j.from_iso || '', to: j.to_iso || '',
-    done: j.done_count | 0, total: j.total_chunks | 0, rows: j.total_rows | 0,
+    done: j.done_count | 0, failed: j.failed_count | 0, total: j.total_chunks | 0, rows: j.total_rows | 0,
   };
+}
+
+// The only way out of a resume offer that the user has given up on. `listResumable` keeps a job on
+// the list for as long as it is planned/running/merging/paused/incomplete/halted, and the extension
+// had no path that leaves that set — a force-closed run was therefore offered on every single mount,
+// for ever, and only the admin dashboard could retire it. 'abandoned' is a state checkpoint() already
+// accepts and listResumable already excludes.
+//
+// The counts ride along unchanged: a checkpoint writes done_count/failed_count, so sending zeroes
+// would erase how far the run actually got from the history row it leaves behind.
+export function abandonCheckpoint(entry) {
+  if (!entry || !entry.id) return null;
+  return { jobId: String(entry.id), state: 'abandoned', done: entry.done | 0, failed: entry.failed | 0 };
 }
 
 const parseStatuses = (v) => {
@@ -220,4 +233,113 @@ export async function finishRun({ merge, checkpoint = null, onStatus = () => {} 
   // export into a failed one. The output already exists on disk.
   if (checkpoint) { try { await checkpoint(); checkpointed = true; } catch {} }
   return { merged: true, checkpointed, repair, error: null };
+}
+
+// ── the chunk map ────────────────────────────────────────────────────────────────────────────────
+// The run card used to carry exactly one notion of a chunk: the one being worked right now
+// ({i, n, phase, cur, max}). Nothing anywhere rendered "which chunks are finished" — so a resumed
+// run showed 190 of 412 in a counter above a widget that said "current chunk —", and the answer to
+// "where is it up to" was a number the user had to trust.
+//
+// This is that missing datum, as a pure function: plan + the index currently being worked → one cell
+// per chunk. The plan is the authority, not the event stream, which is what makes a RESUME correct —
+// orchestrator.start() skips an already-done chunk with `continue` and emits no onChunk for it, so a
+// map painted from events alone would show every completed chunk as "not started".
+//
+// Precedence: done > running > failed > pending.
+//   * done wins over running because a resumed run's skipped chunks must read as finished;
+//   * running wins over failed because a failed chunk stays in failedIds while it is being retried
+//     (the orchestrator only clears it on success), and amber-being-retried is the truth.
+export const CHUNK_MAP_MAX = 240;   // the drawer is a 404px panel; beyond this, cells cover a range
+
+export function chunkMap(plan, runningIndex = null, max = CHUNK_MAP_MAX) {
+  const chunks = (plan && Array.isArray(plan.chunks)) ? plan.chunks : [];
+  const total = chunks.length;
+  const doneSet = new Set((plan && plan.doneIds) || []);
+  const failSet = new Set((plan && plan.failedIds) || []);
+  const run = Number.isInteger(runningIndex) && runningIndex >= 1 && runningIndex <= total ? runningIndex : null;
+  const states = chunks.map((c, i) => (
+    doneSet.has(c.id) ? 'done'
+      : run === i + 1 ? 'run'
+        : failSet.has(c.id) ? 'failed'
+          : 'pending'));
+  const count = (s) => states.filter((x) => x === s).length;
+  // One cell per chunk while that fits; past the cap each cell covers `per` consecutive chunks and
+  // reports the worst thing in its range, so a red square is never averaged away into green.
+  const per = total > max ? Math.ceil(total / max) : 1;
+  const cells = [];
+  for (let i = 0; i < total; i += per) {
+    const slice = states.slice(i, i + per);
+    const state = slice.includes('run') ? 'run'
+      : slice.includes('failed') ? 'failed'
+        : slice.every((s) => s === 'done') ? 'done'
+          : slice.includes('done') ? 'part'
+            : 'pending';
+    cells.push({ state, from: i + 1, to: i + slice.length, n: slice.length });
+  }
+  return { total, per, cells, done: count('done'), failed: count('failed'), pending: count('pending'), running: run };
+}
+
+// ── the run's control lifecycle ──────────────────────────────────────────────────────────────────
+/**
+ * A terminal status line is the end of the run's NARRATIVE, not the end of the run.
+ *
+ * The orchestrator emits "⏸ Paused at i/n" and only THEN writes the progress file and sends its
+ * best-effort job checkpoint (a bridge round-trip whose timeout is 15 s); `running` stays true until
+ * start() resolves, and start() answers a second call while running with a bare `return` — no
+ * status, no error, no log line. A drawer that frees Start on the MESSAGE therefore hands the user a
+ * button whose click vanishes: the plan re-renders, nothing executes, the timer is frozen (it only
+ * ticks while busy) and Pause is greyed out. That is the "pause then re-run does nothing" bug.
+ *
+ * The promise is the release point. runGuarded holds the controls for exactly as long as the
+ * orchestrator does, and refuses anything that arrives before it settles — out loud, because a
+ * swallowed click is the half of the bug the user can see.
+ *
+ * Never throws: the caller phrases its own errors, and a run must not leave the controls held.
+ */
+export async function runGuarded({ isBusy = () => false, setBusy = () => {}, onRefused = () => {}, run } = {}) {
+  if (isBusy()) { onRefused('busy'); return { ran: false, refused: 'busy', value: undefined, error: null }; }
+  setBusy(true);
+  try { return { ran: true, refused: null, value: await run(), error: null }; }
+  catch (e) { return { ran: true, refused: null, value: undefined, error: e }; }
+  finally { setBusy(false); }
+}
+
+// ── the persisted run log's lifecycle ────────────────────────────────────────────────────────────
+// A run that was force-closed leaves "⏸ Paused at 12/17" as the last line of a log whose lifecycle
+// flag is 'resumable'. That is correct — and it used to be PERMANENT: the flag could only leave
+// 'resumable' via a clean finish, and the ✕ next to the log dropped the entries and the storage key
+// while leaving the flag alone, so the very next status line re-persisted `run:'resumable'` and the
+// paused tail came back on the following reload. Hence "it keeps saying pause".
+//
+// Kept here as a parse → persist → clear round-trip so the escape hatch is provable: what clearedLog
+// writes must read back as nothing to restore.
+export const LOG_STATE_V = 2;
+
+export function restoreLog(raw) {
+  let j = null;
+  try { j = typeof raw === 'string' ? JSON.parse(raw) : raw; } catch { return { entries: [], run: 'none', keep: false }; }
+  if (!j || typeof j !== 'object' || Array.isArray(j)) return { entries: [], run: 'none', keep: false };   // legacy bare arrays drop
+  const run = j.run || (j.closed === false ? 'resumable' : 'done');   // v1 {closed} maps over
+  // A run that was mid-flight when the page died ('active') comes back as one that can be resumed.
+  if (run === 'active' || run === 'resumable') return { entries: Array.isArray(j.entries) ? j.entries : [], run: 'resumable', keep: true };
+  return { entries: [], run: 'none', keep: false };
+}
+export const persistLog = (run, entries) => ({ v: LOG_STATE_V, run: String(run || 'none'), entries: entries || [] });
+export const clearedLog = () => ({ run: 'none', entries: [] });
+
+// ── the folder handle ────────────────────────────────────────────────────────────────────────────
+// A directory handle rehydrated from IndexedDB after a reload comes back in 'prompt' state, and
+// orchestrator.ensureDir() goes straight to the owner-stamp check — dir.entries() — which throws
+// NotAllowedError on such a handle. The throw is swallowed into "Pick an output folder first.", and
+// the only Pick control used to live on a screen reachable ONLY through the call that just failed.
+// So: decide what to do BEFORE anything reads the directory, inside the click gesture that can still
+// raise a permission prompt.
+//   permitted === null  → not asked yet   → 'request'
+//   permitted === false → refused / stale → 'pick'   (a fresh handle is granted by definition)
+export function folderAction({ hasHandle = false, permitted = null } = {}) {
+  if (!hasHandle) return 'pick';
+  if (permitted === true) return 'use';
+  if (permitted === false) return 'pick';
+  return 'request';
 }

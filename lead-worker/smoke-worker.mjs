@@ -487,6 +487,62 @@ try {
   check('a locked device cannot mint a job', lockedStart.status === 403 && lj.reason === 'locked');
   await admin('/api/user', { deviceId: PD, action: 'unlock' });
 
+  // ── SPEC-021: the export column mapping ───────────────────────────────────────────────────────
+  // The extension's BUNDLED copy is imported straight from the extension tree. That coupling is the
+  // point: while the two revisions are equal the two tables must be byte-identical, or an offline
+  // user and an online user would get different spreadsheets from the same build.
+  const clientMap = await import(new URL('../src/export/mapping.js', import.meta.url).href);
+  const mapBody = { source: 'invoices', rin: PRIN, version: '9.9.9' };
+
+  const mapUnsigned = await call('/export/mapping', { method: 'POST', body: JSON.stringify(mapBody), headers: { 'content-type': 'application/json' } });
+  check('T-195 the mapping is not a public asset — unsigned is refused', mapUnsigned.status === 401);
+
+  const mapBadSource = await signed('/export/mapping', { ...mapBody, source: 'nope' }, PK, PD);
+  check('T-196 an unknown source is refused, not answered with a default mapping', mapBadSource.status === 400);
+
+  const mapRes = await signed('/export/mapping', mapBody, PK, PD);
+  const mapJ = await mapRes.json();
+  const sumKeys = (mapJ.mapping?.summary || []).map(([k]) => k);
+  check('T-197 a signed, entitled device gets the whole mapping: sheets, columns, revision and hash',
+    mapRes.status === 200 && mapJ.ok && mapJ.source === 'invoices'
+    && Number.isInteger(mapJ.revision) && /^[0-9a-f]{32}$/.test(mapJ.hash || '')
+    && !!mapJ.mapping.summarySheet && !!mapJ.mapping.lineSheet && mapJ.mapping.summarySheet !== mapJ.mapping.lineSheet
+    && sumKeys.includes('index') && sumKeys.includes('details') && sumKeys.includes('uuid')
+    && mapJ.mapping.summary.every((c) => Array.isArray(c) && c.length === 3 && typeof c[1] === 'string' && typeof c[2] === 'number')
+    && mapJ.mapping.lines.some(([k]) => k === 'uuid'));
+
+  const rcpJ = await (await signed('/export/mapping', { ...mapBody, source: 'receipts' }, PK, PD)).json();
+  check('T-198 each source has its own mapping and its own hash',
+    rcpJ.ok && rcpJ.mapping.summarySheet !== mapJ.mapping.summarySheet && rcpJ.hash !== mapJ.hash);
+
+  const mapAgain = await (await signed('/export/mapping', mapBody, PK, PD)).json();
+  const mapSame = await (await signed('/export/mapping', { ...mapBody, have: mapJ.hash }, PK, PD)).json();
+  const mapStale = await (await signed('/export/mapping', { ...mapBody, have: 'ff'.repeat(16) }, PK, PD)).json();
+  check('T-199 the hash is stable, and a client holding it is told "unchanged" instead of resent the table — a stale one is not',
+    mapAgain.hash === mapJ.hash
+    && mapSame.ok && mapSame.unchanged === true && !mapSame.mapping && mapSame.revision === mapJ.revision
+    && mapStale.ok && !mapStale.unchanged && !!mapStale.mapping);
+
+  // The invariant that makes the bundled fallback safe.
+  const ser = (m) => JSON.stringify([m.key, m.summarySheet, m.lineSheet, m.summary, m.lines]);
+  check('T-200 at equal revisions the served mapping and the extension\'s bundled mapping are identical',
+    mapJ.revision !== clientMap.BUNDLED_REVISION
+      ? true   // revisions have deliberately diverged; the client's validator governs from here
+      : ser(mapJ.mapping) === ser(clientMap.BUNDLED.invoices) && ser(rcpJ.mapping) === ser(clientMap.BUNDLED.receipts),
+    'served revision ' + mapJ.revision + ' vs bundled ' + clientMap.BUNDLED_REVISION);
+  // …and whatever we serve must satisfy the client's own validator, or an authorised user would be
+  // silently pushed back onto the bundled mapping by their own extension.
+  check('T-201 the served mapping passes the client-side validator for both sources',
+    clientMap.validateMapping(mapJ.mapping, clientMap.BUNDLED.invoices).ok
+    && clientMap.validateMapping(rcpJ.mapping, clientMap.BUNDLED.receipts).ok);
+
+  await admin('/api/user', { deviceId: PD, action: 'lock' });
+  const mapLocked = await signed('/export/mapping', mapBody, PK, PD);
+  const mlJ = await mapLocked.json();
+  check('T-202 a locked device gets no mapping either — the gate is the same one the planner uses',
+    mapLocked.status === 403 && mlJ.reason === 'locked' && !mlJ.mapping);
+  await admin('/api/user', { deviceId: PD, action: 'unlock' });
+
   // ── SPEC-017 slice 1: the admin portal spine ──────────────────────────────────────────────────
   // Historical KV shapes, written straight into the store. That is deliberate: the migration exists
   // for data that predates the users table, and /register can no longer PRODUCE the defect being

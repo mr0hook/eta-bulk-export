@@ -28,7 +28,7 @@ import { renderPoAnalytics, renderPoTemplate, poAnalyticsName } from '../reject/
 import {
   defaultRange, defaultAdvanced, normalizeAdvanced, loadAdvanced, saveAdvanced, advancedChanges,
   buildSel, sourceOfKind, kindOf, rejectionAllowed, resumeEntry, planFromJob, finishRun, runFinished, runClean,
-  registerRefusal,
+  registerRefusal, chunkMap, runGuarded, restoreLog, persistLog, clearedLog, folderAction, abandonCheckpoint,
 } from './flow.js';
 
 const CSS = `
@@ -151,6 +151,16 @@ details.cols summary::before{ content:'▸ '; color:var(--gold) } details.cols[o
 details.cols .chips{ margin-top:9px }
 .ckline{ display:flex;justify-content:space-between;align-items:baseline;margin-top:10px;font:600 10px var(--font-mono);letter-spacing:.06em;color:var(--dim) } .ckline .cknow{ color:var(--muted) }
 .ckbar{ height:6px;border-radius:999px;background:var(--bg2);border:1px solid var(--line2);overflow:hidden;margin-top:6px } .ckbar>i{ display:block;height:100%;width:0;background:linear-gradient(90deg,var(--gold),var(--teal));transition:width .25s }
+/* The chunk map: one square per chunk, which is the thing the run card never had. Flex-wrap rather
+   than a fixed grid so it mirrors under RTL for free and reflows at any chunk count. */
+.ckgrid{ display:flex;flex-wrap:wrap;gap:3px;margin-top:8px }
+.ckq{ width:9px;height:9px;border-radius:2px;background:var(--bg2);border:1px solid var(--line2);flex:0 0 auto }
+.ckq.done{ background:var(--ok);border-color:var(--ok-bd) }
+.ckq.part{ background:var(--ok);border-color:var(--ok-bd);opacity:.42 }   /* a range cell only some of whose chunks landed */
+.ckq.run{ background:var(--gold);border-color:var(--gold-bd) }
+.ckq.failed{ background:var(--err);border-color:var(--err-bd) }
+.cklegend{ display:flex;flex-wrap:wrap;gap:10px;margin-top:7px;font:500 9px var(--font-mono);color:var(--dim) }
+.cklegend span{ display:inline-flex;align-items:center;gap:4px }
 .tools{ display:flex;gap:8px } .tools .btn{ flex:1 }
 .ft{ border-top:1px solid var(--line2);padding:12px 15px;display:flex;align-items:center;gap:10px;background:linear-gradient(0deg,var(--bg-ft),var(--bg)) }
 .ft .dot{ width:9px;height:9px;border-radius:50%;background:var(--dim);flex:0 0 auto } .ft.run .dot{ background:var(--gold) } .ft.ok .dot{ background:var(--ok) } .ft.err .dot{ background:var(--err) } .ft.wait .dot{ background:var(--teal) }
@@ -198,9 +208,13 @@ details.cols .chips{ margin-top:9px }
 .hint-line{ margin-top:9px;font:500 11.5px var(--font-ui);color:var(--muted);line-height:1.45 }
 /* Resume entry: a whole row, not a link — an interrupted export is the most important thing on the
    screen for the person who has one, and invisible to everyone else. */
-.resume{ display:flex;flex-direction:column;gap:3px;width:100%;margin-top:10px;text-align:start;cursor:pointer;
+.resume{ display:flex;flex-direction:column;gap:3px;flex:1;min-width:0;text-align:start;cursor:pointer;
   padding:11px 13px;border-radius:var(--r);border:1px solid var(--gold-bd);background:var(--gold-chip);color:var(--text) }
 .resume:hover{ filter:brightness(1.08) } .resume[disabled]{ opacity:.45;cursor:not-allowed }
+/* An interrupted run needs a way OUT as well as a way back in: without one, a force-closed run is
+   offered on every mount for ever (the server only drops it at 'done' or 'abandoned'). */
+.resumerow{ display:flex;gap:8px;align-items:stretch;margin-top:10px }
+.rz-x{ flex:0 0 auto;padding:0 12px;font-size:13px }
 .resume .rz-t{ font:600 13px var(--font-ui) } .resume .rz-s{ font:500 11px var(--font-mono);color:var(--muted) }
 .seg.kinds{ display:flex;width:100% } .seg.kinds button{ flex:1;padding:8px 6px }
 details.adv summary{ display:flex;align-items:baseline;gap:7px }
@@ -311,8 +325,17 @@ export function mountUI() {
         <div id="step-home">
         <section class="card">
           <button class="btn primary hero" id="download" data-i18n="flow.download">⭳ Download</button>
-          <button class="resume" id="resumeEntry" hidden><span class="rz-t" id="rz-what"></span><span class="rz-s num" id="rz-sub"></span></button>
+          <!-- The ✕ is not decoration: it is the only path out of a resume offer for a run the user
+               has given up on. Without it a force-closed run is offered on every mount for ever. -->
+          <div class="resumerow" id="resumeRow" hidden>
+            <button class="resume" id="resumeEntry"><span class="rz-t" id="rz-what"></span><span class="rz-s num" id="rz-sub"></span></button>
+            <button class="btn sm rz-x" id="resumeDiscard" data-i18n-title="flow.discardTitle" aria-label="Discard" title="Discard this interrupted run">✕</button>
+          </div>
           <div class="hint-line" id="dlhint" data-i18n="flow.downloadHint">Pick a folder, choose what to export, and go.</div>
+          <!-- The folder also lives HERE, not only on step 2. A handle restored from IndexedDB comes
+               back unpermitted, and the screen that reports "pick a folder" must be a screen you can
+               pick one from. -->
+          <div class="folder"><span>${FOLDER_ICO}</span><span class="p" id="folderHome">No output folder</span><button class="btn sm" id="pickHome" data-i18n="ui.pick">Pick</button></div>
         </section>
         <section class="card">
           <div class="sh"><h3 data-i18n="ui.tools">Tools</h3><span class="hint" data-i18n="ui.toolsHint">post-run</span></div>
@@ -365,6 +388,11 @@ export function mountUI() {
           <div class="track"><i id="bar"></i></div>
           <div class="ckline"><span id="ckLabel">current chunk —</span><span class="cknow" id="ckCur"></span></div>
           <div class="ckbar"><i id="chunkbar"></i></div>
+          <!-- One square per chunk. The bar above it is progress INSIDE the current chunk; this is
+               which chunks are finished — painted from the plan, so a resumed run is right before
+               the first fetch. -->
+          <div class="ckgrid" id="ckgrid" role="img" data-i18n-label="ui.ckMap" aria-label="Chunk map"></div>
+          <div class="cklegend" id="cklegend" hidden><span><i class="ckq done"></i><span data-i18n="ui.tDone">Done</span></span><span><i class="ckq run"></i><span data-i18n="ui.ckRun">Running</span></span><span><i class="ckq failed"></i><span data-i18n="ui.tFail">Failed</span></span><span><i class="ckq"></i><span data-i18n="ui.ckWait">Not started</span></span></div>
           <div class="log" id="log">Idle.</div>
           <div class="runbar" style="margin-top:11px"><button class="btn sm" id="pause" disabled data-i18n="ui.pause">Pause</button><button class="btn sm" id="resume" data-i18n="ui.resume">Resume</button><button class="btn sm" id="done" data-i18n="flow.doneBtn">✓ Done</button></div>
         </section>
@@ -463,16 +491,14 @@ export function mountUI() {
   try {
     const raw = localStorage.getItem(RLOG_KEY);
     if (raw) {
-      const j = JSON.parse(raw);
-      const wrapped = j && typeof j === 'object' && !Array.isArray(j);
-      const run = wrapped ? (j.run || (j.closed === false ? 'resumable' : 'done')) : 'done';   // v1 {closed} maps over; legacy arrays drop
-      if (run === 'active' || run === 'resumable') { rlog.restore(j.entries); logRun = 'resumable'; }   // a crashed 'active' run is now a resumable one
+      const rs = restoreLog(raw);   // the parse lives in flow.js so the clear-it-again path is provable
+      if (rs.keep) { rlog.restore(rs.entries); logRun = rs.run; }
       else localStorage.removeItem(RLOG_KEY);
     }
   } catch {}
   if (rlog.entries().length) rlog.push(t('ft.restored'), { level: 'info' });
   let saveT = 0;
-  const saveLog = () => { saveT = 0; try { localStorage.setItem(RLOG_KEY, JSON.stringify({ v: 2, run: logRun, entries: rlog.toJSON() })); } catch {} };
+  const saveLog = () => { saveT = 0; try { localStorage.setItem(RLOG_KEY, JSON.stringify(persistLog(logRun, rlog.toJSON()))); } catch {} };
   const saveLogSoon = (now) => { if (now) { clearTimeout(saveT); saveLog(); } else if (!saveT) saveT = setTimeout(saveLog, 1000); };
   const renderLog = () => {
     const el = $('log');
@@ -496,7 +522,13 @@ export function mountUI() {
         const cls = { ok: 'ok', err: 'err', wait: 'wait', run: 'run' }[meta.level] || '';
         setFt(cls, m.replace(/^[▶✅■⏸]\s*/, ''));
         if (clean) $('s-eta').textContent = '0m';
-        if (meta.terminal) setBusy(false);
+        // DELIBERATELY NOT setBusy(false). A terminal line ends the run's NARRATIVE, not the run: the
+        // orchestrator emits "⏸ Paused at i/n" and only THEN writes the progress file and sends its
+        // best-effort checkpoint, staying `running` throughout — and start() answers a call made in
+        // that window with a bare `return`, no status and no log line. Freeing the controls here is
+        // what made Pause → re-run do nothing at all. The release point is the start() PROMISE; see
+        // runGuarded() in flow.js, which every run entry point now goes through.
+        if (meta.terminal) { lastChunk = null; renderChunkMap(); }   // nothing is running now, so no square may claim to be
         // SPEC-018: the fetch loop finishing is not the run finishing — the job is not done until the
         // output exists. Merge follows automatically; only then does the 'done' checkpoint go out.
         if (runFinished(meta)) autoFinish(meta);
@@ -509,7 +541,10 @@ export function mountUI() {
     },
     onProgress: (done, failed, left) => {
       $('t-done').textContent = fmt(done); $('t-fail').textContent = fmt(failed); $('t-left').textContent = fmt(left);
-      updateEta();   // plan.doneIds was updated by the orchestrator (same object) just before this fires
+      // plan.doneIds/failedIds were updated by the orchestrator (same object) just before this fires,
+      // and this is also the ONLY hook a resume-skipped chunk emits — so the map repaints from it.
+      renderChunkMap();
+      updateEta();
     },
     onCount: (fetched, total) => {   // rows counter + bar only — the timer runs on work units, not rows
       $('procN').textContent = fmt(fetched); if (total) $('procT').textContent = fmt(total);
@@ -520,8 +555,11 @@ export function mountUI() {
     onChunk: (ck) => {
       lastChunk = ck.phase === 'idle' ? null : ck;
       updateEta();
+      renderChunkMap();   // ck.i is 1-based: this is what lights the amber square
       const { i, n, phase, cur, max } = ck;
-      const label = { search: t('ui.phSearch'), details: t('ui.phDetails'), write: t('ui.phWrite') }[phase];
+      // 'pdf' had no entry here and no ui.* key, so a PDF-enabled run blanked its own chunk line and
+      // zeroed its own bar for the LONGEST phase of every chunk.
+      const label = { search: t('ui.phSearch'), details: t('ui.phDetails'), pdf: t('ui.phPdf'), write: t('ui.phWrite') }[phase];
       if (!max || !label) { $('ckLabel').textContent = t('ui.chunkNone'); $('ckCur').textContent = ''; $('chunkbar').style.width = '0'; return; }
       $('ckLabel').textContent = t('ui.chunkLine', { i: fmt(i), n: fmt(n), label });
       $('ckCur').textContent = `${fmt(cur)} / ${fmt(max)}`;
@@ -542,10 +580,29 @@ export function mountUI() {
     if (b) { eta.reset(); lastChunk = null; if (!finishing) { logRun = 'active'; saveLogSoon(true); } }   // fresh rate baseline; mark mid-flight so a crash restores the log
     else if (logRun === 'active') { logRun = 'none'; saveLogSoon(true); }             // activity ended without a terminal status (plan built, resume loaded) → nothing to resume
     $('download').disabled = b || !licensed; $('sync').disabled = b || !licensed; $('start').disabled = b || !licensed;
-    $('resumeEntry').disabled = b; $('back').disabled = b;
-    $('pause').disabled = !b; $('resume').disabled = b; $('pick').disabled = b; $('merge').disabled = b; $('repair').disabled = b;
+    $('resumeEntry').disabled = b; $('resumeDiscard').disabled = b; $('back').disabled = b;
+    $('pause').disabled = !b; $('resume').disabled = b; $('pick').disabled = b; $('pickHome').disabled = b; $('merge').disabled = b; $('repair').disabled = b;
     $('rj-scan').disabled = b || !licensed; rjFoot();
     $('po-pick').disabled = b; $('po-template').disabled = b; poFoot(); }
+
+  // The chunk map. Painted from the PLAN, never from the event stream: orchestrator.start() skips an
+  // already-done chunk with `continue` and emits no onChunk for it, so a map built from events alone
+  // would show a resumed run's finished chunks as "not started" — the exact bug this replaces.
+  function renderChunkMap() {
+    const el = $('ckgrid'); if (!el) return;
+    const p = currentPlan;
+    const map = chunkMap(p, lastChunk ? lastChunk.i : null);
+    $('cklegend').hidden = !map.total;
+    if (!map.total) { el.textContent = ''; return; }
+    el.textContent = '';
+    for (const c of map.cells) {
+      const i2 = document.createElement('i');
+      i2.className = 'ckq' + (c.state === 'pending' ? '' : ' ' + c.state);
+      i2.title = (c.n > 1 ? t('ui.ckRange', { from: c.from, to: c.to }) : t('ui.ckOne', { n: c.from }))
+        + ' · ' + t({ done: 'ui.tDone', part: 'ui.tDone', run: 'ui.ckRun', failed: 'ui.tFail' }[c.state] || 'ui.ckWait');
+      el.append(i2);
+    }
+  }
 
   // Plan → the run screen's numbers. Named (rather than inline in the hook) because a resume built
   // from /job/plan renders the same panel without going through onPlan.
@@ -554,6 +611,8 @@ export function mountUI() {
     $('s-chunks').textContent = fmt(p.chunks.length); $('s-rows').textContent = fmt(p.totalRows);
     $('s-big').textContent = fmt(p.biggest); $('s-eta').textContent = fmtMin(estMinutes(p));
     const done = (p.doneIds || []).length; $('t-done').textContent = fmt(done); $('t-left').textContent = fmt(p.chunks.length - done);
+    $('t-fail').textContent = fmt((p.failedIds || []).length);
+    renderChunkMap();   // a resumed run paints its finished squares BEFORE the first fetch
     const doneRows = p.chunks.filter((c) => (p.doneIds || []).includes(c.id)).reduce((s, c) => s + Math.min(c.count, p.cap), 0);
     $('procN').textContent = fmt(doneRows); $('procT').textContent = fmt(p.totalRows);
     $('bar').style.width = p.totalRows ? (doneRows / p.totalRows * 100) + '%' : '0';
@@ -628,8 +687,7 @@ export function mountUI() {
   // Fed by /job/resumable. The user should not have to remember that an export was interrupted, and
   // should never start a second run over the same range because the first one was invisible.
   function renderResume() {
-    const el = $('resumeEntry');
-    el.hidden = !resumeJob;
+    $('resumeRow').hidden = !resumeJob;
     if (!resumeJob) return;
     const span = resumeJob.from ? ` · ${resumeJob.from} → ${resumeJob.to}` : '';
     $('rz-what').textContent = t('flow.resume') + ' · ' + t('flow.' + resumeJob.kind) + span;
@@ -737,15 +795,46 @@ export function mountUI() {
   const offerRepair = (on) => { $('repairOffer').hidden = !on; if (on) $('repairMsg').textContent = t('flow.repairOffer'); };
 
   // actions
-  $('pick').onclick = async () => { try { const n = await orch.pickFolder(); $('folder').textContent = n; } catch {} };
+  const setFolderName = (n) => { $('folder').textContent = n; $('folderHome').textContent = n; };
+  const pickFolderNow = async () => { try { setFolderName(await orch.pickFolder()); } catch {} };   // cancel is not an error
+  $('pick').onclick = pickFolderNow;
+  $('pickHome').onclick = pickFolderNow;
+
+  // Every path that writes goes through here, and it exists because of one Chrome rule: a directory
+  // handle rehydrated from IndexedDB after a reload comes back in 'prompt' state. orch.ensureDir()
+  // goes straight to the owner-stamp check — dir.entries() — which throws NotAllowedError on such a
+  // handle; the throw is swallowed into "Pick an output folder first.", and every entry point of the
+  // flow then bails. That is the reload that "makes the tool stop working".
+  //
+  // So the permission is re-requested BEFORE anything reads the directory, and inside the click
+  // gesture (requestPermission and showDirectoryPicker both need transient activation, which a
+  // /session round-trip can outlive — hence licence checks now come after this, not before).
+  async function ensureFolder(opts) {
+    let act = folderAction({ hasHandle: !!orch.dir() });
+    if (act === 'request') {
+      let ok = false;
+      try { ok = await ensurePermission(orch.dir()); } catch {}
+      act = folderAction({ hasHandle: true, permitted: ok });
+    }
+    if (act === 'pick') { try { await orch.pickFolder(); } catch { return null; } }
+    let d = null;
+    try { d = await orch.ensureDir(opts); } catch {}
+    if (d) setFolderName(d.name);
+    return d;
+  }
+  // A run refused because the previous one has not finished winding down must say so. The silent
+  // `return` this replaces is the visible half of the pause → re-run bug.
+  const refuseRun = () => { setFt('wait', t('flow.runBusy')); logLine(t('flow.runBusy'), { level: 'wait' }); };
   // Step 1 → 2: the folder picker IS the second step. A folder remembered from last time is reused
   // (and is still changeable on the next screen) rather than re-prompted for.
   $('download').onclick = async () => {
-    if (busy) return;
-    await refreshLicense(); if (!licensed) { $('gate').hidden = false; $('rg-name').focus(); return; }
-    let d = null; try { d = await orch.ensureDir(); } catch {}   // folder-pick cancel is not an error
+    if (busy) { refuseRun(); return; }
+    // Known-unlicensed is checked against the cached verdict first (so nothing is prompted for), then
+    // the folder inside the gesture, and only then the fresh verdict — see ensureFolder.
+    if (!licensed) { $('gate').hidden = false; $('rg-name').focus(); await refreshLicense(); if (!licensed) return; }
+    const d = await ensureFolder();
     if (!d) { setFt('', t('orch.pickFolder')); return; }
-    $('folder').textContent = d.name;
+    await refreshLicense(); if (!licensed) { $('gate').hidden = false; $('rg-name').focus(); return; }
     const r = defaultRange(todayYmd());   // 1 Jan of the current year → today
     $('from').value = r.from; $('to').value = r.to;
     setKind(kind);                        // re-applies this kind's remembered Advanced
@@ -756,47 +845,68 @@ export function mountUI() {
   // Step 2 → 3. Plan and start are one action now: "Build chunk plan" was a step the user had no
   // way to act on, and the plan is authorised by the server either way.
   $('start').onclick = async () => {
-    if (busy) return;
-    await refreshLicense(); if (!licensed) { $('gate').hidden = false; $('rg-name').focus(); return; }
     const adv = readAdvanced();
     saveAdvanced(kind, adv);
     const sel = buildSel(kind, { from: $('from').value, to: $('to').value }, adv);
-    currentPlan = null;
-    setStep('run'); setBusy(true);
-    try {
-      const p = await orch.plan(sel);
-      if (p) await orch.start(p);
-    } catch (e) { logLine(t('ft.planFailed', { msg: e?.message || e }), { level: 'err' }); setFt('err', t('ft.planFailedShort')); }
-    finally { setBusy(false); }
+    // runGuarded owns `busy` for exactly as long as orch.start() runs — never releasing on a status
+    // line — so the next Start can only land once the orchestrator has actually stopped.
+    const r = await runGuarded({
+      isBusy: () => busy, setBusy, onRefused: refuseRun,
+      run: async () => {
+        await refreshLicense(); if (!licensed) { $('gate').hidden = false; $('rg-name').focus(); return; }
+        currentPlan = null; lastChunk = null;
+        setStep('run'); renderChunkMap();
+        const p = await orch.plan(sel);
+        if (p) await orch.start(p);
+      },
+    });
+    if (r.error) { logLine(t('ft.planFailed', { msg: r.error?.message || r.error }), { level: 'err' }); setFt('err', t('ft.planFailedShort')); }
   };
   // The interrupted-run entry. The server holds the PLAN (its chunks are only purged at 'done'); the
   // folder holds the PROGRESS — and the column/PDF choices the server never stored — so the folder's
   // own plan wins whenever it describes the same run.
   $('resumeEntry').onclick = async () => {
-    if (busy || !resumeJob) return;
-    await refreshLicense(); if (!licensed) { $('gate').hidden = false; return; }
-    let d = null; try { d = await orch.ensureDir(); } catch {}
+    if (busy) { refuseRun(); return; }
+    if (!resumeJob) return;
+    const d = await ensureFolder();   // permission first, inside the gesture — see ensureFolder
     if (!d) { setFt('', t('orch.pickResume')); return; }
-    $('folder').textContent = d.name;
-    setStep('run'); setBusy(true);
+    await refreshLicense(); if (!licensed) { $('gate').hidden = false; return; }
+    const r = await runGuarded({
+      isBusy: () => busy, setBusy, onRefused: refuseRun,
+      run: async () => {
+        lastChunk = null; setStep('run');
+        let p = planFromJob(await jobPlan(resumeJob.id));
+        if (!p) { logLine(t('flow.resumeGone'), { level: 'err' }); setFt('err', t('flow.resumeGone')); return; }
+        let local = null; try { local = await orch.resume(); } catch {}
+        if (local && local.key === p.key) p = { ...local, jobId: p.jobId };
+        setKind(kindOf(p.source, p.dir));
+        renderPlan(p);   // paints the chunk map's finished squares before a single fetch goes out
+        await orch.start(p);
+      },
+    });
+    if (r.error) { logLine(t('ft.resumeFailed', { msg: r.error?.message || r.error }), { level: 'err' }); setFt('err', t('ft.resumeFailed', { msg: r.error?.message || r.error })); }
+  };
+  // The way OUT of an interrupted run. Without it the offer is permanent: listResumable keeps a job
+  // for as long as it is paused/halted/incomplete, and nothing in the extension ever left that set —
+  // only the admin dashboard could. Clearing the persisted run log with it is the other half: its
+  // "⏸ Paused at i/n" tail is what makes a reloaded drawer keep saying pause.
+  $('resumeDiscard').onclick = async () => {
+    if (busy || !resumeJob) return;
+    if (!(await confirmModal(t('flow.discardConfirm'), t('flow.discardBody')))) return;
+    const body = abandonCheckpoint(resumeJob);
     try {
-      let p = planFromJob(await jobPlan(resumeJob.id));
-      if (!p) { logLine(t('flow.resumeGone'), { level: 'err' }); setFt('err', t('flow.resumeGone')); return; }
-      let local = null; try { local = await orch.resume(); } catch {}
-      if (local && local.key === p.key) p = { ...local, jobId: p.jobId };
-      setKind(kindOf(p.source, p.dir));
-      renderPlan(p);
-      await orch.start(p);
-    } catch (e) { logLine(t('ft.resumeFailed', { msg: e?.message || e }), { level: 'err' }); setFt('err', t('ft.resumeFailed', { msg: e?.message || e })); }
-    finally { setBusy(false); }
+      if (body) await jobCheckpoint(body);
+      resumeJob = null; renderResume();
+      rlog.clear(); logRun = clearedLog().run; saveLogSoon(true); renderLog();
+      setFt('ok', t('flow.discarded')); refreshResume();
+    } catch (e) { setFt('err', t('flow.discardFailed', { msg: e?.message || e })); }
   };
   $('sync').onclick = async () => {
-    if (busy) return;
-    await refreshLicense(); if (!licensed) { $('gate').hidden = false; return; }
-    let d = null; try { d = await orch.ensureDir(); } catch {}   // folder-pick cancel is not an error
+    if (busy) { refuseRun(); return; }
+    const d = await ensureFolder();
     if (!d) { setFt('', t('sync.pickFolder')); return; }
-    setBusy(true);
-    try {
+    await refreshLicense(); if (!licensed) { $('gate').hidden = false; return; }
+    const r0 = await runGuarded({ isBusy: () => busy, setBusy, onRefused: refuseRun, run: async () => {
       const sel = deriveSyncSel(await readProgress(d), todayYmd());
       if (!sel) { setFt('', t('sync.noPrev')); return; }
       // The derived selection is run VERBATIM — it carries the previous run's own filters, which is
@@ -813,8 +923,8 @@ export function mountUI() {
       logLine(t('sync.header', { from: sel.from, to: sel.to }), { level: 'run' });
       const p = await orch.plan(sel);
       if (p) await orch.start(p);
-    } catch (e) { logLine(t('sync.failed', { msg: e?.message || e }), { level: 'err' }); setFt('err', t('sync.failedShort')); }
-    finally { setBusy(false); }
+    } });
+    if (r0.error) { logLine(t('sync.failed', { msg: r0.error?.message || r0.error }), { level: 'err' }); setFt('err', t('sync.failedShort')); }
   };
   $('rg-submit').onclick = async () => {
     const btn = $('rg-submit'), msg = $('rg-msg');
@@ -846,11 +956,16 @@ export function mountUI() {
   // In-run Resume: load the folder's plan and continue immediately. There is no separate Start on
   // the run screen — "resume" that then waits for a second click is not resuming.
   $('resume').onclick = async () => {
-    if (busy) return;
-    setBusy(true);
-    try { const p = await orch.resume(); if (p) { currentPlan = p; await orch.start(p); } }
-    catch (e) { logLine(t('ft.resumeFailed', { msg: e?.message || e }), { level: 'err' }); }
-    finally { setBusy(false); }
+    if (busy) { refuseRun(); return; }
+    // Re-request the folder permission before orch.resume() reads it: after a reload the handle is
+    // back in 'prompt' state and readProgress/scanDoneFromFolder are exactly what would throw.
+    if (!(await ensureFolder())) { setFt('', t('orch.pickResume')); return; }
+    const r = await runGuarded({ isBusy: () => busy, setBusy, onRefused: refuseRun, run: async () => {
+      lastChunk = null;
+      const p = await orch.resume();
+      if (p) { renderPlan(p); await orch.start(p); }   // renderPlan, not a bare assign: the map must show what already landed
+    } });
+    if (r.error) logLine(t('ft.resumeFailed', { msg: r.error?.message || r.error }), { level: 'err' });
   };
   // One merge path, whether it is the automatic end of a run or the standalone button: both must
   // notice unreadable files and both must be able to raise the repair offer.
@@ -862,9 +977,8 @@ export function mountUI() {
     setBusy(true);
     offerRepair(false);
     try {
-      const d = await orch.ensureDir({ allowUnverified: true });
+      const d = await ensureFolder({ allowUnverified: true });
       if (d) {
-        $('folder').textContent = d.name;
         const res = await finishRun({ merge: (onMsg) => runMergeInto(d, onMsg) });   // no checkpoint: this folder is not necessarily this run
         if (res.error) throw res.error;
         offerRepair(res.repair);
@@ -882,7 +996,7 @@ export function mountUI() {
     setBusy(true);
     offerRepair(false);
     try {
-      const d = await orch.ensureDir({ allowUnverified: true });
+      const d = await ensureFolder({ allowUnverified: true });
       if (!d) { setFt('warn', t('orch.pickFolder')); return; }
       logLine(t('flow.merging'), { level: 'run' }); setFt('run', t('flow.merging'));
       const res = await finishRun({
@@ -900,7 +1014,7 @@ export function mountUI() {
   $('repair').onclick = async () => {
     if (busy) return;
     setBusy(true);
-    try { const d = await orch.ensureDir(); if (d) { $('folder').textContent = d.name; await repairFolder(d, { onStatus: (m) => { logLine(m); setFt('run', m); } }); offerRepair(false); } }
+    try { const d = await ensureFolder(); if (d) { await repairFolder(d, { onStatus: (m) => { logLine(m); setFt('run', m); } }); offerRepair(false); } }
     catch (e) { logLine(t('ft.repairFailed', { msg: e?.message || e }), { level: 'err' }); setFt('err', t('ft.repairFailedShort')); }
     setBusy(false);
   };
@@ -1147,9 +1261,8 @@ export function mountUI() {
   $('po-template').onclick = async () => {
     if (busy) return;
     if (!window.ExcelJS) { setFt('err', t('orch.noExcel')); return; }
-    let d = null; try { d = await orch.ensureDir(); } catch {}
+    const d = await ensureFolder();   // permission is re-requested inside the click gesture
     if (!d) { setFt('', t('orch.pickFolder')); return; }
-    if (!(await ensurePermission(d))) { setFt('err', t('orch.permLost')); return; }   // permission inside the click gesture
     try {
       const buf = await renderPoTemplate(window.ExcelJS).workbook.xlsx.writeBuffer();
       await writeBlob(d, 'PO_Template.xlsx', new Blob([buf], { type: XLSX_MIME }));
@@ -1161,9 +1274,8 @@ export function mountUI() {
     await refreshLicense(); if (!licensed) { $('gate').hidden = false; return; }
     if (!window.ExcelJS) { setFt('err', t('orch.noExcel')); return; }
     // folder + permission FIRST, inside the gesture — after minutes of fetching the re-request would fail
-    let d = null; try { d = await orch.ensureDir(); } catch {}
+    const d = await ensureFolder();
     if (!d) { setFt('', t('orch.pickFolder')); return; }
-    if (!(await ensurePermission(d))) { setFt('err', t('orch.permLost')); return; }
     setBusy(true);
     const ctrl = new AbortController(); rjCtrl = ctrl;   // shared controller: Pause aborts analyze too
     try {
@@ -1207,7 +1319,16 @@ export function mountUI() {
     try { await navigator.clipboard.writeText(header + rlog.text()); setFt('ok', t('ft.logCopied')); }
     catch { setFt('err', t('ft.logCopyBlocked')); }   // portal permissions-policy edge case
   };
-  $('logclear').onclick = () => { rlog.clear(); renderLog(); try { localStorage.removeItem(RLOG_KEY); } catch {} setFt('', t('ft.logCleared')); };
+  // Clearing the log must also clear its LIFECYCLE. It used to drop the entries and the storage key
+  // while leaving logRun at 'resumable', so the very next status line re-persisted run:'resumable'
+  // and the "⏸ Paused at i/n" tail came back on the next reload — for ever. This ✕ is the visible,
+  // devtools-free way out of a force-closed run that keeps saying pause.
+  $('logclear').onclick = () => {
+    const c = clearedLog();
+    rlog.clear(); logRun = c.run; renderLog();
+    try { localStorage.removeItem(RLOG_KEY); } catch {}
+    setFt('', t('ft.logCleared'));
+  };
 
   // Language: annotated nodes re-render via the data-i18n walker; dynamic areas (footer, chunk line)
   // pick up the new language on their next event. dir flips the drawer to RTL; .num/.log stay LTR islands.
@@ -1217,13 +1338,15 @@ export function mountUI() {
     root.querySelectorAll('[data-i18n]').forEach((el) => { el.textContent = t(el.dataset.i18n); });
     root.querySelectorAll('[data-i18n-ph]').forEach((el) => { el.placeholder = t(el.dataset.i18nPh); });
     root.querySelectorAll('[data-i18n-title]').forEach((el) => { el.title = t(el.dataset.i18nTitle); });
+    root.querySelectorAll('[data-i18n-label]').forEach((el) => { el.setAttribute('aria-label', t(el.dataset.i18nLabel)); });
     root.querySelectorAll('[data-i18n-html]').forEach((el) => { el.innerHTML = t(el.dataset.i18nHtml); });   // catalog-owned markup only (consent text)
     { const pl = $('privacy-link'); if (pl) pl.href = String(LEAD_URL).replace(/\/$/, '') + '/privacy'; }    // consent innerHTML recreates the link — re-point it
-    if (!orch.folderName()) $('folder').textContent = t('ui.noFolder');
+    if (!orch.folderName()) setFolderName(t('ui.noFolder'));
     $('langBtn').textContent = L === 'ar' ? 'EN' : 'ع';
     applySourceUI();   // date-field option labels, cap line (renderCap), proc label, column chips (selection-preserving)
     $('runwhat').textContent = t('flow.' + kind);
     renderResume();    // the entry's label is assembled, not annotated
+    renderChunkMap();  // the per-cell titles are assembled too
     if (!$('repairOffer').hidden) $('repairMsg').textContent = t('flow.repairOffer');
     rjRender(); poRender();   // rejection views bake t() at render — re-render so a language toggle isn't half-translated (row state lives on the items)
     renderLog();
@@ -1247,7 +1370,8 @@ export function mountUI() {
   const tokChip = (tk) => { const c = $('tok'); c.className = 'chip ' + (tk.ok ? 'ok' : 'err'); c.querySelector('.num').textContent = tk.label.replace(/^(Token|الجلسة):\s*/, ''); };
   tokChip(orch.tokenStatus());
   setInterval(() => tokChip(orch.tokenStatus()), 30000);
-  idbGet('dh_last').then((h) => { if (h) { orch.setFolder(h); $('folder').textContent = h.name; } }).catch(() => {});
+  // The handle comes back in 'prompt' state; ensureFolder() re-requests it inside the next click.
+  idbGet('dh_last').then((h) => { if (h) { orch.setFolder(h); setFolderName(h.name); } }).catch(() => {});
 
   // survive SPA re-render: re-append host if the app wipes it
   const obs = new MutationObserver(() => { if (!document.getElementById('eta-bulk-host')) document.documentElement.appendChild(host); });

@@ -32,6 +32,8 @@ export const EN = {
   'orch.sessionRenew': '⏳ Portal session running low — refreshing it in the background…',
   'orch.refLookup': '▶ Chunk {i}/{n} resolving {n2} original invoice number(s)…',
   'orch.chunkXlsx': '▶ Chunk {i}/{n} building xlsx ({count})…',
+  'orch.mapBundled': 'ℹ️ Column layout not confirmed with the server — using the built-in layout. The export is complete and correct.',
+  'orch.mapCached': 'ℹ️ Column layout not confirmed with the server — reusing the last confirmed layout. The export is complete and correct.',
   'orch.dropLogFailed': 'could not record {count} dropped document(s); retrying chunk ({msg})',
   'orch.docsDropped': '⚠️ {count} document(s) in chunk {i} unavailable after retries — logged to eta_failures.jsonl ({written}/{total} written).',
   'orch.chunkBackoff': '⏳ Chunk {i} attempt {a}/3 failed ({msg}). Backing off {m}min…',
@@ -119,6 +121,11 @@ export const EN = {
   'ui.fetchedInv': 'invoices fetched', 'ui.fetchedRec': 'receipts fetched',
   'ui.chunkNone': 'current chunk —', 'ui.chunkLine': 'chunk {i}/{n} · {label}',
   'ui.phSearch': 'fetching rows', 'ui.phDetails': 'fetching details', 'ui.phWrite': 'writing file',
+  'ui.phPdf': 'fetching PDFs',
+  // ── the chunk map (one square per chunk) ──
+  'ui.ckMap': 'One square per chunk. Green is finished, amber is running now, red failed, grey has not started.',
+  'ui.ckOne': 'chunk {n}', 'ui.ckRange': 'chunks {from}–{to}',
+  'ui.ckRun': 'Running', 'ui.ckWait': 'Not started',
   'ui.idle': 'Idle.',
   'ui.tools': 'Tools', 'ui.toolsHint': 'post-run', 'ui.merge': '⧉ Merge folder', 'ui.repair': '⛭ Repair files',
   'ui.bug': '🐞 Report a bug', 'ui.reqrin': '＋ Request access for another account',
@@ -261,6 +268,15 @@ export const EN = {
   'flow.runComplete': '✅ Export complete — the combined output is in your folder.',
   'flow.repairOffer': 'Some files could not be read. They were written by another tool; Repair can fix illegal characters in them — then merge again.',
   'flow.rejLocked': 'Auto-Reject isn’t enabled for your account.',
+  // ── run lifecycle: stopping, and getting out of a stuck one ──
+  'flow.runBusy': 'The previous run is still stopping (saving progress) — try again in a moment.',
+  'flow.stopping': 'Stopping — saving progress…',
+  'flow.discardTitle': 'Discard this interrupted run',
+  'flow.discardConfirm': 'Discard the interrupted run?',
+  'flow.discardBody': 'It stops being offered here and on your account. Nothing already exported is deleted — the files stay in your folder.',
+  'flow.discarded': 'Interrupted run discarded.',
+  'flow.discardFailed': 'Could not discard the run: {msg}',
+  'flow.folderTitle': 'Output folder',
 };
 
 export const AR = {
@@ -289,6 +305,8 @@ export const AR = {
   'orch.sessionRenew': '⏳ جلسة البوابة على وشك الانتهاء — يتم تجديدها في الخلفية…',
   'orch.refLookup': '▶ الدفعة {i}/{n} — جلب {n2} من أرقام الفواتير الأصلية…',
   'orch.chunkXlsx': '▶ الدفعة {i}/{n} — إنشاء ملف Excel ({count})…',
+  'orch.mapBundled': 'ℹ️ تعذّر تأكيد تنسيق الأعمدة مع الخادم — سيُستخدم التنسيق المُضمَّن. التصدير كامل وصحيح.',
+  'orch.mapCached': 'ℹ️ تعذّر تأكيد تنسيق الأعمدة مع الخادم — سيُستخدم آخر تنسيق مؤكَّد. التصدير كامل وصحيح.',
   'orch.dropLogFailed': 'تعذّر تسجيل {count} مستند مفقود؛ ستُعاد الدفعة ({msg})',
   'orch.docsDropped': '⚠️ {count} مستند غير متاح في الدفعة {i} بعد إعادة المحاولات — سُجِّلت في eta_failures.jsonl (كُتب {written}/{total}).',
   'orch.chunkBackoff': '⏳ فشلت محاولة {a}/3 للدفعة {i} ({msg}). انتظار {m} دقيقة…',
@@ -368,6 +386,10 @@ export const AR = {
   'ui.fetchedInv': 'فاتورة تم جلبها', 'ui.fetchedRec': 'إيصال تم جلبه',
   'ui.chunkNone': 'الدفعة الحالية —', 'ui.chunkLine': 'الدفعة {i}/{n} · {label}',
   'ui.phSearch': 'جلب الصفوف', 'ui.phDetails': 'جلب التفاصيل', 'ui.phWrite': 'كتابة الملف',
+  'ui.phPdf': 'جلب ملفات PDF',
+  'ui.ckMap': 'كل مربع يمثل دفعة. الأخضر اكتمل، والبرتقالي قيد التنفيذ الآن، والأحمر فشل، والرمادي لم يبدأ.',
+  'ui.ckOne': 'الدفعة {n}', 'ui.ckRange': 'الدفعات {from}–{to}',
+  'ui.ckRun': 'قيد التنفيذ', 'ui.ckWait': 'لم تبدأ',
   'ui.idle': 'في وضع الانتظار.',
   'ui.tools': 'الأدوات', 'ui.toolsHint': 'بعد التصدير', 'ui.merge': '⧉ دمج المجلد', 'ui.repair': '⛭ إصلاح الملفات',
   'ui.bug': '🐞 الإبلاغ عن مشكلة', 'ui.reqrin': '＋ طلب صلاحية لحساب آخر',
@@ -503,6 +525,14 @@ export const AR = {
   'flow.runComplete': '✅ اكتمل التصدير — الملف المجمَّع في مجلدك.',
   'flow.repairOffer': 'تعذّرت قراءة بعض الملفات. كُتبت ببرنامج آخر؛ يمكن لأداة الإصلاح معالجة المحارف غير الصالحة بها — ثم أعد الدمج.',
   'flow.rejLocked': 'خاصية الرفض التلقائي غير مفعَّلة لحسابك.',
+  'flow.runBusy': 'التشغيل السابق ما زال يتوقف (يتم حفظ التقدم) — أعد المحاولة بعد لحظة.',
+  'flow.stopping': 'جارٍ الإيقاف — يتم حفظ التقدم…',
+  'flow.discardTitle': 'تجاهل هذا التشغيل المتوقف',
+  'flow.discardConfirm': 'هل تريد تجاهل التشغيل المتوقف؟',
+  'flow.discardBody': 'لن يُعرض بعدها هنا ولا في حسابك. لن يُحذف أي شيء تم تصديره — تبقى الملفات في مجلدك.',
+  'flow.discarded': 'تم تجاهل التشغيل المتوقف.',
+  'flow.discardFailed': 'تعذّر تجاهل التشغيل: {msg}',
+  'flow.folderTitle': 'مجلد الحفظ',
 };
 
 let lang = 'en';

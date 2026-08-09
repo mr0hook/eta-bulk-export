@@ -13,8 +13,11 @@ import {
   KINDS, selOfKind, kindOf, defaultRange, defaultAdvanced, normalizeAdvanced,
   loadAdvanced, saveAdvanced, advancedChanges, buildSel, yearLabel,
   rejectionAllowed, resumeEntry, planFromJob, isUnreadableSkip, finishRun, runFinished, runClean,
-  registerRefusal,
+  registerRefusal, chunkMap, CHUNK_MAP_MAX, runGuarded, restoreLog, persistLog, clearedLog,
+  folderAction, abandonCheckpoint,
 } from '../src/ui/flow.js';
+
+const DRAWER = readFileSync(new URL('../src/ui/drawer.js', import.meta.url), 'utf8');
 
 // A localStorage that behaves like the browser's, for the persistence cases. ls.js swallows a
 // missing global, so tests that don't install this simply see the defaults.
@@ -260,7 +263,7 @@ test('T-170 Resume appears only when /job/resumable returns a job', () => {
   const e = resumeEntry(RESUMABLE);
   assert.deepEqual(e, {
     id: 'job-9', state: 'paused', kind: 'purchases',
-    from: '2026-01-01', to: '2026-08-09', done: 190, total: 412, rows: 98000,
+    from: '2026-01-01', to: '2026-08-09', done: 190, failed: 1, total: 412, rows: 98000,
   });
 });
 
@@ -378,4 +381,245 @@ test('T-185 every other /register answer is left to the caller, and counts are c
   assert.ok(!/undefined|NaN/.test(r.text));
   assert.equal(registerRefusal({ ok: false, reason: 'device_limit', held: '4', allowed: '1' }).held, 4);
   assert.equal(registerRefusal({ ok: false, reason: 'device_limit', held: -3, allowed: 1.9 }).held, 0);
+});
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+// T-186 — the chunk map: which chunks are DONE, and which are PENDING
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+// The run card carried exactly one notion of a chunk — the one being worked right now — so nothing
+// anywhere said which chunks had finished. The failure that matters is the RESUME one: start() skips
+// an already-done chunk with `continue` and emits NO onChunk for it, so a map painted from the event
+// stream shows a resumed run's completed chunks as "not started" while the counter above it says
+// 190/412. The plan is the authority; these tests pin that.
+const planOf = (n, doneIds = [], failedIds = []) => ({
+  chunks: Array.from({ length: n }, (x, i) => ({ id: 'c' + (i + 1), label: 'L' + (i + 1), count: 10 })),
+  doneIds, failedIds,
+});
+const statesOf = (m) => m.cells.map((c) => c.state);
+
+test('T-186 the chunk map marks done, running, failed and pending from the plan', () => {
+  const m = chunkMap(planOf(5, ['c1', 'c2'], ['c4']), 3);
+  assert.equal(m.total, 5);
+  assert.equal(m.per, 1, 'one cell per chunk at this size');
+  assert.deepEqual(statesOf(m), ['done', 'done', 'run', 'failed', 'pending']);
+  assert.deepEqual({ done: m.done, failed: m.failed, pending: m.pending, running: m.running }, { done: 2, failed: 1, pending: 1, running: 3 });
+  // Each cell names the chunk it stands for, 1-based, so a tooltip can be assembled without the DOM.
+  assert.deepEqual(m.cells[2], { state: 'run', from: 3, to: 3, n: 1 });
+
+  // No plan / no chunks is an empty map, never a crash and never a phantom square.
+  for (const p of [null, undefined, {}, { chunks: [] }, { chunks: [], doneIds: ['c1'] }]) {
+    const e = chunkMap(p);
+    assert.deepEqual(e.cells, [], 'empty plan → no cells');
+    assert.equal(e.total, 0);
+  }
+  // A doneId for a chunk that is not in this plan cannot colour anything.
+  assert.deepEqual(statesOf(chunkMap(planOf(2, ['nope']), null)), ['pending', 'pending']);
+});
+
+test('T-186 a RESUMED run shows its finished chunks as done before a single fetch goes out', () => {
+  // What orchestrator.resume() hands the drawer: doneIds reconciled from the folder, nothing running.
+  const resumed = planOf(6, ['c1', 'c2', 'c3']);
+  const before = chunkMap(resumed, null);
+  assert.deepEqual(statesOf(before), ['done', 'done', 'done', 'pending', 'pending', 'pending'],
+    'the map is painted from plan.doneIds, so a resume is right before the first onChunk arrives');
+  assert.equal(before.done, 3);
+  assert.equal(before.running, null, 'nothing is running yet — no square may claim to be');
+
+  // The orchestrator then skips c1..c3 (onProgress only, no onChunk) and starts work on c4.
+  const during = chunkMap(resumed, 4);
+  assert.deepEqual(statesOf(during), ['done', 'done', 'done', 'run', 'pending', 'pending'],
+    'the skipped chunks stay done — an event-driven map would have shown them as not started');
+
+  // done wins over running: a stale index must never un-finish a chunk that landed.
+  assert.equal(chunkMap(resumed, 2).cells[1].state, 'done');
+  // running wins over failed: a failed chunk stays in failedIds while it is being retried.
+  assert.equal(chunkMap(planOf(3, [], ['c2']), 2).cells[1].state, 'run');
+  assert.equal(chunkMap(planOf(3, [], ['c2']), 3).cells[1].state, 'failed');
+  // An out-of-range or non-integer running index lights nothing.
+  for (const bad of [0, 7, -1, null, 1.5, '2', NaN]) assert.equal(chunkMap(resumed, bad).running, null, String(bad));
+});
+
+test('T-186 a plan with hundreds of chunks still fits a 404px panel, and a red square survives', () => {
+  const n = CHUNK_MAP_MAX * 3 + 7;   // 727 chunks — the T-170 fixture is 412, so this is realistic
+  const done = Array.from({ length: 400 }, (x, i) => 'c' + (i + 1));
+  const m = chunkMap(planOf(n, done, ['c' + n]), 401);
+  assert.ok(m.cells.length <= CHUNK_MAP_MAX, `capped at ${CHUNK_MAP_MAX}, got ${m.cells.length}`);
+  assert.equal(m.cells.reduce((s, c) => s + c.n, 0), n, 'every chunk is covered by exactly one cell');
+  assert.deepEqual([m.cells[0].from, m.cells[m.cells.length - 1].to], [1, n], 'the cells span the whole plan');
+  // The counts are per-CHUNK, not per-cell: the tracker and the map must agree.
+  assert.deepEqual({ done: m.done, failed: m.failed }, { done: 400, failed: 1 });
+  // The worst thing in a range wins, so a single failure is never averaged into a field of green.
+  assert.ok(statesOf(m).includes('failed'), 'one failed chunk in 727 must still be visible');
+  assert.ok(statesOf(m).includes('run'));
+  assert.ok(statesOf(m).includes('done'));
+  // A range only some of whose chunks landed is neither done nor pending.
+  assert.ok(statesOf(chunkMap(planOf(10, ['c1']), null, 5)).includes('part'));
+});
+
+test('T-186 the drawer renders the map, and renders it from the plan', () => {
+  assert.match(DRAWER, /id="ckgrid"/, 'the chunk map needs an element to live in');
+  assert.match(DRAWER, /chunkMap\(/, 'the states come from flow.js, not from a second implementation');
+  assert.match(DRAWER, /function renderChunkMap\(/);
+  // Painted on every hook that can change it — including onProgress, which is the ONLY hook a
+  // resume-skipped chunk emits.
+  const hook = DRAWER.slice(DRAWER.indexOf('onProgress: ('), DRAWER.indexOf('onCount: ('));
+  assert.match(hook, /renderChunkMap\(\)/, 'onProgress must repaint the map');
+  assert.match(DRAWER.slice(DRAWER.indexOf('function renderPlan(')), /renderChunkMap\(\)/, 'a resumed plan paints before the first fetch');
+  // The PDF phase had no label and no catalog key, so a PDF-enabled run blanked its own chunk line
+  // for the longest phase of every chunk.
+  assert.match(DRAWER, /pdf: t\('ui\.phPdf'\)/);
+  assert.ok(EN['ui.phPdf'] && AR['ui.phPdf'], 'both languages');
+});
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+// T-187 — Pause, then re-run: the controls are released by the PROMISE, never by a status line
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+const tick = () => new Promise((r) => setTimeout(r, 0));
+
+test('T-187 a re-run during the previous run’s wind-down is refused out loud, and works after it', async () => {
+  // Model of the real thing: orchestrator.start() emits its terminal "⏸ Paused at i/n" line and only
+  // THEN writes progress and sends its best-effort checkpoint, staying `running` throughout — and a
+  // start() made in that window returns undefined with no status, no error and no log line.
+  const starts = [];
+  let running = false;
+  const start = async (onStatus) => {
+    if (running) { starts.push('swallowed'); return undefined; }   // orchestrator.js:161, verbatim
+    running = true; starts.push('ran');
+    onStatus('⏸ Paused at 2/3.', { level: 'wait', terminal: true });
+    await tick(); await tick();                                     // writeProgress + jobCheckpoint
+    running = false;
+    return 'settled';
+  };
+
+  let busy = false; const refused = [];
+  const attempt = () => runGuarded({
+    isBusy: () => busy, setBusy: (b) => { busy = b; }, onRefused: (why) => refused.push(why),
+    run: () => start(() => {}),
+  });
+
+  const first = attempt();
+  await tick();   // the terminal line has been emitted — this is where the drawer used to setBusy(false)
+  assert.equal(busy, true, 'the run has not settled, so the controls are still held');
+
+  const second = await attempt();
+  assert.deepEqual(second, { ran: false, refused: 'busy', value: undefined, error: null });
+  assert.deepEqual(refused, ['busy'], 'a swallowed click is the visible half of the bug — it must speak');
+  assert.deepEqual(starts, ['ran'], 'the refused attempt never reached the orchestrator’s silent return');
+
+  assert.equal((await first).value, 'settled');
+  assert.equal(busy, false, 'the promise is the release point');
+
+  const third = await attempt();
+  assert.equal(third.ran, true);
+  assert.equal(third.value, 'settled', 'the re-run after a pause actually runs');
+  assert.deepEqual(starts, ['ran', 'ran']);
+  assert.deepEqual(refused, ['busy']);
+});
+
+test('T-187 runGuarded always releases the controls, including when the run throws', async () => {
+  let busy = false;
+  const r = await runGuarded({ isBusy: () => busy, setBusy: (b) => { busy = b; }, run: async () => { throw new Error('plan denied'); } });
+  assert.equal(busy, false, 'a failed run must not leave the drawer wedged');
+  assert.equal(r.ran, true);
+  assert.match(String(r.error.message), /plan denied/, 'the error is returned, not thrown — the caller phrases it');
+  assert.equal(r.refused, null);
+});
+
+test('T-187 the drawer releases on the promise, not on the terminal status line', () => {
+  assert.ok(!/terminal\)\s*setBusy\(false\)/.test(DRAWER),
+    'a terminal line ends the run’s narrative, not the run — releasing there is the pause → re-run bug');
+  assert.match(DRAWER, /runGuarded\(\{/, 'the run entry points go through the guarded wrapper');
+  // Every entry point that can start the orchestrator, and the refusal they share.
+  for (const id of ['start', 'resumeEntry', 'sync', 'resume']) {
+    const h = DRAWER.slice(DRAWER.indexOf(`$('${id}').onclick`), DRAWER.indexOf(`$('${id}').onclick`) + 1400);
+    assert.match(h, /runGuarded\(/, `${id} must not manage busy by hand`);
+    assert.match(h, /refuseRun/, `${id} must not swallow a click made while a run is winding down`);
+  }
+  assert.ok(EN['flow.runBusy'] && AR['flow.runBusy'], 'the refusal needs both languages');
+});
+
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+// T-188 — a force-closed run must not come back stuck in "pause"
+// ═════════════════════════════════════════════════════════════════════════════════════════════════
+test('T-188 a restored paused log can be cleared, and stays cleared across the next reload', () => {
+  const paused = [{ t: 0, level: 'wait', msg: '⏸ Paused at 12/17.', n: 1 }];
+
+  // What a force-closed run leaves behind, and what the next mount reads.
+  const crashed = JSON.stringify(persistLog('active', paused));
+  const r1 = restoreLog(crashed);
+  assert.deepEqual({ run: r1.run, keep: r1.keep, n: r1.entries.length }, { run: 'resumable', keep: true, n: 1 },
+    'a run that was mid-flight when the page died comes back as one that can be resumed');
+  assert.equal(restoreLog(JSON.stringify(persistLog('resumable', paused))).run, 'resumable');
+
+  // The ✕ next to the log. THIS is the round trip that used to fail: the entries and the key went,
+  // the lifecycle flag did not, so the next status line re-persisted run:'resumable' and the paused
+  // tail came back on the following reload — for ever.
+  const c = clearedLog();
+  assert.deepEqual(c, { run: 'none', entries: [] });
+  const afterClear = restoreLog(JSON.stringify(persistLog(c.run, c.entries)));
+  assert.deepEqual({ run: afterClear.run, keep: afterClear.keep }, { run: 'none', keep: false },
+    'what the clear writes must read back as nothing to restore');
+
+  // A clean finish is not resumable either, and nothing malformed may resurrect a log.
+  assert.equal(restoreLog(JSON.stringify(persistLog('done', paused))).run, 'none');
+  assert.equal(restoreLog(JSON.stringify({ closed: false, entries: paused })).run, 'resumable', 'v1 {closed} maps over');
+  assert.equal(restoreLog(JSON.stringify({ closed: true, entries: paused })).run, 'none');
+  for (const junk of [null, undefined, '', 'not json', '[]', JSON.stringify(paused), '{}', '7']) {
+    const j = restoreLog(junk);
+    assert.deepEqual({ run: j.run, keep: j.keep, n: j.entries.length }, { run: 'none', keep: false, n: 0 }, JSON.stringify(junk));
+  }
+});
+
+test('T-188 the drawer’s clear resets the lifecycle, not just the lines', () => {
+  const h = DRAWER.slice(DRAWER.indexOf("$('logclear').onclick"), DRAWER.indexOf("$('logclear').onclick") + 400);
+  assert.match(h, /clearedLog\(\)/, 'the clear must go through the flow helper');
+  assert.match(h, /logRun = /, 'clearing the log must clear its lifecycle flag or the paused tail comes back');
+  assert.match(DRAWER, /restoreLog\(raw\)/, 'the mount-time restore is the same model');
+  assert.match(DRAWER, /persistLog\(logRun,/);
+});
+
+test('T-188 an interrupted run can be discarded, which is the only way off the resume list', () => {
+  // listResumable keeps a job while it is planned/running/merging/paused/incomplete/halted, and the
+  // extension had no path that leaves that set — so a force-closed run was offered on every mount.
+  const e = resumeEntry(RESUMABLE);
+  assert.deepEqual(abandonCheckpoint(e), { jobId: 'job-9', state: 'abandoned', done: 190, failed: 1 });
+  // The counts ride along: a checkpoint writes done_count/failed_count, so zeroes would erase how far
+  // the run actually got from the history row it leaves behind.
+  assert.equal(abandonCheckpoint({ id: 'j', done: 3, failed: 2 }).done, 3);
+  assert.equal(abandonCheckpoint({ id: 'j' }).failed, 0, 'a missing count is 0, never undefined');
+  // Nothing to abandon is not a checkpoint — never a request with an empty job id.
+  for (const bad of [null, undefined, {}, { id: '' }, 'job-9']) assert.equal(abandonCheckpoint(bad), null, String(bad));
+
+  assert.match(DRAWER, /id="resumeDiscard"/, 'the way out must be a control, not a devtools command');
+  const h = DRAWER.slice(DRAWER.indexOf("$('resumeDiscard').onclick"), DRAWER.indexOf("$('resumeDiscard').onclick") + 700);
+  assert.match(h, /confirmModal\(/, 'discarding a run is not an accident you can click into');
+  assert.match(h, /abandonCheckpoint\(resumeJob\)/);
+  assert.match(h, /jobCheckpoint\(body\)/);
+  assert.match(h, /rlog\.clear\(\)/, 'discarding the run also clears the paused log it left behind');
+  for (const k of ['flow.discardTitle', 'flow.discardConfirm', 'flow.discardBody', 'flow.discarded', 'flow.discardFailed']) {
+    assert.ok(EN[k] && AR[k], k);
+  }
+});
+
+test('T-188 a folder handle restored after a reload is re-permissioned before anything reads it', () => {
+  // Chrome hands back a rehydrated handle in 'prompt' state. ensureDir() goes straight to the owner
+  // -stamp check — dir.entries() — which throws NotAllowedError, is swallowed into "Pick an output
+  // folder first.", and used to leave the user on the one screen with no Pick button. That is the
+  // reload after which the tool "stops working".
+  assert.equal(folderAction({ hasHandle: false }), 'pick', 'no handle → the picker');
+  assert.equal(folderAction({ hasHandle: true }), 'request', 'a restored handle is asked about BEFORE it is read');
+  assert.equal(folderAction({ hasHandle: true, permitted: null }), 'request');
+  assert.equal(folderAction({ hasHandle: true, permitted: true }), 'use');
+  assert.equal(folderAction({ hasHandle: true, permitted: false }), 'pick', 'a refused handle falls back to a fresh one, not to a dead end');
+  assert.equal(folderAction(), 'pick');
+
+  assert.match(DRAWER, /async function ensureFolder\(/);
+  const f = DRAWER.slice(DRAWER.indexOf('async function ensureFolder('), DRAWER.indexOf('async function ensureFolder(') + 700);
+  assert.match(f, /folderAction\(/, 'the decision lives in flow.js');
+  assert.ok(f.indexOf('ensurePermission') < f.indexOf('orch.ensureDir'), 'permission must be settled BEFORE the directory is read');
+  // No writing path may still go straight at ensureDir and inherit the wedge.
+  assert.equal((DRAWER.match(/await orch\.ensureDir\(/g) || []).length, 1, 'ensureFolder is the single gate');
+  // And the screen that reports "pick a folder" must be a screen you can pick one from.
+  const home = DRAWER.slice(DRAWER.indexOf('<div id="step-home">'), DRAWER.indexOf('<div id="step-what"'));
+  assert.match(home, /id="pickHome"/, 'the only Pick control used to sit behind the door that jams');
 });

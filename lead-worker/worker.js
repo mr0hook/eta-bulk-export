@@ -8,6 +8,9 @@
 //   POST /session      signed → { allowed, locked, killed, reason, superadmin, features, boundRins, quota, canRequestRin }
 //   POST /rin-request  signed { requestedRin, note } → queues a request for admin approval
 //   POST /bug          signed { message } → files a bug report
+//   POST /export/mapping signed { source, have?, rin, version } → the xlsx column mapping for that
+//                      source (sheet names + [key,header,width] tuples), or { unchanged:true } when
+//                      the client's hash already matches. SPEC-021 — column metadata only, never rows.
 // Admin (token via `Authorization: Bearer <token>` header only — never the query string):
 //   GET  /admin                    dashboard (Users · Requests · Bugs · Tools)
 //   GET  /api/stats                summary counters for the dashboard cards
@@ -54,6 +57,7 @@ import { errlog } from './src/lib/audit.js';
 import { makeAdminCheck } from './src/lib/auth.js';
 import { extensionRoutes } from './src/routes/extension.js';
 import { planRoutes } from './src/routes/plan.js';
+import { exportRoutes } from './src/routes/exportmap.js';
 import { portalRoutes } from './src/routes/portal.js';
 import { adminRoutes } from './src/routes/admin.js';
 
@@ -99,6 +103,9 @@ async function handle(request, env) {
     if (ext) return ext;
     const plan = await planRoutes(request, env, url, path);
     if (plan) return plan;
+    // SPEC-021: the export column mapping. Signed + entitlement-checked like the planner.
+    const emap = await exportRoutes(request, env, url, path);
+    if (emap) return emap;
     // BEFORE adminRoutes on purpose: /api/users and /api/user are shared paths. portalRoutes serves
     // the SPEC-017 contract and returns null for a legacy `{ deviceId, … }` /api/user body, which
     // then falls through to the KV dashboard's handler with its request body still unread.

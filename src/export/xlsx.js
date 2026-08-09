@@ -1,9 +1,16 @@
 // Clean-room ETA export builder — reimplemented from EXPORT_BEHAVIOR_SPEC.md on ExcelJS.
 // Pure + node-testable: renderWorkbook(ExcelJS, records, source, options) -> { workbook, ... }.
 // records: [{ detail, search }]  (invoices use detail; receipts use detail + search.posSerialNumber/submitterName)
+//
+// SPEC-021: the sheet names and base column definitions no longer live in this file — they come
+// from mapping.js, which returns the server-served mapping when one has been fetched and validated
+// and the BUNDLED one otherwise. This file is unchanged in every other respect: it still decides
+// every DYNAMIC column (tax types, FX, discounts, references, customs) from the records in hand,
+// and every row it writes is built here, on the device, from data that never leaves it.
 import { clean, cleanRow } from './sanitize.js';
 import { dateEg } from './dates.js';
 import { taxName, taxWidth } from './codes.js';
+import { mappingFor, ALWAYS_KEEP } from './mapping.js';
 
 export const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const RTL = { rightToLeft: true, rtl: true, activeCell: 'A1', state: 'frozen', ySplit: 1 };
@@ -19,56 +26,10 @@ function insertAfter(cols, afterKey, col) { const i = idx(cols, afterKey); cols.
 const BAD_STATUS = ['Invalid', 'Rejected', 'Cancelled', 'Cancellation Requested', 'Rejection Requested'];
 
 // ---------------- column definitions ----------------
-const INV = {
-  key: 'invoices', summarySheet: 'جميع الفواتير', lineSheet: 'بيانات الفواتير',
-  summary: [
-    ['index', 'مسلسل', 10], ['details', 'تفاصيل', 10], ['type', 'نوع المستند', 12], ['version', 'نسخة المستند', 13],
-    ['status', 'الحالة', 10], ['dateIssued', 'تاريخ الإصدار', 13], ['dateReceived', 'تاريخ التقديم', 13],
-    ['currency', 'عملة الفاتورة', 13], ['totalSales', 'إجمالى المبيعات', 12], ['netAmount', 'قيمة الفاتورة', 12],
-    ['totalAmount', 'إجمالى الفاتورة', 14], ['invoiceNumber', 'الرقم الداخلى', 23], ['uuid', 'الرقم الإلكترونى', 32],
-    ['issuerId', 'الرقم الضريبى للبائع', 17], ['issuerName', 'إسم البائع', 32], ['issuerAddress', 'عنوان البائع', 32],
-    ['receiverId', 'الرقم الضريبى للمشترى', 17], ['receiverName', 'إسم المشترى', 32], ['receiverAddress', 'عنوان المشترى', 32],
-    ['purchaseOrderReference', 'مرجع طلب الشراء', 32], ['purchaseOrderDescription', 'وصف طلب الشراء', 32],
-    ['salesOrderReference', 'مرجع طلب المبيعات', 32], ['salesOrderDescription', 'وصف طلب المبيعات', 32],
-    ['signature', 'التوقيع الإلكترونى', 32], ['url', 'الرابط الخارجى', 120],
-  ],
-  lines: [
-    ['type', 'نوع المستند', 12], ['version', 'نسخة المستند', 13], ['status', 'الحالة', 10], ['invoiceNumber', 'رقم الفاتورة', 23],
-    ['dateIssued', 'تاريخ الإصدار', 13], ['dateReceived', 'تاريخ التقديم', 13], ['itemCode', 'كود الصنف', 14], ['internalCode', 'الكود الداخلى', 14],
-    ['itemSecondaryName', 'إسم الكود', 14], ['description', 'الوصف', 25], ['unitType', 'كود الوحدة', 12], ['unitTypeName', 'إسم الوحدة', 20],
-    ['unitValue', 'السعر', 10], ['quantity', 'الكمية', 10], ['salesTotal', 'المبيعات', 10], ['netTotal', 'القيمة', 10], ['total', 'الإجمالى', 10],
-    ['issuerId', 'الرقم الضريبى للبائع', 17], ['issuerName', 'إسم البائع', 32], ['issuerAddress', 'عنوان البائع', 32],
-    ['receiverId', 'الرقم الضريبى للمشترى', 17], ['receiverName', 'إسم المشترى', 32], ['receiverAddress', 'عنوان المشترى', 32],
-    ['purchaseOrderReference', 'مرجع طلب الشراء', 32], ['purchaseOrderDescription', 'وصف طلب الشراء', 32],
-    ['salesOrderReference', 'مرجع طلب المبيعات', 32], ['salesOrderDescription', 'وصف طلب المبيعات', 32],
-    ['uuid', 'الرقم الإلكترونى', 32], ['signature', 'التوقيع الإلكترونى', 32],
-  ],
-};
-const RCP = {
-  key: 'receipts', summarySheet: 'جميع الإيصالات', lineSheet: 'بيانات الإيصالات',
-  summary: [
-    ['index', 'مسلسل', 10], ['details', 'تفاصيل', 10], ['type', 'نوع الإيصال', 12], ['status', 'الحالة', 10],
-    ['dateTimeIssued', 'تاريخ الإصدار', 13], ['dateTimeReceived', 'تاريخ الإستلام', 13], ['currency', 'عملة الإيصال', 13],
-    ['netAmount', 'قيمة الإيصال', 12], ['totalAmount', 'إجمالى الإيصال', 14], ['receiptNumber', 'رقم الإيصال', 23],
-    ['uuid', 'الرقم الإلكترونى', 32], ['deviceSerialNumber', 'سيريال نقطة البيع', 17], ['submitterName', 'إسم نقطة البيع', 17],
-    ['issuerId', 'الرقم الضريبى للبائع', 17], ['issuerName', 'إسم البائع', 32], ['issuerAddress', 'عنوان البائع', 32],
-    ['receiverId', 'الرقم الضريبى للمشترى', 17], ['receiverName', 'إسم المشترى', 32], ['receiverMobileNumber', 'رقم المشترى', 32],
-  ],
-  lines: [
-    ['type', 'نوع الإيصال', 12], ['receiptNumber', 'رقم الإيصال', 23], ['dateTimeIssued', 'تاريخ الإصدار', 13], ['dateTimeReceived', 'تاريخ الإستلام', 13],
-    ['itemCode', 'كود الصنف', 14], ['itemCodeNameAr', 'إسم الكود', 14], ['description', 'الوصف', 25], ['unitPrice', 'السعر', 10],
-    ['quantity', 'الكمية', 10], ['netSale', 'المبيعات', 10], ['netAmount', 'القيمة', 10], ['total', 'الإجمالى', 10],
-    ['deviceSerialNumber', 'سيريال نقطة البيع', 17], ['submitterName', 'إسم نقطة البيع', 17],
-    ['issuerId', 'الرقم الضريبى للبائع', 17], ['issuerName', 'إسم البائع', 32], ['issuerAddress', 'عنوان البائع', 32],
-    ['receiverId', 'الرقم الضريبى للمشترى', 17], ['receiverName', 'إسم المشترى', 32], ['receiverMobileNumber', 'رقم المشترى', 32],
-    ['uuid', 'الرقم الإلكترونى', 32], // added (base receipt line sheet lacks uuid) so merge can join
-  ],
-};
-
+// The base [key, header, width] tuples and the two sheet names now come from mapping.js (SPEC-021).
+// ALWAYS_KEEP (index/details/uuid) is imported from there too: removableColumns omits those from
+// the UI and keep() force-keeps them, so a stray options.columns:{uuid:false} can't break merge.
 const toCols = (defs) => defs.map(([key, header, width]) => ({ key, header, width }));
-// Columns never dropped: index/details are structural; uuid is the merge/repair dedup key. removableColumns
-// omits these from the UI and keep() force-keeps them, so a stray options.columns:{uuid:false} can't break merge.
-const ALWAYS_KEEP = new Set(['index', 'details', 'uuid']);
 const keep = (defs, options) => toCols(defs).filter((c) => ALWAYS_KEEP.has(c.key) || options?.columns?.[c.key] !== false);
 const sortTax = (set) => [...set].sort((a, b) => parseInt(a.slice(1)) - parseInt(b.slice(1)));
 
@@ -85,7 +46,10 @@ function fillFor(statusEn, typeEn) {
 
 // ---------------- main ----------------
 export function renderWorkbook(ExcelJS, records, source, options = {}) {
-  const cfg = source === 'receipts' ? RCP : INV;
+  // options.mapping lets a caller pin an exact mapping (tests, and any future "re-render with the
+  // mapping this folder was started on"). Otherwise mappingFor() decides: validated server mapping
+  // if one is cached and current, bundled otherwise. It never returns a partial mapping.
+  const cfg = options.mapping || mappingFor(source);
   const wb = new ExcelJS.Workbook();
   const built = source === 'receipts'
     ? buildReceipts(records, options, cfg)
@@ -115,7 +79,7 @@ export function renderWorkbook(ExcelJS, records, source, options = {}) {
 // ---------------- invoices ----------------
 // Base summary columns a user may remove (for the Columns UI). ALWAYS_KEEP (index/details/uuid) is excluded.
 export function removableColumns(source) {
-  const cfg = source === 'receipts' ? RCP : INV;
+  const cfg = mappingFor(source);   // the Columns UI must offer whatever the export will actually write
   return cfg.summary.filter(([k]) => !ALWAYS_KEEP.has(k)).map(([key, header]) => ({ key, header }));
 }
 
