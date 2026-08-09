@@ -50,19 +50,63 @@ export async function finishPlan(env, id, chunks, probes) {
   return true;
 }
 
+/**
+ * Jobs this device could still pick up: planned but never started, or started and not finished.
+ * Drives the "Resume" entry under the Download button — the user should not have to remember that
+ * an export was interrupted, and should never be able to start a second run over the same range by
+ * accident because the first one was invisible.
+ *
+ * 'done' is excluded (nothing to resume) and so is 'abandoned'. Newest first, capped: a device with
+ * a long history should not push a wall of stale jobs into the drawer.
+ */
+export async function listResumable(env, deviceId, limit = 5) {
+  if (!hasJobs(env)) return [];
+  const r = await env.JOBS.prepare(
+    `SELECT id, source, date_field, dir, from_iso, to_iso, state, total_chunks, total_rows,
+            done_count, failed_count, updated_at
+       FROM jobs
+      WHERE device_id = ? AND state IN ('planned','running','paused','incomplete','halted')
+      ORDER BY updated_at DESC
+      LIMIT ?`,
+  ).bind(deviceId, limit).all();
+  return (r && r.results) || [];
+}
+
 export async function getChunks(env, id) {
   if (!hasJobs(env)) return [];
   const r = await env.JOBS.prepare('SELECT * FROM job_chunks WHERE job_id = ? ORDER BY idx ASC').bind(id).all();
   return (r && r.results) || [];
 }
 
-/** Progress checkpoint from a running export. Counts only. */
+/**
+ * Progress checkpoint from a running export. Counts only.
+ *
+ * On successful completion the per-chunk rows are dropped and the jobs row is kept: the history of
+ * WHAT was exported survives, the range-by-range working detail does not. That is a deliberate
+ * retention rule — it keeps the admin timeline useful while shrinking what the backend holds about
+ * a taxpayer's activity, and it keeps /privacy honest about a smaller surface.
+ *
+ * Chunks are dropped ONLY on 'done'. They are exactly what a resume reads, so clearing them on an
+ * incomplete, halted or paused job would strand the user with no way to continue — the failure
+ * would look like the tool losing their work.
+ */
 export async function checkpoint(env, id, deviceId, p) {
   if (!hasJobs(env)) return false;
   const now = new Date().toISOString();
   const state = ['running', 'done', 'incomplete', 'halted', 'paused', 'abandoned'].includes(p.state) ? p.state : 'running';
-  const res = await env.JOBS.prepare(
+  await env.JOBS.prepare(
     `UPDATE jobs SET state=?, done_count=?, failed_count=?, updated_at=? WHERE id=? AND device_id=?`,
   ).bind(state, p.done | 0, p.failed | 0, now, id, deviceId).run();
-  return !!res;
+  if (state === 'done') await purgeChunks(env, id, deviceId);
+  return true;
+}
+
+/** Drop the working rows for a finished job, leaving its history row intact. */
+export async function purgeChunks(env, id, deviceId) {
+  if (!hasJobs(env)) return false;
+  // Device-scoped via the jobs row so a job id alone cannot be used to wipe someone else's chunks.
+  await env.JOBS.prepare(
+    `DELETE FROM job_chunks WHERE job_id = ? AND EXISTS (SELECT 1 FROM jobs WHERE id = ? AND device_id = ?)`,
+  ).bind(id, id, deviceId).run();
+  return true;
 }

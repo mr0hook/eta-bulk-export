@@ -33,11 +33,18 @@ function makeD1() {
     if (sql.includes('INSERT OR REPLACE INTO job_chunks')) { chunks.push({ job_id: a[0], idx: a[1], chunk_id: a[2], from_iso: a[3], to_iso: a[4], sub_f: a[5], sub_t: a[6], label: a[7], count: a[8], warn: a[9], state: 'pending' }); return { success: true }; }
     if (sql.includes("SET state='planned'")) { const j = jobs.get(a[4]); if (j) Object.assign(j, { state: 'planned', total_chunks: a[0], total_rows: a[1], probes: a[2], updated_at: a[3] }); return { success: true }; }
     if (sql.includes('SET state=?, done_count=?')) { const j = jobs.get(a[4]); if (j && j.device_id === a[5]) Object.assign(j, { state: a[0], done_count: a[1], failed_count: a[2], updated_at: a[3] }); return { success: true }; }
+    if (sql.includes('DELETE FROM job_chunks')) { const j = jobs.get(a[1]); if (j && j.device_id === a[2]) { for (let i = chunks.length - 1; i >= 0; i--) if (chunks[i].job_id === a[0]) chunks.splice(i, 1); } return { success: true }; }
     throw new Error('D1 stub: unrecognised statement → ' + sql.slice(0, 70));
   };
   const read = (sql, a) => {
     if (sql.includes('SELECT * FROM jobs WHERE id')) { const j = jobs.get(a[0]); return (j && j.device_id === a[1]) ? [j] : []; }
     if (sql.includes('SELECT * FROM job_chunks')) return chunks.filter((c) => c.job_id === a[0]).sort((x, y) => x.idx - y.idx);
+    if (sql.includes('FROM jobs') && sql.includes('state IN')) {
+      return [...jobs.values()]
+        .filter((j) => j.device_id === a[0] && ['planned', 'running', 'paused', 'incomplete', 'halted'].includes(j.state))
+        .sort((x, y) => String(y.updated_at).localeCompare(String(x.updated_at)))
+        .slice(0, a[1]);
+    }
     throw new Error('D1 stub: unrecognised query → ' + sql.slice(0, 70));
   };
   const mk = (sql, args) => ({
@@ -191,6 +198,28 @@ try {
 
   const cp = await signed('/job/checkpoint', { jobId: s0.jobId, state: 'running', done: 1, failed: 0 }, PK, PD);
   check('checkpoint records progress', cp.status === 200 && jobRow.done_count === 1 && jobRow.state === 'running');
+
+  // Retention: an unfinished job KEEPS its chunks — they are what a resume reads.
+  await signed('/job/checkpoint', { jobId: s0.jobId, state: 'incomplete', done: 1, failed: 1 }, PK, PD);
+  check('an incomplete job keeps its chunks (resume depends on them)', JOBS._chunks.filter((c) => c.job_id === s0.jobId).length === 2);
+
+  // ── the Resume entry under the Download button ──
+  const res1 = await (await signed('/job/resumable', {}, PK, PD)).json();
+  check('an unfinished job is offered as resumable', res1.ok && res1.jobs.length === 1 && res1.jobs[0].id === s0.jobId && res1.jobs[0].done_count === 1);
+  const plan1 = await (await signed('/job/plan', { jobId: s0.jobId }, PK, PD)).json();
+  check('resuming returns the stored plan in order', plan1.ok && plan1.chunks.length === 2 && plan1.chunks[0].label && plan1.chunks[0].count === 100);
+  const otherPlan = await (await signed('/job/plan', { jobId: s0.jobId }, reg.clientKey, 'dev-1')).json();
+  check("another device cannot read this job's plan", otherPlan.ok !== true);
+
+  await signed('/job/checkpoint', { jobId: s0.jobId, state: 'done', done: 2, failed: 0 }, PK, PD);
+  check('a finished job drops its chunks but keeps its history row',
+    JOBS._chunks.filter((c) => c.job_id === s0.jobId).length === 0
+    && JOBS._jobs.get(s0.jobId).state === 'done' && JOBS._jobs.get(s0.jobId).total_chunks === 2);
+
+  const res2 = await (await signed('/job/resumable', {}, PK, PD)).json();
+  check('a finished job is no longer offered as resumable', res2.ok && res2.jobs.length === 0);
+  const gonePlan = await signed('/job/plan', { jobId: s0.jobId }, PK, PD);
+  check('resuming a purged plan fails cleanly, not with a half-plan', gonePlan.status === 410);
 
   // The gate: a locked device must not be able to mint a job at all.
   await admin('/api/user', { deviceId: PD, action: 'lock' });

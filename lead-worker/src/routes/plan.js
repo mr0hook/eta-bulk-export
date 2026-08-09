@@ -14,7 +14,7 @@ import { computeVerdict } from '../lib/verdict.js';
 import { errlog } from '../lib/audit.js';
 import { cursorKey, seal, unseal } from '../cursor.js';
 import { startPlan, advance } from '../planner.js';
-import { createJob, getJob, finishPlan, checkpoint, hasJobs } from '../jobs.js';
+import { createJob, getJob, getChunks, finishPlan, checkpoint, listResumable, hasJobs } from '../jobs.js';
 
 // Mirrors SOURCES in the extension (src/api/sources.js). Held server-side so a client cannot raise
 // its own cap and have the planner accept oversized chunks.
@@ -27,7 +27,7 @@ const YMD = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_STEPS = 20000;   // backstop: the depth caps bound a plan long before this
 
 export async function planRoutes(request, env, url, path) {
-  if (!path.startsWith('/plan/') && path !== '/job/checkpoint') return null;
+  if (!path.startsWith('/plan/') && !path.startsWith('/job/')) return null;
   if (request.method !== 'POST') return json({ ok: false, error: 'not found' }, 404);
 
   const body = await request.text();
@@ -99,6 +99,29 @@ export async function planRoutes(request, env, url, path) {
       return json({ ok: true, done: true, jobId: id, chunks: r.chunks, probes: r.probes });
     }
     return json({ ok: true, jobId: id, cursor: await seal(key, id, st), ...trim(r) });
+  }
+
+  // ── resumable jobs ────────────────────────────────────────────────────────────────────────────
+  // Backs the Resume entry under the Download button. Deliberately does NOT require an allowed
+  // verdict: a user whose licence lapsed mid-export should still be able to see that work is
+  // outstanding and why they cannot continue it, rather than have it silently disappear.
+  if (path === '/job/resumable') {
+    const jobs = await listResumable(env, dev.deviceId);
+    return json({ ok: true, jobs });
+  }
+
+  // Hand back the plan for a job the client is resuming. The chunks are still in D1 because they
+  // are only purged when a job reaches 'done' — see jobs.js checkpoint().
+  if (path === '/job/plan') {
+    const id = String(b.jobId || '');
+    const job = await getJob(env, id, dev.deviceId);
+    if (!job) return json({ ok: false, error: 'no such job' }, 404);
+    const chunks = await getChunks(env, id);
+    if (!chunks.length) return json({ ok: false, error: 'plan no longer available', state: job.state }, 410);
+    return json({
+      ok: true, job,
+      chunks: chunks.map((c) => ({ id: c.chunk_id, fromISO: c.from_iso, toISO: c.to_iso, subF: c.sub_f, subT: c.sub_t, label: c.label, count: c.count, warn: c.warn })),
+    });
   }
 
   // ── checkpoint ────────────────────────────────────────────────────────────────────────────────
