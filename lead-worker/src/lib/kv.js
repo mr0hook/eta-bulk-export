@@ -52,6 +52,37 @@ async function rinRelease(env, rin, deviceId) {
   if (env.LOCKS) { await env.LOCKS.get(env.LOCKS.idFromName('rin:' + rin)).releaseRin(deviceId, rin); return; }
   if ((await env.LEADS.get('rinowner:' + rin)) === deviceId) await env.LEADS.delete('rinowner:' + rin);
 }
+/**
+ * Every RIN this PERSON holds, across every browser they have registered — SPEC-017 slice 3.
+ *
+ * The licensing hole this closes: `dev.boundRins.length < dev.quota` counts one browser, so the same
+ * accountant on a laptop and an office PC held two quotas against one licence. Counted from KV (the
+ * `email:` index → each `dev:` record) rather than from the D1 clients table because KV is what
+ * /register actually enforces from, exists on every install migrated or not, and can never be behind
+ * the very record being written in this request.
+ *
+ * `self` is passed in — not re-read — because the device may be mid-registration and not yet in the
+ * index. A device whose record has vanished contributes nothing rather than throwing; under-counting
+ * one browser is a smaller failure than refusing a legitimate registration outright.
+ *
+ * @returns { rins: Set<string>, devices: number }
+ */
+async function personHeld(env, email, self) {
+  const rins = new Set((self && self.boundRins) || []);
+  let devices = self ? 1 : 0;
+  const e = String(email || '').trim().toLowerCase();
+  if (!e) return { rins, devices };
+  const ids = (await env.LEADS.get('email:' + e, 'json')) || [];
+  for (const id of ids) {
+    if (self && id === self.deviceId) continue;
+    const d = await getDev(env, id);
+    if (!d) continue;
+    devices++;
+    for (const r of (d.boundRins || [])) rins.add(r);
+  }
+  return { rins, devices };
+}
+
 // Per-device fixed-window limiter for the SIGNED endpoints (/bug, /rin-request). Atomic via the Locks DO
 // (self-cleaning alarm) when bound; best-effort KV bucket otherwise. Without this, one registered device could
 // loop a signed endpoint and write unbounded permanent KV records — exhausting write quota and bloating the
@@ -65,4 +96,4 @@ async function deviceRate(env, tag, deviceId, limit, windowMs) {
   return true;
 }
 
-export { devKey, getDev, putDev, listPrefix, withSeen, listKeys, getCfg, isVoided, rinOwnerGet, rinClaim, rinRelease, deviceRate };
+export { devKey, getDev, putDev, listPrefix, withSeen, listKeys, getCfg, isVoided, rinOwnerGet, rinClaim, rinRelease, deviceRate, personHeld };

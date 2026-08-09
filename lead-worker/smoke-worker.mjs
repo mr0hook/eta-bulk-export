@@ -30,7 +30,7 @@ const LEADS = {
 // upsert, the MAX-merged counters, the escalating status), because those are the parts worth
 // testing; getting them wrong here would make a wrong route pass.
 function makeD1() {
-  const jobs = new Map(), chunks = [], users = new Map(), clients = new Map(), devices = new Map();
+  const jobs = new Map(), chunks = [], users = new Map(), clients = new Map(), devices = new Map(), plans = new Map();
   const kept = (cur, ex) => (cur !== null && cur !== undefined && cur !== '') ? cur : ex;   // COALESCE(NULLIF(cur,''), ex)
   const owned = (email, m) => [...m.values()].filter((r) => r.user_email === email);
 
@@ -40,8 +40,12 @@ function makeD1() {
     if (sql.includes('INSERT OR REPLACE INTO job_chunks')) { chunks.push({ job_id: a[0], idx: a[1], chunk_id: a[2], from_iso: a[3], to_iso: a[4], sub_f: a[5], sub_t: a[6], label: a[7], count: a[8], warn: a[9], state: 'pending' }); return { success: true }; }
     if (sql.includes("SET state='planned'")) { const j = jobs.get(a[4]); if (j) Object.assign(j, { state: 'planned', total_chunks: a[0], total_rows: a[1], probes: a[2], updated_at: a[3] }); return { success: true }; }
     if (sql.includes('SET state=?, done_count=?')) { const j = jobs.get(a[4]); if (j && j.device_id === a[5]) Object.assign(j, { state: a[0], done_count: a[1], failed_count: a[2], updated_at: a[3] }); return { success: true }; }
+    // The portal's purge is NOT device-scoped (admin token is the authority) — matched first, since
+    // the device-scoped delete below shares its opening clause.
+    if (sql.includes('/* admin */ DELETE FROM job_chunks')) { for (let i = chunks.length - 1; i >= 0; i--) if (chunks[i].job_id === a[0]) chunks.splice(i, 1); return { success: true }; }
     if (sql.includes('DELETE FROM job_chunks')) { const j = jobs.get(a[1]); if (j && j.device_id === a[2]) { for (let i = chunks.length - 1; i >= 0; i--) if (chunks[i].job_id === a[0]) chunks.splice(i, 1); } return { success: true }; }
     if (sql.includes('UPDATE jobs SET user_email')) { for (const j of jobs.values()) if (j.device_id === a[1] && !j.user_email) j.user_email = a[0]; return { success: true }; }
+    if (sql.includes('UPDATE jobs SET state = ?')) { const j = jobs.get(a[2]); if (j) { j.state = a[0]; j.updated_at = a[1]; } return { success: true }; }
 
     if (sql.includes('INSERT INTO users')) {
       const k = ['email', 'name', 'company', 'phone', 'plan', 'quota', 'valid_until', 'status', 'superadmin', 'features', 'note', 'tags', 'country', 'created_at', 'updated_at'];
@@ -94,6 +98,15 @@ function makeD1() {
     }
     if (sql.includes('DELETE FROM devices')) { for (const d of owned(a[0], devices)) devices.delete(d.device_id); return { success: true }; }
 
+    // plans: the seed is INSERT OR IGNORE (an admin's edits survive every ensureSchema), the portal
+    // upsert overwrites every column. Two different statements, two different meanings.
+    if (sql.includes('INSERT OR IGNORE INTO plans')) {
+      if (!plans.has(a[0])) plans.set(a[0], { id: a[0], name: a[1], quota: a[2], features: a[3], price: a[4], active: 1 });
+      return { success: true };
+    }
+    if (sql.includes('INSERT INTO plans')) { plans.set(a[0], { id: a[0], name: a[1], quota: a[2], features: a[3], price: a[4], active: a[5] }); return { success: true }; }
+    if (sql.includes('DELETE FROM plans')) { plans.delete(a[0]); return { success: true }; }
+
     throw new Error('D1 stub: unrecognised statement → ' + sql.slice(0, 70));
   };
 
@@ -115,6 +128,24 @@ function makeD1() {
 
   const read = (sql, a) => {
     if (sql.includes('pragma_table_info')) return [{ n: 1 }];                          // jobs.user_email exists here
+
+    // ── slice 3: plans + the entitlement resolve ──
+    if (sql.includes('/* plans */')) return [...plans.values()].sort((x, y) => (x.quota | 0) - (y.quota | 0) || String(x.id).localeCompare(String(y.id)));
+    if (sql.includes('/* plan */')) { const p = plans.get(a[0]); return p ? [p] : []; }
+    if (sql.includes('/* plan users */')) return [{ n: [...users.values()].filter((u) => (u.plan || 'free') === a[0]).length }];
+    if (sql.includes('/* entitlement */')) { const u = users.get(a[0]); return u ? [u] : []; }
+
+    // ── slice 2: the jobs page. `stuck` is state ∈ (running, merging) AND updated_at older than the
+    // bound cut-off — reimplemented rather than stubbed true, because that predicate IS the test.
+    if (sql.includes('/* jobs page */')) {
+      const [state, , email, , rin, , stuck, stale] = a;
+      const hit = [...jobs.values()].filter((j) =>
+        (!state || j.state === state) && (!email || j.user_email === email) && (!rin || j.rin === rin) &&
+        (!stuck || (['running', 'merging'].includes(j.state) && String(j.updated_at || '') < String(stale))));
+      if (sql.includes('SELECT COUNT(*)')) return [{ n: hit.length }];
+      return hit.sort((x, y) => String(y.created_at).localeCompare(String(x.created_at))).slice(a[9], a[9] + a[8]);
+    }
+    if (sql.includes('/* job row */')) { const j = jobs.get(a[0]); return j ? [j] : []; }
     if (sql.startsWith('SELECT (SELECT COUNT(*) FROM users)')) {
       const js = [...jobs.values()];
       return [{
@@ -170,7 +201,7 @@ function makeD1() {
     first: async () => read(sql, args || [])[0] || null,
     all: async () => ({ results: read(sql, args || []) }),
   });
-  return { prepare: (sql) => mk(sql, null), batch: async (stmts) => { for (const s of stmts) await s.run(); return []; }, _jobs: jobs, _chunks: chunks, _users: users, _clients: clients, _devices: devices };
+  return { prepare: (sql) => mk(sql, null), batch: async (stmts) => { for (const s of stmts) await s.run(); return []; }, _jobs: jobs, _chunks: chunks, _users: users, _clients: clients, _devices: devices, _plans: plans };
 }
 const JOBS = makeD1();
 const env = { LEADS, JOBS, ADMIN_TOKEN: 'testtok' };   // no LOCKS → KV fallbacks
@@ -447,7 +478,7 @@ try {
   const dwBody = (version) => ({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ regId: 'dw', name: 'Dual Write', email: 'dual.write@example.com', company: 'DW Ltd', taxpayerName: 'DW Ltd', registrationNumber: '800000001', deviceId: 'dev-dw', consent: true, version }) });
   await call('/register', dwBody('0.4.1'));
   const dw1 = await (await admin('/api/user?email=dual.write@example.com')).json();
-  await call('/register', dwBody('0.5.0'));
+  const dwReg = await (await call('/register', dwBody('0.5.0'))).json();
   const dw2 = await (await admin('/api/user?email=dual.write@example.com')).json();
   const dwKv = JSON.parse(store.get('dev:dev-dw'));
   check('T-162 dual-write keeps a KV dev: record and its D1 devices row in step',
@@ -472,6 +503,157 @@ try {
   const legacy = await (await admin('/api/user', { deviceId: PD, action: 'setNote', value: 'legacy path' })).json();
   check('a legacy { deviceId } /api/user action still falls through to the KV handler',
     legacy.ok && JSON.parse(store.get('dev:' + PD)).note === 'legacy path');
+
+  // ── SPEC-017 slice 2: the Jobs section ────────────────────────────────────────────────────────
+  // A third run, driven to a finished plan, so there is a job WITH chunks to inspect and purge.
+  // (s0 is stale-running with its chunks already dropped at 'done'; live is running with none yet.)
+  const j3 = await (await signed('/plan/start', startBody, PK, PD)).json();
+  {
+    let c = j3.cursor, i = j3.instruction, n = 0;
+    while (i && n++ < 50) {
+      const obs = i.kind === 'detectMaxSub' ? { maxSub: null } : { count: probeFor(i.fromISO || i.subF, i.toISO || i.subT) };
+      const r = await (await signed('/plan/step', { jobId: j3.jobId, cursor: c, observation: obs }, PK, PD)).json();
+      if (r.done) break;
+      c = r.cursor; i = r.instruction;
+    }
+  }
+
+  const jobsAll = await (await admin('/api/jobs')).json();
+  check('/api/jobs lists every run in the contract shape',
+    jobsAll.ok && jobsAll.total === 3 && jobsAll.jobs.length === 3
+    && jobsAll.jobs.every((j) => j.jobId && j.user === 'planner@gmail.com' && j.rin === PRIN
+      && 'dir' in j && 'probes' in j && 'version' in j && 'failed' in j));
+
+  // The support question "is anything wedged right now" as one click. s0 stopped checkpointing two
+  // hours ago; live checkpointed a moment ago; j3 is 'planned', which is a plan RESTING until the
+  // user presses Download and must never be reported as stuck however old it gets.
+  const jobsStuck = await (await admin('/api/jobs?stuck=1')).json();
+  check('stuck=1 finds only the run that stopped checkpointing 30+ minutes ago',
+    jobsStuck.ok && jobsStuck.total === 1 && jobsStuck.jobs[0].jobId === s0.jobId);
+
+  const jobsPlanned = await (await admin('/api/jobs?state=planned')).json();
+  const jobsNobody = await (await admin('/api/jobs?user=nobody@example.com')).json();
+  const jobsRin = await (await admin('/api/jobs?rin=' + PRIN)).json();
+  check('/api/jobs filters by state, user and rin',
+    jobsPlanned.total === 1 && jobsPlanned.jobs[0].jobId === j3.jobId
+    && jobsNobody.total === 0 && jobsRin.total === 3);
+
+  const one = await (await admin('/api/job?id=' + j3.jobId)).json();
+  check('/api/job returns the run and its chunk plan in order',
+    one.ok && one.job.jobId === j3.jobId && one.job.total === 2 && one.chunks.length === 2
+    && one.chunks[0].idx === 0 && !!one.chunks[0].chunkId && one.chunks[0].count === 100
+    && !!one.chunks[0].label && one.chunks[0].state === 'pending');
+
+  const purged = await (await admin('/api/job', { id: j3.jobId, action: 'purge' })).json();
+  check('purge drops the chunk rows and keeps the job row (checkpoint\'s retention rule on demand)',
+    purged.ok && JOBS._chunks.filter((c) => c.job_id === j3.jobId).length === 0
+    && JOBS._jobs.get(j3.jobId).state === 'planned' && JOBS._jobs.get(j3.jobId).total_chunks === 2);
+
+  const resumeBefore = (await (await signed('/job/resumable', {}, PK, PD)).json()).jobs;
+  const aband = await (await admin('/api/job', { id: live.jobId, action: 'abandon' })).json();
+  const resumeAfter = (await (await signed('/job/resumable', {}, PK, PD)).json()).jobs;
+  check('abandon sets state=abandoned, which also drops the run from /job/resumable',
+    aband.ok && aband.job.state === 'abandoned' && JOBS._jobs.get(live.jobId).state === 'abandoned'
+    && resumeBefore.some((j) => j.id === live.jobId) && !resumeAfter.some((j) => j.id === live.jobId));
+
+  const noSuchJob = await admin('/api/job', { id: 'deadbeef', action: 'abandon' });
+  const badJobAction = await admin('/api/job', { id: s0.jobId, action: 'nuke' });
+  check('an unknown job 404s, an unknown job action 400s, and both real ones are audited',
+    noSuchJob.status === 404 && badJobAction.status === 400
+    && auditAll().some((e) => e.action === 'job:purge' && e.target === j3.jobId)
+    && auditAll().some((e) => e.action === 'job:abandon' && e.target === live.jobId));
+
+  // ── SPEC-017 slice 3: plans, features, expiry, and quota on the person ────────────────────────
+  const plansJ = await (await admin('/api/plans')).json();
+  const byId = (id) => plansJ.plans.find((p) => p.id === id);
+  check('the three default plans are seeded with their quotas and features',
+    plansJ.ok && byId('free').quota === 1 && byId('free').features.length === 0
+    && byId('standard').quota === 5 && byId('standard').features.join() === 'auto-reject'
+    && byId('pro').quota === 25 && byId('pro').features.join() === 'auto-reject,po-analytics');
+
+  const up = await (await admin('/api/plan', { id: 'trial', name: 'Trial', quota: 2, features: ['auto-reject'], price: '14 days' })).json();
+  check('a plan can be created from the portal', up.ok && up.plan.quota === 2 && up.plan.active === true
+    && up.plan.features.join() === 'auto-reject' && up.plan.price === '14 days');
+
+  await admin('/api/user', { email: 'shared@example.com', action: 'setPlan', value: 'trial' });
+  const delRef = await admin('/api/plan/delete', { id: 'trial' });
+  const delRefJ = await delRef.json();
+  check('deleting a plan is REFUSED while a user references it, naming the count',
+    delRef.status === 409 && delRefJ.users === 1 && /1 user/.test(delRefJ.error) && JOBS._plans.has('trial'));
+  await admin('/api/user', { email: 'shared@example.com', action: 'setPlan', value: 'free' });
+  const delOk = await (await admin('/api/plan/delete', { id: 'trial' })).json();
+  check('deleting an unreferenced plan works', delOk.ok && !JOBS._plans.has('trial'));
+
+  // Features: the extension has always been SENT `features` and read it nowhere. Slice 3 is the
+  // first consumer, so what /session sends has to describe the person's plan, not the browser.
+  const dwSession = () => signed('/session', { rin: '800000001', version: '0.5.0' }, dwReg.clientKey, 'dev-dw').then((r) => r.json());
+  await admin('/api/user', { email: 'dual.write@example.com', action: 'setPlan', value: 'standard' });
+  const sPlan = await dwSession();
+  check('/session fills features from the user\'s plan, and the plan raises the reported quota',
+    sPlan.ok && sPlan.allowed && sPlan.features.join() === 'auto-reject' && sPlan.quota === 5);
+
+  await admin('/api/user', { email: 'dual.write@example.com', action: 'setFeatures', value: 'po-analytics' });
+  const sOver = await dwSession();
+  check('a per-user features override beats the plan', sOver.features.join() === 'po-analytics');
+  await admin('/api/user', { email: 'dual.write@example.com', action: 'setFeatures', value: '' });
+  const sBack = await dwSession();
+  check('clearing the override hands the user back to the plan, not to nothing', sBack.features.join() === 'auto-reject');
+
+  // Expiry binds, and it is its OWN reason — the drawer has to be able to say "your plan expired"
+  // rather than "you are locked", because those ask completely different things of the user.
+  const expStart = () => signed('/plan/start', { ...startBody, rin: '800000001', version: '0.5.0' }, dwReg.clientKey, 'dev-dw');
+  await admin('/api/user', { email: 'dual.write@example.com', action: 'setValidUntil', value: '2020-01-01' });
+  const sExp = await dwSession();
+  const pExp = await expStart(); const pExpJ = await pExp.json();
+  check('an expired plan is refused by BOTH /session and /plan/start, with reason=expired',
+    sExp.ok && sExp.allowed === false && sExp.reason === 'expired' && sExp.expired === true
+    && pExp.status === 403 && pExpJ.reason === 'expired');
+  await admin('/api/user', { email: 'dual.write@example.com', action: 'setValidUntil', value: '2099-12-31' });
+  const sFuture = await dwSession();
+  check('a valid_until still in the future blocks nothing', sFuture.allowed === true && !sFuture.expired);
+
+  // Quota on the PERSON — the hole this spec exists to close: a second browser used to mean a
+  // second quota against one licence.
+  const qBody = (deviceId, rin) => ({ method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name: 'Two Devices', email: 'two.devices@example.com', consent: true, registrationNumber: rin, deviceId, version: '0.5.0' }) });
+  const q1 = await (await call('/register', qBody('dev-q1', '810000001'))).json();
+  const q2 = await (await call('/register', qBody('dev-q2', '810000002'))).json();
+  check('a SECOND browser on the same email does not get a second quota',
+    q1.ok && q1.boundRins.includes('810000001')
+    && q2.ok && q2.boundRins.length === 0 && q2.allowed === false && !store.has('rinowner:810000002'));
+
+  await admin('/api/user', { email: 'two.devices@example.com', action: 'setQuota', value: 2 });
+  const q3 = await (await call('/register', qBody('dev-q2', '810000002'))).json();
+  check('raising the PERSON\'s quota lets the second device bind',
+    q3.ok && q3.boundRins.includes('810000002') && q3.quota === 2);
+
+  // Grandfather rule: drop the cap BELOW what they already hold. Nothing is confiscated — a RIN
+  // removed retroactively would break an export mid-quarter — and nothing new can be added.
+  await admin('/api/user', { email: 'two.devices@example.com', action: 'setQuota', value: 1 });
+  const q4 = await (await call('/register', qBody('dev-q1', '810000003'))).json();
+  check('grandfather: an over-cap user keeps every RIN they hold and simply cannot add another',
+    q4.ok && q4.boundRins.length === 1 && q4.boundRins.includes('810000001')
+    && JSON.parse(store.get('dev:dev-q2')).boundRins.includes('810000002')
+    && !store.has('rinowner:810000003'));                       // never squat a RIN we are over quota to hold
+
+  const rr = await (await signed('/rin-request', { requestedRin: '810000003' }, q1.clientKey, 'dev-q1')).json();
+  const appr = await admin('/api/request', { id: rr.id, action: 'approve' });
+  const apprJ = await appr.json();
+  check('RIN approval counts across the person\'s devices instead of silently raising the quota',
+    appr.status === 409 && /across 2 device/.test(apprJ.error)
+    && !JSON.parse(store.get('dev:dev-q1')).boundRins.includes('810000003'));
+  await admin('/api/user', { email: 'two.devices@example.com', action: 'setQuota', value: 3 });
+  const appr2 = await (await admin('/api/request', { id: rr.id, action: 'approve' })).json();
+  check('raising the quota first lets the same approval through',
+    appr2.ok && JSON.parse(store.get('dev:dev-q1')).boundRins.includes('810000003'));
+
+  // Pre-migration installs must not LOSE features on the day slice 3 ships. Constructed with the
+  // portal delete, which removes the D1 person and deliberately leaves the KV device behind.
+  await admin('/api/user', { deviceId: 'dev-dw', action: 'setFeatures', value: 'legacy-grant' });   // legacy KV-only path
+  await admin('/api/user', { email: 'dual.write@example.com', action: 'delete' });
+  const sKvOnly = await dwSession();
+  check('a device whose person has no D1 row keeps the features on its KV record',
+    sKvOnly.ok && sKvOnly.allowed && sKvOnly.features.join() === 'legacy-grant');
 
   // ── top-level catch ──
   const origGet = LEADS.get; LEADS.get = async () => { throw new Error('kv exploded'); };

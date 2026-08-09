@@ -116,6 +116,15 @@ CREATE TABLE IF NOT EXISTS plans (
   active   INTEGER DEFAULT 1
 );
 
+-- Every users row points at a plan by name, and slice 3 resolves features and the plan cap through
+-- it, so the three defaults are part of the schema rather than of the migration: a database without
+-- a 'free' row would silently resolve every user's features to nothing. OR IGNORE, never REPLACE —
+-- the Worker re-runs the identical statements from ensureSchema() and must not undo an admin's edits.
+INSERT OR IGNORE INTO plans (id, name, quota, features, price, active) VALUES
+  ('free',     'Free',     1,  '[]',                                '', 1),
+  ('standard', 'Standard', 5,  '["auto-reject"]',                   '', 1),
+  ('pro',      'Pro',      25, '["auto-reject","po-analytics"]',    '', 1);
+
 -- A job belongs to a person, not only to a browser. Backfilled from devices by /api/migrate.
 --
 -- SQLite has no `ADD COLUMN IF NOT EXISTS`, so a SECOND run of this file stops on the next line with

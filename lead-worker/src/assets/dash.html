@@ -387,6 +387,58 @@ tbody tr:hover > td{background:var(--panel2)}
 .demo{background:var(--runbg);border-bottom:1px solid var(--runln);color:var(--run);
   font:500 10px var(--font-mono);text-transform:uppercase;letter-spacing:.09em;padding:6px var(--s6);text-align:center}
 
+/* ── Jobs: the wedged-run alarm and the chunk ladder ──────────────────────── */
+/* One square per chunk. Forty of them fit on one line, so a failed or stalled
+   chunk is a red square in a field of green — found by eye, not by reading. */
+.ladder{display:flex;flex-wrap:wrap;gap:3px;margin:var(--s3) 0}
+.ck{width:16px;height:16px;padding:0;border-radius:4px;cursor:pointer;
+  background:var(--panel2);border:1px solid var(--line2);transition:transform var(--d1)}
+.ck:hover{transform:translateY(-2px)}
+.ck:focus-visible{outline:none;box-shadow:0 0 0 2px var(--panel),0 0 0 4px var(--accent)}
+.ck.done{background:var(--ok);border-color:var(--ok)}
+.ck.run{background:var(--run);border-color:var(--run);animation:pulse 1.7s var(--ease) infinite}
+.ck.bad{background:var(--bad);border-color:var(--bad)}
+.ck.warn{background:var(--warn);border-color:var(--warn)}
+.ck.wait{background:var(--well);border-color:var(--line2)}
+tr.ch.bad > td{background:var(--badbg)}
+tr.ch.warn > td{background:var(--warnbg)}
+tr.ch.run > td{background:var(--runbg)}
+tr.ch.hit > td{box-shadow:inset 0 0 0 1px var(--accent)}
+tr.wedged > td:first-child{box-shadow:inset 3px 0 0 var(--bad)}
+.runrow.wedged{background:var(--badbg);box-shadow:inset 3px 0 0 var(--bad);
+  border-radius:var(--r);padding-inline:10px;margin-top:2px}
+.chip.alarm{border-color:var(--badln);color:var(--bad)}
+.chip.alarm:hover{background:var(--badbg);color:var(--bad)}
+.chip.alarm.on{background:var(--bad);border-color:var(--bad);color:var(--on-accent)}
+.chip.alarm.on::before{content:"● "}
+.warnline{color:var(--warn);font:500 11.5px var(--font-mono);line-height:1.5;word-break:break-word}
+.filt{flex:0 1 200px;min-width:132px;width:auto}
+
+/* ── Activation: features and expiry ──────────────────────────────────────── */
+/* The left edge carries the SOURCE of a feature — accent means an admin wrote it
+   onto this account, muted means the plan did. Fill carries the EFFECT. An admin
+   must never have to guess which of the two put a flag there. */
+.feats{display:grid;grid-template-columns:repeat(auto-fit,minmax(258px,1fr));gap:var(--s2)}
+.feat{padding:11px var(--s4);border:1px solid var(--line);border-left:3px solid var(--line2);
+  border-radius:var(--r);background:var(--panel2)}
+.feat .fh{display:flex;align-items:center;gap:var(--s2);flex-wrap:wrap}
+.feat .fn{font:600 12.5px var(--font-mono);letter-spacing:.02em;flex:1;min-width:0}
+.feat .fw{margin-top:6px;font-size:12px;line-height:1.5;color:var(--muted)}
+.feat .fw b{color:var(--text2);font-weight:650}
+.feat.on{background:var(--okbg);border-color:var(--okln);border-left-color:var(--ok)}
+.feat.ovr{border-left-color:var(--accent);border-left-width:3px}
+.feat.ovr.on{background:var(--accent-soft);border-color:color-mix(in srgb,var(--accent) 38%,transparent);
+  border-left-color:var(--accent)}
+.feat.unknown{border-left-color:var(--warn)}
+.srcbar{display:flex;align-items:center;gap:var(--s3);flex-wrap:wrap;margin-bottom:var(--s3);
+  padding:9px var(--s4);border-radius:var(--r);border:1px dashed var(--line2);background:var(--panel2);font-size:12.5px}
+.srcbar.ovr{border-style:solid;border-color:color-mix(in srgb,var(--accent) 45%,transparent);background:var(--accent-soft)}
+.exp{font:500 10.5px var(--font-mono);letter-spacing:.04em;margin-top:3px}
+.exp.bad{color:var(--bad)} .exp.warn{color:var(--warn)} .exp.ok{color:var(--faint)}
+.planrow td{vertical-align:middle}
+.planed{border:1px solid var(--accent);border-radius:var(--r);padding:var(--s4);
+  background:var(--panel2);margin-bottom:var(--s4)}
+
 /* ── Responsive: laptop first, then narrow ────────────────────────────────── */
 @media(max-width:1180px){
   :root{--rail:64px}
@@ -487,6 +539,9 @@ var S = {
   user:null, userEmail:'',
   clients:[], ctotal:0, cpage:1, cq:'',
   client:null, clientRin:'',
+  jobs:[], jtotal:0, jpage:1, jstate:'', juser:'', jrin:'', jstuck:0, jobsErr:'',
+  job:null, jobId:'', jobErr:'',
+  plans:[], plansErr:'', plansDone:false, planEdit:null, planRefused:null,
   reqs:[], bugs:[], voids:[], audit:[], errs:[], trash:[], snaps:[],
   insights:null, health:null, cfg:{}, stats:null,
   rfilter:'all', bfilter:'all',
@@ -518,12 +573,19 @@ function api(p){
   return authFetch(p).then(function(r){ return r.json().catch(function(){ return {ok:false,error:'bad response'}; }); })
     .catch(function(){ return {ok:false,error:'network'}; });
 }
-function post(p,body){
+/* `quiet` suppresses the automatic toast so the caller can render a refusal in
+   full — a 409 from /api/plan/delete carries a reason and a count, and a toast
+   that says "conflict" throws both away. The HTTP status is kept as `_status`
+   because the body alone cannot tell "refused" from "failed". */
+function post(p,body,quiet){
   if(DEMO){ toast('Demo mode — nothing was written','n'); return Promise.resolve({ok:false,error:'demo'}); }
   return authFetch(p,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body||{})})
-    .then(function(r){ return r.json(); })
-    .then(function(j){ if(!j||!j.ok) toast((j&&j.error)||'Request failed','bad'); return j||{ok:false}; })
-    .catch(function(){ toast('Network error','bad'); return {ok:false}; });
+    .then(function(r){
+      return r.json().catch(function(){ return {ok:false,error:'HTTP '+r.status}; })
+        .then(function(j){ j=j||{ok:false}; j._status=r.status; return j; });
+    })
+    .then(function(j){ if(!j.ok&&!quiet) toast(j.error||'Request failed','bad'); return j; })
+    .catch(function(){ if(!quiet) toast('Network error','bad'); return {ok:false,error:'network'}; });
 }
 function download(path,filename){
   if(DEMO){ toast('Demo mode — nothing to export','n'); return; }
@@ -560,7 +622,9 @@ function modal(o){
       +'<button class="btn '+(o.danger?'danger solid':'primary')+'" id="modal-ok">'+esc(o.confirmText||'Confirm')+'</button></div></div>';
     root.hidden=false;
     var field=$('modal-input');
-    if(field){ if(!opts&&inp.value!=null) field.value=inp.value; setTimeout(function(){ field.focus(); try{ field.select(); }catch(e){} },20); }
+    /* Setting .value on a <select> selects the matching option — so a dropdown
+       opens on what is already true rather than on whatever is first. */
+    if(field){ if(inp.value!=null) field.value=inp.value; setTimeout(function(){ field.focus(); try{ field.select(); }catch(e){} },20); }
     else setTimeout(function(){ $('modal-ok').focus(); },20);
     function done(v){ root.hidden=true; root.innerHTML=''; document.removeEventListener('keydown',onkey); resolve(v); }
     function ok(){ done(hasInput?(field?field.value:''):true); }
@@ -583,6 +647,8 @@ var ICON = {
   insights:'<path d="M3 20.4h18"/><rect x="4.8" y="11" width="3.4" height="6.4" rx="1.1"/><rect x="10.3" y="6.6" width="3.4" height="10.8" rx="1.1"/><rect x="15.8" y="13.4" width="3.4" height="4" rx="1.1"/>',
   requests:'<path d="M6.2 9.4a5.8 5.8 0 1111.6 0c0 3.9 1.5 5.4 1.5 5.4H4.7s1.5-1.5 1.5-5.4z"/><path d="M10 18.4a2 2 0 004 0"/>',
   bugs:'<path d="M9 6.2a3 3 0 016 0"/><rect x="7.2" y="8" width="9.6" height="10.4" rx="4.8"/><path d="M4 11.2h3.2M16.8 11.2H20M4 16.4h3.2M16.8 16.4H20M12 8v10.4"/>',
+  jobs:'<rect x="2.9" y="4" width="18.2" height="6" rx="1.7"/><rect x="2.9" y="14" width="18.2" height="6" rx="1.7"/><path d="M6.3 7h.02M6.3 17h.02"/><path d="M10.5 7h6.8M10.5 17h6.8"/>',
+  activation:'<path d="M12 2.9l7.3 2.9v5.5c0 4.5-3 7.9-7.3 9.6-4.3-1.7-7.3-5.1-7.3-9.6V5.8z"/><path d="M8.9 12.1l2.1 2.2 4.1-4.4"/>',
   activity:'<path d="M2.8 12.4h4.1L9.4 6l4 13.2 2.4-6.8h5.4"/>',
   tools:'<circle cx="12" cy="12" r="3.2"/><path d="M12 3v2.3M12 18.7V21M21 12h-2.3M5.3 12H3M18.4 5.6L16.8 7.2M7.2 16.8L5.6 18.4M18.4 18.4l-1.6-1.6M7.2 7.2L5.6 5.6"/>'
 };
@@ -592,6 +658,7 @@ function ic(k,cls){ return '<svg viewBox="0 0 24 24" fill="none" stroke="current
 var SECTIONS = [
   {group:'Operations', items:[
     {id:'dashboard', label:'Dashboard', icon:'dashboard', title:'Dashboard',  sub:'What is happening right now'},
+    {id:'jobs',      label:'Jobs',      icon:'jobs',      title:'Export runs', sub:'Every run, chunk by chunk — including the wedged ones'},
     {id:'users',     label:'Users',     icon:'users',     title:'Users',      sub:'One record per person, not per browser'},
     {id:'clients',   label:'Clients',   icon:'clients',   title:'Clients',    sub:'One row per taxpayer registration number'}
   ]},
@@ -602,12 +669,14 @@ var SECTIONS = [
     {id:'activity',  label:'Activity',  icon:'activity',  title:'Activity',   sub:'Admin action log and extension-facing errors'}
   ]},
   {group:'System', items:[
+    {id:'activation', label:'Activation', icon:'activation', title:'Activation', sub:'Plans, features and expiry — what a licence actually grants'},
     {id:'tools',     label:'Tools',     icon:'tools',     title:'Tools',      sub:'Configuration, migration, backup, trash'}
   ]}
 ];
 var DETAIL = {
   user:   {title:'User',   sub:'Clients, devices, jobs, bugs and history on one page', parent:'users'},
-  client: {title:'Client', sub:'Who exports for this taxpayer, and everything they ran', parent:'clients'}
+  client: {title:'Client', sub:'Who exports for this taxpayer, and everything they ran', parent:'clients'},
+  job:    {title:'Export run', sub:'The chunk timeline — what the run did, and where it stopped', parent:'jobs'}
 };
 function sectionMeta(id){
   if(DETAIL[id]) return DETAIL[id];
@@ -617,13 +686,16 @@ function sectionMeta(id){
 function renderNav(){
   var pending = S.reqs.filter(function(r){ return r.status==='pending'; }).length;
   var open = S.bugs.filter(function(g){ return g.status==='open'; }).length;
-  var counts = {requests:pending, bugs:open};
+  /* The wedged count rides on the rail so "is anything stuck" is answered from
+     every section, not only from the two that happen to list jobs. */
+  var counts = {requests:pending, bugs:open, jobs:stuckIds().length};
   var active = DETAIL[S.section] ? DETAIL[S.section].parent : S.section;
   $('nav').innerHTML = SECTIONS.map(function(g){
     return '<div class="navgroup" style="margin-bottom:14px"><div class="mlabel">'+esc(g.group)+'</div>'
       + g.items.map(function(it){
           var c = counts[it.id];
-          return '<button class="nav'+(active===it.id?' on':'')+'" data-go="'+it.id+'" title="'+esc(it.label)+'">'
+          var tip = it.label + (c && it.id==='jobs' ? ' — '+c+' wedged right now' : '');
+          return '<button class="nav'+(active===it.id?' on':'')+'" data-go="'+it.id+'" title="'+esc(tip)+'">'
             + ic(it.icon) + '<span class="lbl">'+esc(it.label)+'</span>'
             + (c?'<span class="count">'+c+'</span>':'') + '</button>';
         }).join('')
@@ -712,6 +784,35 @@ function loadClient(rin){
     repaint('client');
   });
 }
+/* Jobs. `stuck=1` is the whole point of the filter row: the support question is
+   "is anything wedged right now", and that must be one click, not a date sum. */
+function jobsQuery(){
+  return '/api/jobs?state='+encodeURIComponent(S.jstate)+'&user='+encodeURIComponent(S.juser)
+       + '&rin='+encodeURIComponent(S.jrin)+'&stuck='+(S.jstuck?'1':'')+'&page='+S.jpage;
+}
+function loadJobs(){
+  return api(jobsQuery()).then(function(j){
+    if(!guard(j)) return;
+    if(j.ok){ S.jobs=j.jobs||[]; S.jtotal=(j.total!=null?j.total:S.jobs.length); S.jobsErr=''; setConn('on'); }
+    else { S.jobs=[]; S.jtotal=0; S.jobsErr=j.error||'unavailable'; }
+    renderNav(); repaint('jobs');
+  });
+}
+function loadJob(id){
+  S.job=null; repaint('job');
+  return api('/api/job?id='+encodeURIComponent(id)).then(function(j){
+    if(!guard(j)) return;
+    S.job = j.ok ? j : null; S.jobErr = j.ok ? '' : (j.error||'unavailable');
+    repaint('job');
+  });
+}
+function loadPlans(){
+  return api('/api/plans').then(function(j){
+    if(!guard(j)) return;
+    if(j.ok){ S.plans=j.plans||[]; S.plansErr=''; } else { S.plans=[]; S.plansErr=j.error||'unavailable'; }
+    S.plansDone=true; repaint('activation'); repaint('user');
+  });
+}
 function loadStats(){ return api('/api/stats').then(function(j){ if(!guard(j)) return; if(j.ok){ S.stats=j.stats; S.cfg=j.cfg||{}; setConn('on'); repaint('tools'); } }); }
 function loadReqs(){ return api('/api/requests').then(function(j){ S.reqs=j.requests||[]; renderNav(); repaint('requests'); }); }
 function loadBugs(){ return api('/api/bugs').then(function(j){ S.bugs=j.bugs||[]; renderNav(); repaint('bugs'); }); }
@@ -726,11 +827,13 @@ function loadHealth(){ return api('/api/health').then(function(j){ if(j.ok){ S.h
 function loadAll(){
   setConn('run');
   Promise.all([loadDashboard(), loadStats(), loadReqs(), loadBugs()]).then(stamp);
-  loadUsers(); loadClients(); loadVoids(); loadAudit(); loadErrs(); loadTrash(); loadSnaps(); loadInsights(); loadHealth();
+  loadUsers(); loadClients(); loadJobs(); loadPlans();
+  loadVoids(); loadAudit(); loadErrs(); loadTrash(); loadSnaps(); loadInsights(); loadHealth();
   if(S.section==='user'&&S.userEmail) loadUser(S.userEmail);
   if(S.section==='client'&&S.clientRin) loadClient(S.clientRin);
+  if(S.section==='job'&&S.jobId) loadJob(S.jobId);
 }
-function loadLive(){ loadDashboard(); loadStats(); loadReqs(); loadBugs(); stamp(); }
+function loadLive(){ loadDashboard(); loadJobs(); loadStats(); loadReqs(); loadBugs(); stamp(); }
 
 /* ── auth ─────────────────────────────────────────────────────────────────── */
 function openApp(){ $('login').hidden=true; $('shell').hidden=false; $('demobar').hidden=!DEMO; go(S.section); loadAll(); }
@@ -739,6 +842,8 @@ function logout(){
   if(S.autoTimer){ clearInterval(S.autoTimer); S.autoTimer=null; $('auto').classList.remove('on'); }
   S.section='dashboard'; S.usel={}; S.upage=1; S.uq=''; S.ustatus='all'; S.uplan=''; S.cpage=1; S.cq='';
   S.dash=null; S.users=[]; S.clients=[]; S.user=null; S.client=null;
+  S.jobs=[]; S.job=null; S.jobId=''; S.jpage=1; S.jstate=''; S.juser=''; S.jrin=''; S.jstuck=0;
+  S.plans=[]; S.plansDone=false; S.planEdit=null; S.planRefused=null;
   $('shell').hidden=true; $('login').hidden=false; $('token').value=''; $('err').textContent='';
   setConn(''); $('stamp').textContent='';
 }
@@ -760,7 +865,94 @@ function attemptLogin(){
 /* ═══ DASHBOARD ═══════════════════════════════════════════════════════════ */
 function alertClass(l){ l=String(l||'').toLowerCase(); if(/err|danger|crit|high|stuck|fail/.test(l)) return 'bad'; if(/warn|expir|medium/.test(l)) return 'warn'; if(/ok|good/.test(l)) return 'ok'; return 'info'; }
 function eventClass(k){ k=String(k||'').toLowerCase(); if(/fail|error|kill|delete|void|deny|stuck/.test(k)) return 'bad'; if(/lock|warn|expir/.test(k)) return 'warn'; if(/run|start|progress|job/.test(k)) return 'run'; if(/done|complete|approve|unlock|revive/.test(k)) return 'ok'; return 'accent'; }
-function jobStateClass(s){ s=String(s||'').toLowerCase(); if(/fail|error|dead/.test(s)) return 'bad'; if(/done|complete/.test(s)) return 'ok'; if(/wait|queue|pending/.test(s)) return 'info'; return 'run'; }
+function jobStateClass(s){ s=String(s||'').toLowerCase(); if(/fail|error|dead|abandon/.test(s)) return 'bad'; if(/done|complete/.test(s)) return 'ok'; if(/wait|queue|pending/.test(s)) return 'info'; return 'run'; }
+
+/* ── jobs vocabulary ──────────────────────────────────────────────────────── */
+/* The contract defines stuck as running|merging with updated_at older than 30
+   minutes. The server filters on it; the client recomputes it so a row already
+   on screen can be badged without asking again. Same rule, one place. */
+var STUCK_MIN = 30;
+function jobId(j){ return String(f(j,'jobId','job_id','id')||''); }
+function jobState(j){ return String(f(j,'state','status')||'').toLowerCase(); }
+function jobSeen(j){ return f(j,'updatedAt','updated_at','createdAt','created_at'); }
+function isStuck(j){
+  var st=jobState(j); if(st!=='running'&&st!=='merging') return false;
+  var t=Date.parse(jobSeen(j)||''); if(!t) return false;
+  return (Date.now()-t) > STUCK_MIN*60000;
+}
+function stuckIds(){
+  var m={}, all=((S.dash&&S.dash.active)||[]).concat(S.jobs||[]);
+  all.forEach(function(j){ if(isStuck(j)) m[jobId(j)]=1; });
+  return Object.keys(m);
+}
+function dayRange(a,b){
+  a=a?String(a).slice(0,10):''; b=b?String(b).slice(0,10):'';
+  if(!a&&!b) return '—';
+  if(a&&b&&a===b) return a;
+  return (a||'…')+' &rarr; '+(b||'…');
+}
+
+/* ── feature vocabulary ───────────────────────────────────────────────────── */
+/* Fixed for now, per SPEC-017 slice 3. Typing feature names into a free-text box
+   is how a plan silently stops granting anything, so the editors below toggle
+   from this list instead. Flags found in the data that are NOT in this list are
+   still rendered — flagged as unknown rather than hidden. */
+var FEATURES = [
+  {id:'auto-reject',  what:'Unlocks the rejection tab in the extension. Slice 3 is its first consumer — the drawer receives <span class="mono">features</span> today and reads it nowhere.'},
+  {id:'po-analytics', what:'Purchase-order analytics. Carried on the plan so it can be sold; nothing gates on it until a consumer exists.'}
+];
+function featureKnown(id){ for(var i=0;i<FEATURES.length;i++) if(FEATURES[i].id===id) return FEATURES[i]; return null; }
+/* null  = no per-user override, the plan decides.
+   []    = a deliberate empty override — the plan is ignored and nothing is granted. */
+function featList(v){
+  if(v==null||v==='') return null;
+  if(Array.isArray(v)) return v.map(String);
+  if(typeof v==='string'){
+    var s=v.trim(); if(!s) return [];
+    if(s.charAt(0)==='['){ try{ var a=JSON.parse(s); return Array.isArray(a)?a.map(String):[]; }catch(e){} }
+    return s.split(',').map(function(x){ return x.trim(); }).filter(Boolean);
+  }
+  return [];
+}
+function planById(id){
+  for(var i=0;i<(S.plans||[]).length;i++) if(String(S.plans[i].id)===String(id)) return S.plans[i];
+  return null;
+}
+/* The one computation the whole Activation slice turns on: what does this user
+   actually get, and WHICH of the two sources put it there. */
+function featureView(u){
+  u=u||{};
+  var ovr = featList(u.features);
+  var pl  = planById(u.plan);
+  var plf = pl ? (featList(pl.features)||[]) : null;   /* null = plan unknown */
+  return { ovr:ovr, plan:pl, planFeats:plf, eff:(ovr!=null ? ovr : (plf||[])) };
+}
+function featureIds(v){
+  var seen={}, out=[];
+  FEATURES.forEach(function(x){ seen[x.id]=1; out.push(x.id); });
+  [].concat(v.eff||[], v.ovr||[], v.planFeats||[]).forEach(function(id){
+    id=String(id); if(!seen[id]){ seen[id]=1; out.push(id); }
+  });
+  return out;
+}
+function expiryCell(u){
+  var raw=u&&u.validUntil;
+  if(raw==null||raw==='') return '<div class="usub">no expiry set</div>';
+  var d=days(raw), iso=String(raw).slice(0,10);
+  if(d==null) return '<div class="usub num">'+esc(iso)+'</div>';
+  var cls = d<0?'bad' : d<=14?'warn' : 'ok';
+  var txt = d<0 ? ('expired '+Math.max(1,Math.floor(-d))+'d ago') : (Math.ceil(d)+'d left');
+  return '<div class="usub num">'+esc(iso)+'</div><div class="exp '+cls+'">'+txt+'</div>';
+}
+function expiryBuckets(list){
+  var exp=[], soon=[];
+  (list||S.users||[]).forEach(function(u){
+    var d=days(u.validUntil); if(d==null) return;
+    if(d<0) exp.push(u); else if(d<=14) soon.push(u);
+  });
+  var by=function(a,b){ return String(a.validUntil).localeCompare(String(b.validUntil)); };
+  return {exp:exp.sort(by), soon:soon.sort(by)};
+}
 
 RENDER.dashboard = function(){
   if(!S.dash){
@@ -774,28 +966,31 @@ RENDER.dashboard = function(){
     {k:'Users',    v:st.users,    go:'users'},
     {k:'Clients',  v:st.clients,  go:'clients'},
     {k:'Devices',  v:st.devices,  c:'moss'},
-    {k:'Running now', v:st.activeJobs, c:'run'},
-    {k:'Jobs today',  v:st.jobsToday},
+    {k:'Running now', v:st.activeJobs, c:'run', go:'jobs'},
+    /* Derived, not reported: same 30-minute rule the stuck filter uses. */
+    {k:'Wedged &gt;'+STUCK_MIN+'m', v:stuckIds().length, c:'bad', go:'jobs', extra:' data-stuck="1"'},
+    {k:'Jobs today',  v:st.jobsToday, go:'jobs'},
     {k:'Docs today',  v:st.docsToday, c:'info'},
     {k:'Open bugs',   v:st.openBugs,  c:'bad',  go:'bugs'},
     {k:'Pending RIN', v:st.pendingRequests, c:'warn', go:'requests'},
-    {k:'Expiring 14d',v:st.expiringSoon, c:'warn', go:'users'}
+    {k:'Expiring 14d',v:st.expiringSoon, c:'warn', go:'users', extra:' data-expiry="1"'}
   ];
   var strip = '<div class="strip">'+tiles.map(function(t){
     var zero = !Number(t.v);
-    return '<'+(t.go?'button':'div')+' class="tile'+(t.c&&!zero?' '+t.c:'')+(zero?' zero':'')+(t.go?' act':'')+'"'+(t.go?' data-go="'+t.go+'"':'')+'>'
-      + '<div class="v">'+n(t.v)+'</div><div class="k">'+esc(t.k)+'</div></'+(t.go?'button':'div')+'>';
+    return '<'+(t.go?'button':'div')+' class="tile'+(t.c&&!zero?' '+t.c:'')+(zero?' zero':'')+(t.go?' act':'')+'"'
+      + (t.go?' data-go="'+t.go+'"'+(t.extra||''):'')+'>'
+      + '<div class="v">'+n(t.v)+'</div><div class="k">'+t.k+'</div></'+(t.go?'button':'div')+'>';
   }).join('')+'</div>';
 
   var live = '<div class="panel"><div class="eyebrow">Live now'+(active.length?' &middot; <b>'+active.length+'</b>':'')+'</div>'
     + (active.length ? active.map(function(a){
-        var p = pct(a.done,a.total);
-        return '<div class="runrow">'
+        var p = pct(a.done,a.total), stk=isStuck(a), id=jobId(a);
+        return '<div class="runrow'+(stk?' wedged':'')+'" style="cursor:pointer" data-jopen="'+esc(id)+'" title="Open the chunk timeline">'
           + '<div><div class="who">'+esc(a.user||'—')+' <span class="faint">&rarr;</span> <span class="num">'+esc(a.rin||'')+'</span></div>'
-          + '<div class="meta">'+esc(a.source||'')+' &middot; '+esc(a.jobId||'').slice(0,12)+' &middot; '+esc(rel(a.updatedAt)||'')+'</div></div>'
-          + '<div style="text-align:right"><span class="pill '+jobStateClass(a.state)+'">'+esc(a.state||'running')+'</span>'
+          + '<div class="meta">'+esc(a.source||'')+' &middot; '+esc(id).slice(0,12)+' &middot; '+esc(rel(a.updatedAt)||'')+'</div></div>'
+          + '<div style="text-align:right"><span class="pill '+(stk?'bad':jobStateClass(a.state))+'">'+(stk?'STUCK':esc(a.state||'running'))+'</span>'
           + '<div class="cnt" style="margin-top:5px">'+n(a.done)+'<small> / '+n(a.total)+'</small></div></div>'
-          + '<div class="bar live"><i style="width:'+p+'%"></i></div>'
+          + '<div class="bar'+(stk?'':' live')+'"><i style="width:'+p+'%'+(stk?';background:var(--bad)':'')+'"></i></div>'
           + '</div>';
       }).join('')
       : '<div class="muted" style="font-size:13px;padding:6px 0">Nothing running. Runs appear here the moment an extension starts one.</div>')
@@ -803,11 +998,29 @@ RENDER.dashboard = function(){
 
   var alertBox = '<div class="panel"><div class="eyebrow">Needs a decision'+(alerts.length?' &middot; <b>'+alerts.length+'</b>':'')+'</div>'
     + (alerts.length ? alerts.map(function(a){
-        var c=alertClass(a.level);
+        var c=alertClass(a.level), ref=String(a.ref||'');
+        /* A stuck-job alert that cannot be opened is a sentence, not a tool. */
+        var jump = /^job/i.test(ref) ? '<button class="btn tiny" data-jopen2="'+esc(ref)+'" style="margin-top:7px">Open run</button>' : '';
         return '<div class="callout '+c+'"><span class="cl">'+esc(a.level||c)+'</span><span class="cb">'+esc(a.text||'')
-          + (a.ref?'<div class="ref">'+esc(a.ref)+'</div>':'')+'</span></div>';
+          + (ref?'<div class="ref">'+esc(ref)+'</div>':'')+jump+'</span></div>';
       }).join('')
       : '<div class="callout ok"><span class="cl">Clear</span><span class="cb">No stuck jobs, no plans expiring inside 14 days, no error spike.</span></div>')
+    + '</div>';
+
+  /* The tile counts the estate; this names the accounts, from the Users page that
+     is already loaded. Said plainly rather than implying it is the whole list. */
+  var eb=expiryBuckets(), expRows=eb.exp.concat(eb.soon).slice(0,8);
+  var expiring = '<div class="panel"><div class="eyebrow">Plans expiring'+(expRows.length?' &middot; <b>'+(eb.exp.length+eb.soon.length)+'</b>':'')+'</div>'
+    + (expRows.length
+      ? expRows.map(function(u){
+          var d=days(u.validUntil), bad=d<0;
+          return '<div class="callout '+(bad?'bad':'warn')+'" style="cursor:pointer" data-uopen="'+esc(u.email||'')+'">'
+            + '<span class="cl">'+(bad?'expired':Math.ceil(d)+'d')+'</span>'
+            + '<span class="cb">'+esc(u.name||u.email||'—')+' <span class="usub">'+esc(u.plan||'free')+'</span>'
+            + '<div class="ref">'+esc(String(u.validUntil).slice(0,10))+' &middot; '+esc(u.email||'')+'</div></span></div>';
+        }).join('')
+        + '<div class="usub" style="margin-top:10px">Names come from the loaded Users page; the tile above counts the estate.</div>'
+      : '<div class="callout ok"><span class="cl">Clear</span><span class="cb">No loaded account expires inside 14 days.</span></div>')
     + '</div>';
 
   var feed = '<div class="panel"><div class="eyebrow">Recent events</div>'
@@ -819,9 +1032,17 @@ RENDER.dashboard = function(){
       : '<div class="muted" style="font-size:13px">No events recorded yet.</div>')
     + '</div>';
 
-  return strip + '<div class="split">'+live+alertBox+'</div>' + feed;
+  return strip + '<div class="split">'+live+'<div>'+alertBox+expiring+'</div></div>' + feed;
 };
-WIRE.dashboard = function(){ q('#views [data-go]', function(b){ b.onclick=function(){ go(b.getAttribute('data-go')); }; }); };
+WIRE.dashboard = function(){
+  q('#views [data-go]', function(b){ b.onclick=function(){
+    if(b.getAttribute('data-stuck')){ S.jstuck=1; S.jstate=''; S.jpage=1; loadJobs(); }
+    if(b.getAttribute('data-expiry')) S.usort={key:'validUntil',dir:1};
+    go(b.getAttribute('data-go')); }; });
+  q('#views [data-jopen]', function(el){ el.onclick=function(e){ if(e.target.closest('button,a')) return; openJob(el.getAttribute('data-jopen')); }; });
+  q('#views [data-jopen2]', function(b){ b.onclick=function(e){ e.stopPropagation(); openJob(b.getAttribute('data-jopen2')); }; });
+  q('#views [data-uopen]', function(el){ el.onclick=function(){ openUser(el.getAttribute('data-uopen')); }; });
+};
 
 /* ═══ USERS ═══════════════════════════════════════════════════════════════ */
 function userPills(u){
@@ -844,7 +1065,8 @@ function quotaCell(u){
 }
 function planOptions(sel){
   var seen={}; S.users.forEach(function(u){ if(u.plan) seen[u.plan]=1; });
-  ['free','pro','team'].forEach(function(p){ if(!(p in seen)) seen[p]=1; });
+  (S.plans||[]).forEach(function(p){ if(p.id) seen[p.id]=1; });
+  ['free','standard','pro'].forEach(function(p){ if(!(p in seen)) seen[p]=1; });
   return '<option value="">All plans</option>'+Object.keys(seen).sort().map(function(p){
     return '<option value="'+esc(p)+'"'+(sel===p?' selected':'')+'>'+esc(p)+'</option>'; }).join('');
 }
@@ -860,6 +1082,9 @@ function sortPage(rows,sort){
     var k=sort.key, va,vb;
     if(k==='name'){ va=String(a.name||a.email||'').toLowerCase(); vb=String(b.name||b.email||'').toLowerCase(); }
     else if(k==='docs'){ va=Number(a.docs||0); vb=Number(b.docs||0); }
+    /* No expiry is not "expires first" — it sorts to the far end, so ascending
+       puts the accounts that are actually about to be refused at the top. */
+    else if(k==='validUntil'){ va=String(a.validUntil||'9999'); vb=String(b.validUntil||'9999'); }
     else { va=a[k]||''; vb=b[k]||''; }
     return va<vb?-sort.dir:va>vb?sort.dir:0;
   });
@@ -890,7 +1115,10 @@ RENDER.users = function(){
         + '<div class="usub mono">'+e+'</div>'
         + ((u.tags&&u.tags.length)?'<div style="margin-top:4px">'+(typeof u.tags==='string'?u.tags.split(','):u.tags).map(function(t){ return '<span class="tag">'+esc(String(t).trim())+'</span>'; }).join('')+'</div>':'')
       + '</td>'
-      + '<td><span class="pill accent">'+esc(u.plan||'free')+'</span>'+(u.validUntil?'<div class="usub" style="margin-top:4px">to '+esc(String(u.validUntil).slice(0,10))+'</div>':'')+'</td>'
+      + '<td><span class="pill accent">'+esc(u.plan||'free')+'</span>'
+        + (planById(u.plan)&&planById(u.plan).quota!=null&&Number(planById(u.plan).quota)!==Number(u.quota)
+            ? '<div class="usub" title="Plan quota is '+esc(String(planById(u.plan).quota))+'">quota overridden</div>' : '')
+        + '<div style="margin-top:4px">'+expiryCell(u)+'</div></td>'
       + '<td>'+quotaCell(u)+'</td>'
       + '<td class="num">'+n(u.deviceCount)+'</td>'
       + '<td class="num">'+n(u.jobCount)+'</td>'
@@ -903,11 +1131,25 @@ RENDER.users = function(){
         + '<button class="btn tiny" data-open2="'+e+'">Open</button></div></td></tr>';
   }).join('');
 
-  return head
+  /* Expiry is a real answer now that slice 3 makes valid_until binding, so the
+     page says how many of its own rows are already refused or about to be. */
+  var eb=expiryBuckets();
+  var expBar = (eb.exp.length||eb.soon.length)
+    ? '<div class="callout '+(eb.exp.length?'bad':'warn')+'" style="margin-bottom:16px"><span class="cl">expiry</span><span class="cb">'
+      + (eb.exp.length?'<b>'+eb.exp.length+'</b> account'+(eb.exp.length===1?'':'s')+' on this page '+(eb.exp.length===1?'has':'have')+' already expired':'')
+      + (eb.exp.length&&eb.soon.length?' &middot; ':'')
+      + (eb.soon.length?'<b>'+eb.soon.length+'</b> expire'+(eb.soon.length===1?'s':'')+' within 14 days':'')
+      + '. An expired account is refused with <span class="mono">reason:&#39;expired&#39;</span>, not locked.'
+      + '<div style="margin-top:9px"><button class="btn tiny" id="usortexp">Sort by expiry</button> '
+      + '<button class="btn tiny ghost" data-go2="activation">Open Activation</button></div></span></div>'
+    : '';
+
+  return head + expBar
     + '<div class="tablewrap"><table class="wide"><thead><tr>'
     + '<th style="width:34px"><input type="checkbox" id="chkAll" class="chk" title="Select all on this page"></th>'
     + sortHead('name','User',S.usort)
-    + '<th>Plan</th><th>Clients / quota</th><th>Devices</th><th>Jobs</th>'
+    + sortHead('validUntil','Plan / expiry',S.usort)
+    + '<th>Clients / quota</th><th>Devices</th><th>Jobs</th>'
     + sortHead('docs','Documents',S.usort)
     + '<th>Status</th>' + sortHead('lastSeen','Last seen',S.usort) + '<th></th>'
     + '</tr></thead><tbody>'+body+'</tbody></table></div>'
@@ -940,6 +1182,8 @@ WIRE.users = function(){
   if($('chkAll')) $('chkAll').onclick=function(){
     var on=$('chkAll').checked; S.users.forEach(function(u){ if(on) S.usel[u.email]=1; else delete S.usel[u.email]; }); paint(); };
   if($('bulkclear')) $('bulkclear').onclick=function(){ S.usel={}; paint(); };
+  if($('usortexp')) $('usortexp').onclick=function(){ S.usort={key:'validUntil',dir:1}; paint(); };
+  q('#views [data-go2]', function(b){ b.onclick=function(){ go(b.getAttribute('data-go2')); }; });
   q('#views [data-bulk]', function(b){ b.onclick=function(){ bulk(b.getAttribute('data-bulk')); }; });
 };
 function openUser(email){ S.userEmail=email; S.user=null; go('user',email); loadUser(email); }
@@ -970,7 +1214,7 @@ RENDER.user = function(){
   var u=S.user.user||{}, cs=S.user.clients||[], ds=S.user.devices||[], js=S.user.jobs||[], bs=S.user.bugs||[], au=S.user.audit||[];
   var st=String(u.status||'active').toLowerCase();
   var tags = typeof u.tags==='string' ? u.tags.split(',').map(function(s){return s.trim();}).filter(Boolean) : (u.tags||[]);
-  var feats = typeof u.features==='string' ? (function(){ try{ return JSON.parse(u.features); }catch(e){ return u.features.split(','); } })() : (u.features||[]);
+  var v = featureView(u);   /* {ovr, plan, planFeats, eff} — see the Activation section */
 
   var header = '<div class="dhead"><div style="min-width:0">'
     + '<h2>'+esc(u.name||u.email||'—')+'</h2>'
@@ -1001,15 +1245,64 @@ RENDER.user = function(){
     + '</div></div>';
 
   var entitlement = '<div class="panel"><div class="eyebrow">Entitlement</div><div class="kv">'
-    + '<span class="k">Plan</span><span class="v"><span class="pill accent">'+esc(u.plan||'free')+'</span> <button class="btn tiny" data-ue="setPlan">change</button></span>'
-    + '<span class="k">Client quota</span><span class="v"><span class="num">'+esc(u.quota==null?'—':u.quota)+'</span> <button class="btn tiny" data-ue="setQuota">set</button></span>'
-    + '<span class="k">Valid until</span><span class="v"><span class="num">'+esc(u.validUntil?String(u.validUntil).slice(0,10):'—')+'</span> <button class="btn tiny" data-ue="setValidUntil">set</button></span>'
-    + '<span class="k">Features</span><span class="v">'+(feats.length?feats.map(function(x){ return '<span class="tag">'+esc(String(x).trim())+'</span>'; }).join(''):'<span class="muted">plan default</span>')+' <button class="btn tiny" data-ue="setFeatures">edit</button></span>'
+    + '<span class="k">Plan</span><span class="v"><span class="pill accent">'+esc(u.plan||'free')+'</span>'
+      + (v.plan ? ' <span class="usub">'+esc(v.plan.name||'')+' &middot; quota '+esc(String(v.plan.quota==null?'∞':v.plan.quota))+(v.plan.price?' &middot; '+esc(v.plan.price):'')+'</span>' : '')
+      + ' <button class="btn tiny" data-ue="setPlan">change</button></span>'
+    + '<span class="k">Client quota</span><span class="v"><span class="num">'+esc(u.quota==null?'—':u.quota)+'</span>'
+      + (v.plan && v.plan.quota!=null && Number(v.plan.quota)!==Number(u.quota)
+          ? ' <span class="pill warn">differs from plan ('+esc(String(v.plan.quota))+')</span>' : '')
+      + ' <button class="btn tiny" data-ue="setQuota">set</button></span>'
+    + '<span class="k">Valid until</span><span class="v">'+expiryCell(u)
+      + '<div style="margin-top:5px"><button class="btn tiny" data-ue="setValidUntil">set</button></div></span>'
     + '<span class="k">Tags</span><span class="v">'+(tags.length?tags.map(function(t){ return '<span class="tag">'+esc(t)+'</span>'; }).join(''):'<span class="muted">none</span>')+' <button class="btn tiny" data-ue="setTags">edit</button></span>'
     + '</div>'
     + '<div class="field" style="margin-top:16px"><label>Admin note — private</label>'
     + '<textarea id="unote" placeholder="Why is this account locked / trusted / suspicious?">'+esc(u.note||'')+'</textarea></div>'
     + '<button class="btn tiny" id="unotesave">Save note</button></div>';
+
+  /* Features get their own panel because the question is never "which flags does
+     she have" — it is "WHY does she have them". Left edge = source, fill = effect. */
+  var featPanel = '<div class="panel"><div class="eyebrow">Features</div>'
+    + (v.ovr!=null
+        ? '<div class="srcbar ovr"><span class="pill accent">OVERRIDE</span>'
+          + '<span style="flex:1;min-width:180px">An explicit list is written on this account. Plan <b>'+esc(u.plan||'free')+'</b> no longer decides — editing the plan will not change what she gets.</span>'
+          + '<button class="btn tiny" id="ufclear">Clear override</button></div>'
+        : '<div class="srcbar"><span class="pill muted">INHERITED</span>'
+          + '<span style="flex:1;min-width:180px">This account has no override. Everything below comes from plan <b>'+esc(u.plan||'free')+'</b>'
+          + (v.planFeats==null ? ' — whose feature list is <b>unknown</b> until <span class="mono">/api/plans</span> answers.' : '.')
+          + '</span></div>')
+    + '<div class="feats">'+featureIds(v).map(function(id){
+        var meta=featureKnown(id);
+        var on=v.eff.indexOf(id)>=0;
+        var inPlan=v.planFeats ? v.planFeats.indexOf(id)>=0 : null;
+        var overridden = v.ovr!=null;
+        var why;
+        if(!overridden){
+          why = inPlan==null ? 'Plan list unknown — this reflects nothing until <span class="mono">/api/plans</span> answers.'
+              : inPlan ? 'Granted by plan <b>'+esc(u.plan||'free')+'</b>.'
+                       : 'Plan <b>'+esc(u.plan||'free')+'</b> does not include it.';
+        } else if(on){
+          why = inPlan==null ? 'Written on this account. Whether the plan also grants it is unknown.'
+              : inPlan ? 'On by override. Plan <b>'+esc(u.plan||'free')+'</b> grants it too, so the override is redundant here.'
+                       : '<b>Added for this account only</b> — plan <b>'+esc(u.plan||'free')+'</b> does not include it.';
+        } else {
+          why = inPlan==null ? 'Not in the override list on this account.'
+              : inPlan ? '<b>Removed for this account only</b> — plan <b>'+esc(u.plan||'free')+'</b> does include it.'
+                       : 'Off. Neither the plan nor the override grants it.';
+        }
+        return '<div class="feat'+(on?' on':'')+(overridden?' ovr':'')+(meta?'':' unknown')+'">'
+          + '<div class="fh"><span class="fn">'+esc(id)+'</span>'
+            + '<span class="pill '+(on?'':'muted')+'">'+(on?'ON':'off')+'</span>'
+            + '<span class="pill '+(overridden?'accent':'muted')+'">'+(overridden?'override':'plan')+'</span>'
+            + '<button class="btn tiny" data-uf="'+esc(id)+'">'+(on?'Turn off':'Turn on')+'</button></div>'
+          + '<div class="fw">'+why+'</div>'
+          + (meta ? '<div class="fw">'+meta.what+'</div>'
+                  : '<div class="fw" style="color:var(--warn)">Not in the known vocabulary — probably a typo. Nothing gates on it.</div>')
+          + '</div>';
+      }).join('')+'</div>'
+    + '<p class="hint" style="margin:14px 0 0">Toggling anything here writes an explicit list onto the account: '
+    + '<span class="mono">setFeatures</span> with a JSON array, matching the <span class="mono">features TEXT</span> column. '
+    + 'The extension receives it on every check-in.</p></div>';
 
   var clients = '<div class="panel flush"><div style="padding:18px 20px 0"><div class="eyebrow">Clients &middot; <b>'+cs.length+'</b></div></div>'
     + (cs.length ? '<div class="tablewrap" style="border:none;border-radius:0;box-shadow:none;margin:0"><table><thead><tr>'
@@ -1069,15 +1362,18 @@ RENDER.user = function(){
     + '<div class="inline"><select id="umsglvl" style="width:auto;min-width:130px"><option value="info">Info</option><option value="warn">Warning</option><option value="alert">Alert</option></select>'
     + '<button class="btn primary" id="umsgsend">Send</button></div></div>';
 
-  return back + header + totals + '<div class="grid2">'+identity+entitlement+'</div>'
+  return back + header + totals + '<div class="grid2">'+identity+entitlement+'</div>' + featPanel
     + clients + devices + jobs + '<div class="grid2">'+bugsPanel+auditPanel+'</div>' + message;
 };
+/* Shared by the user and client pages. Now a doorway into the run's chunk
+   timeline instead of a dead row. */
 function jobRow(j){
-  var id=String(f(j,'jobId','job_id','id')||''), done=f(j,'done','rows','completed')||0, total=f(j,'total','chunks','expected')||0;
-  var state=f(j,'state','status')||'—';
-  return '<tr><td class="mono">'+esc(id.slice(0,14))+'</td>'
+  var id=jobId(j), done=f(j,'done','rows','completed')||0, total=f(j,'total','chunks','expected')||0;
+  var state=f(j,'state','status')||'—', stk=isStuck(j);
+  return '<tr class="click'+(stk?' wedged':'')+'" data-jopen="'+esc(id)+'"><td class="mono">'+esc(id.slice(0,14))+'</td>'
     + '<td class="num">'+esc(f(j,'rin')||'—')+'</td><td>'+esc(f(j,'source')||'—')+'</td>'
-    + '<td><span class="pill '+jobStateClass(state)+'">'+esc(state)+'</span></td>'
+    + '<td><span class="pill '+jobStateClass(state)+'">'+esc(state)+'</span>'
+      + (stk?' <span class="pill bad">STUCK</span>':'')+'</td>'
     + '<td style="min-width:130px"><div class="num" style="font-size:12px">'+n(done)+' / '+n(total)+'</div>'
       + '<div class="bar sm" style="margin-top:5px"><i style="width:'+pct(done,total)+'%"></i></div></td>'
     + '<td class="usub">'+when(f(j,'createdAt','created_at','startedAt','at'))+'</td></tr>';
@@ -1094,7 +1390,10 @@ WIRE.user = function(){
     confirmDanger('Delete '+(S.user.user.name||email)+'?','Removes the account and releases the clients it owns. The deletion is written to the audit trail.','Delete')
       .then(function(v){ if(v) actUser(email,'delete').then(function(j){ if(j.ok){ toast('User deleted','ok'); go('users'); loadUsers(); loadAudit(); } }); }); };
   q('#views tr.click[data-crin]', function(tr){ tr.onclick=function(e){ if(e.target.closest('button,a,input')) return; openClient(tr.getAttribute('data-crin')); }; });
+  q('#views tr.click[data-jopen]', function(tr){ tr.onclick=function(e){ if(e.target.closest('button,a,input')) return; openJob(tr.getAttribute('data-jopen')); }; });
   q('#views [data-cact]', function(b){ b.onclick=function(e){ e.stopPropagation(); clientAction(b.getAttribute('data-cact'), b.getAttribute('data-r'), function(){ loadUser(email); }); }; });
+  q('#views [data-uf]', function(b){ b.onclick=function(){ toggleFeature(email,b.getAttribute('data-uf')); }; });
+  if($('ufclear')) $('ufclear').onclick=function(){ clearOverride(email); };
   if($('umsgsend')) $('umsgsend').onclick=function(){
     var tx=$('umsg').value.trim(); if(!tx){ toast('Enter a message','bad'); return; }
     /* Out of the SPEC-017 action list — kept because dropping it would lose a shipped
@@ -1102,23 +1401,59 @@ WIRE.user = function(){
     actUser(email,'setMessage',{text:tx,level:$('umsglvl').value}).then(function(j){ if(j.ok){ toast('Queued — delivered on next check-in','ok'); loadUser(email); } });
   };
 };
-function editField(email,action){
-  var u=(S.user&&S.user.user)||{};
+/* `uobj` lets the Activation and Users pages edit an account they are not
+   standing on — otherwise the defaults would come from whoever was opened last. */
+function editField(email,action,uobj){
+  var u=uobj||(S.user&&S.user.user)||{};
+  var planOpts=(S.plans||[]).filter(function(p){ return Number(p.active) || String(p.id)===String(u.plan); })
+    .map(function(p){ return {value:p.id, label:p.id+' — quota '+(p.quota==null?'∞':p.quota)+((featList(p.features)||[]).length?' · '+(featList(p.features)||[]).join(', '):'')}; });
   var specs = {
-    setPlan:{title:'Change plan',label:'Plan id',value:u.plan||'free',placeholder:'free / pro / team'},
+    setPlan: planOpts.length
+      ? {title:'Change plan',label:'Plan',options:planOpts,value:u.plan||'free',message:'The plan supplies quota and features. A per-user feature override, if one exists, keeps winning over the new plan.'}
+      : {title:'Change plan',label:'Plan id',value:u.plan||'free',placeholder:'free / standard / pro',
+         message:'/api/plans is not answering, so this is a free-text id. Check it against the Activation section once that endpoint lands.'},
     setQuota:{title:'Client quota',label:'Maximum registration numbers',type:'number',min:0,value:u.quota==null?1:u.quota,
-      message:'Enforced once, on the user. Devices inherit it.'},
-    setValidUntil:{title:'Valid until',label:'Date',type:'date',value:u.validUntil?String(u.validUntil).slice(0,10):''},
-    setFeatures:{title:'Features',label:'Comma-separated flags',value:(Array.isArray(u.features)?u.features.join(', '):(u.features||'')),placeholder:'auto-reject, pdf, priority',
-      message:'A per-user override wins over the plan default.'},
+      message:'Enforced once, on the user. Devices inherit it. A user already over the cap keeps their clients and simply cannot add more.'},
+    setValidUntil:{title:'Valid until',label:'Date',type:'date',value:u.validUntil?String(u.validUntil).slice(0,10):'',
+      message:'A date in the past makes /session answer allowed:false with reason "expired" — a different answer from "locked", and a different action for the user.'},
     setTags:{title:'Tags',label:'Comma-separated tags',value:(Array.isArray(u.tags)?u.tags.join(', '):(u.tags||''))}
   };
   var sp=specs[action]; if(!sp) return;
   modal({title:sp.title, message:sp.message, confirmText:'Save',
-    input:{label:sp.label,type:sp.type,min:sp.min,value:sp.value,placeholder:sp.placeholder}}).then(function(v){
+    input:{label:sp.label,type:sp.type,min:sp.min,value:sp.value,placeholder:sp.placeholder,options:sp.options}}).then(function(v){
     if(v===null) return;
     var val = sp.type==='number' ? (parseInt(v,10)||0) : v;
-    actUser(email,action,val).then(function(j){ if(j.ok){ toast(sp.title+' saved','ok'); loadUser(email); loadUsers(); loadAudit(); } });
+    actUser(email,action,val).then(function(j){ if(j.ok){ toast(sp.title+' saved','ok'); afterUserEdit(email); } });
+  });
+}
+function afterUserEdit(email){
+  if(S.section==='user'&&S.userEmail===email) loadUser(email);
+  loadUsers(); loadAudit();
+  if(S.section==='activation') loadPlans();
+}
+/* setFeatures carries a JSON array — the shape of the `features TEXT` column.
+   Toggling from inherited state creates the override, and says so first, because
+   from that moment plan edits stop reaching this account. */
+function toggleFeature(email,id){
+  var u=(S.user&&S.user.user)||{}, v=featureView(u);
+  var base=(v.ovr!=null ? v.ovr : (v.planFeats||[])).slice();
+  var i=base.indexOf(id);
+  if(i>=0) base.splice(i,1); else base.push(id);
+  var send=function(){
+    actUser(email,'setFeatures',base).then(function(j){ if(j.ok){ toast('Features saved','ok'); afterUserEdit(email); } });
+  };
+  if(v.ovr!=null) return send();
+  modal({title:'Create a per-user override?',
+    message:'This account inherits its features from plan '+(u.plan||'free')+'. Saving here writes an explicit list onto the account, '
+          + 'and from then on the plan no longer drives it — including future edits to the plan. Clearing the override restores inheritance.',
+    confirmText:'Create override'}).then(function(ok){ if(ok) send(); });
+}
+function clearOverride(email){
+  modal({title:'Clear the feature override?',
+    message:'Removes the explicit list from this account so it inherits from its plan again. Sends setFeatures with an empty value.',
+    confirmText:'Clear override'}).then(function(ok){
+    if(!ok) return;
+    actUser(email,'setFeatures',null).then(function(j){ if(j.ok){ toast('Override cleared — inheriting from plan','ok'); afterUserEdit(email); } });
   });
 }
 function wireCommon(){
@@ -1234,6 +1569,272 @@ WIRE.client = function(){
   wireCommon();
   q('#views [data-cact]', function(b){ b.onclick=function(){ clientAction(b.getAttribute('data-cact'), b.getAttribute('data-r'), function(){ loadClient(S.clientRin); }); }; });
   q('#views [data-uopen]', function(a){ a.onclick=function(e){ e.preventDefault(); openUser(a.getAttribute('data-uopen')); }; });
+  q('#views tr.click[data-jopen]', function(tr){ tr.onclick=function(e){ if(e.target.closest('button,a,input')) return; openJob(tr.getAttribute('data-jopen')); }; });
+};
+
+/* ═══ JOBS ════════════════════════════════════════════════════════════════ */
+/* GET /api/jobs?state=&user=&rin=&stuck=&page=   GET /api/job?id=
+   POST /api/job {id, action:abandon|purge}                        SPEC-017 slice 2 */
+var JSTATES = [['','All'],['queued','Queued'],['running','Running'],['merging','Merging'],['done','Done'],['failed','Failed']];
+
+function jobsSorted(){
+  /* Newest first regardless of what order the page arrives in. */
+  return (S.jobs||[]).slice().sort(function(a,b){
+    var ta=Date.parse(f(a,'createdAt','created_at')||jobSeen(a)||'')||0;
+    var tb=Date.parse(f(b,'createdAt','created_at')||jobSeen(b)||'')||0;
+    return tb-ta;
+  });
+}
+function jobsToolbar(){
+  var stk=stuckIds().length;
+  return '<div class="toolbar">'
+    + '<button class="chip alarm'+(S.jstuck?' on':'')+'" id="jstuck" '
+      + 'title="Running or merging, not advanced in '+STUCK_MIN+' minutes">Stuck only'+(stk?' · '+stk:'')+'</button>'
+    + '<div class="chips" id="jchips">'+JSTATES.map(function(d){
+        return '<button class="chip'+(S.jstate===d[0]?' on':'')+'" data-js="'+d[0]+'">'+d[1]+'</button>'; }).join('')+'</div>'
+    + '<input id="juser" class="filt" placeholder="user email…" aria-label="Filter by user" value="'+esc(S.juser)+'">'
+    + '<input id="jrin" class="filt mono" placeholder="RIN…" aria-label="Filter by registration number" value="'+esc(S.jrin)+'">'
+    + (S.jstuck||S.jstate||S.juser||S.jrin ? '<button class="btn tiny ghost" id="jclear">Clear filters</button>' : '')
+    + '<span class="sp"></span><span class="mlabel">'+n(S.jtotal)+' runs</span></div>';
+}
+function jobProgressCell(j){
+  var done=Number(f(j,'done')||0), total=Number(f(j,'total')||0), failed=Number(f(j,'failed')||0);
+  var live=/run|merg/.test(jobState(j));
+  return '<div class="num" style="font-size:12px">'+n(done)+'<span class="muted"> / '+n(total)+'</span>'
+    + (failed?' <span class="pill bad" style="margin-left:4px">'+n(failed)+' failed</span>':'')+'</div>'
+    + '<div class="bar sm'+(live?' live':'')+'" style="margin-top:5px;min-width:96px"><i style="width:'+pct(done,total)+'%"></i></div>';
+}
+RENDER.jobs = function(){
+  var head = jobsToolbar();
+  if(S.jobsErr) return head + '<div class="empty"><span class="mlabel">Export runs</span>'
+    + '<div class="big">GET /api/jobs returned <span class="mono">'+esc(S.jobsErr)+'</span></div>'
+    + 'The <span class="mono">jobs</span> and <span class="mono">job_chunks</span> tables already exist from SPEC-016; slice 2&#39;s backend half is what exposes them here. '
+    + 'Until then a user&#39;s runs are still visible on their own page.</div>';
+  var rows = jobsSorted();
+  if(!rows.length) return head + '<div class="empty"><span class="mlabel">Export runs</span>'
+    + '<div class="big">'+(S.jstuck?'Nothing is wedged':'No run matches')+'</div>'
+    + (S.jstuck ? 'No run in <span class="mono">running</span> or <span class="mono">merging</span> has gone quiet for '+STUCK_MIN+' minutes. That is the answer to &ldquo;is anything stuck&rdquo;.'
+                : 'Every export an extension starts is recorded here the moment it plans its first chunk.')+'</div>';
+
+  var body = rows.map(function(j){
+    var id=jobId(j), stk=isStuck(j), st=jobState(j)||'—';
+    var e=esc(id);
+    return '<tr class="click'+(stk?' wedged':'')+'" data-jopen="'+e+'">'
+      + '<td><div class="uname">'+esc(f(j,'user','user_email')||'—')+'</div>'
+        + '<div class="usub mono">'+esc(id.slice(0,18))+'</div></td>'
+      + '<td class="num"><b>'+esc(f(j,'rin')||'—')+'</b></td>'
+      + '<td>'+esc(f(j,'source')||'—')
+        + '<div class="usub mono">'+esc([f(j,'dateField','date_field'),f(j,'dir')].filter(Boolean).join(' · ')||'')+'</div></td>'
+      + '<td class="usub num nowrap">'+dayRange(f(j,'from'),f(j,'to'))+'</td>'
+      + '<td><span class="pill '+jobStateClass(st)+'">'+esc(st)+'</span>'
+        + (stk?'<div style="margin-top:4px"><span class="pill bad">STUCK</span></div>':'')+'</td>'
+      + '<td style="min-width:140px">'+jobProgressCell(j)+'</td>'
+      + '<td class="num">'+n(f(j,'rows'))+'</td>'
+      + '<td class="usub">'+when(jobSeen(j))+'</td>'
+      + '<td><div class="act">'
+        + '<button class="btn tiny" data-jopen2="'+e+'">Open</button>'
+        + (/run|merg|queue|wait/.test(st) ? '<button class="btn tiny danger" data-ja="abandon" data-j="'+e+'">Abandon</button>' : '')
+        + '<button class="btn tiny danger" data-ja="purge" data-j="'+e+'">Purge</button>'
+        + '</div></td></tr>';
+  }).join('');
+
+  return head
+    + '<div class="tablewrap"><table class="wide"><thead><tr>'
+    + '<th>User / run</th><th>Client TRN</th><th>Source</th><th>Range</th><th>State</th>'
+    + '<th>Progress</th><th>Rows</th><th>Last update</th><th></th>'
+    + '</tr></thead><tbody>'+body+'</tbody></table></div>'
+    + pager('j',S.jpage,S.jtotal);
+};
+WIRE.jobs = function(){
+  if($('jstuck')) $('jstuck').onclick=function(){ S.jstuck=S.jstuck?0:1; S.jpage=1; loadJobs(); };
+  q('#jchips [data-js]', function(b){ b.onclick=function(){ S.jstate=b.getAttribute('data-js'); S.jpage=1; loadJobs(); }; });
+  if($('jclear')) $('jclear').onclick=function(){ S.jstuck=0; S.jstate=''; S.juser=''; S.jrin=''; S.jpage=1; loadJobs(); };
+  ['juser','jrin'].forEach(function(id){
+    var el=$(id); if(!el) return;
+    el.oninput=function(){ S[id]=el.value; S.jpage=1;      /* state key === input id */
+      clearTimeout(WIRE['_'+id]); WIRE['_'+id]=setTimeout(loadJobs,260); };
+    el.onkeydown=function(e){ if(e.key==='Enter'){ clearTimeout(WIRE['_'+id]); loadJobs(); } };
+  });
+  q('#views [data-pg]', function(b){ b.onclick=function(){
+    var d=b.getAttribute('data-pg').split(':')[1];
+    S.jpage = d==='next' ? S.jpage+1 : Math.max(1,S.jpage-1); loadJobs(); }; });
+  q('#views tr.click[data-jopen]', function(tr){ tr.onclick=function(e){ if(e.target.closest('button,a,input')) return; openJob(tr.getAttribute('data-jopen')); }; });
+  q('#views [data-jopen2]', function(b){ b.onclick=function(e){ e.stopPropagation(); openJob(b.getAttribute('data-jopen2')); }; });
+  q('#views [data-ja]', function(b){ b.onclick=function(e){ e.stopPropagation();
+    jobAction(b.getAttribute('data-j'), b.getAttribute('data-ja')); }; });
+};
+function openJob(id){ if(!id) return; S.jobId=id; S.job=null; go('job',id); loadJob(id); }
+
+/* Both actions are destructive in different ways, so both say which one they are.
+   Purge is the one an admin can regret: it drops the artefact that answers
+   "why did this export fail" and there is no way to rebuild it. */
+function jobAction(id,action,after){
+  var short=String(id).slice(0,16);
+  var spec = action==='purge'
+    ? {title:'Purge the chunk detail of '+short+'?',
+       message:'Purge drops the chunk detail — every chunk row with its range, count, state and warning. '
+             + 'It keeps the job history: the run stays in this list with its user, client, state, progress and totals. '
+             + 'The timeline cannot be rebuilt afterwards, so the next "why did this fail" about this run has no answer.',
+       confirmText:'Purge chunk detail', ok:'Chunk detail purged'}
+    : {title:'Abandon '+short+'?',
+       message:'Marks the run dead so it stops counting as running and stops being reported as stuck. '
+             + 'Nothing already exported is removed and the chunk detail is kept — purge is the one that drops that.',
+       confirmText:'Abandon run', ok:'Run abandoned'};
+  return modal({title:spec.title,message:spec.message,confirmText:spec.confirmText,danger:true}).then(function(v){
+    if(!v) return;
+    return post('/api/job',{id:id,action:action}).then(function(j){
+      if(!j.ok) return;
+      toast(spec.ok,'ok');
+      loadJobs(); loadDashboard(); loadAudit();
+      if(S.section==='job'&&S.jobId===id) loadJob(id);
+      if(after) after();
+    });
+  });
+}
+
+/* ── job detail: the chunk timeline ───────────────────────────────────────── */
+function chunkClass(c){
+  var s=String(c.state||'').toLowerCase();
+  if(/fail|error|dead/.test(s)) return 'bad';
+  if(/run|merg|busy|active/.test(s)) return 'run';
+  if(/done|ok|complete|merged/.test(s)) return c.warn ? 'warn' : 'done';
+  if(/wait|pend|queue|plan|todo/.test(s)) return 'wait';
+  return c.warn ? 'warn' : 'wait';
+}
+RENDER.job = function(){
+  var back='<button class="back" data-back="jobs">&larr; All runs</button>';
+  if(!S.job){
+    return back+'<div class="empty"><span class="mlabel">Export run</span><div class="big">'
+      + (S.jobErr ? 'GET /api/job returned <span class="mono">'+esc(S.jobErr)+'</span>' : 'Loading '+esc(String(S.jobId).slice(0,18))+'…')
+      + '</div></div>';
+  }
+  var j=S.job.job||{}, chunks=S.job.chunks||[];
+  var id=jobId(j)||S.jobId, st=jobState(j)||'—', stk=isStuck(j);
+  var done=Number(f(j,'done')||0), total=Number(f(j,'total')||0), failed=Number(f(j,'failed')||0);
+
+  var header = '<div class="dhead"><div style="min-width:0">'
+    + '<h2 class="mono" style="font-size:21px">'+esc(id)+' <button class="copy" data-copy="'+esc(id)+'">copy</button></h2>'
+    + '<div class="dsub">'+esc(f(j,'source')||'—')+' &middot; '+dayRange(f(j,'from'),f(j,'to'))
+      + ' &middot; <a href="#" data-uopen="'+esc(f(j,'user','user_email')||'')+'">'+esc(f(j,'user','user_email')||'unknown user')+'</a>'
+      + ' &middot; <a href="#" data-copen="'+esc(f(j,'rin')||'')+'" class="num">'+esc(f(j,'rin')||'—')+'</a></div>'
+    + '<div class="pills"><span class="pill '+jobStateClass(st)+'">'+esc(st)+'</span>'
+      + (stk?' <span class="pill bad">STUCK — no progress in '+Math.floor((Date.now()-Date.parse(jobSeen(j)))/60000)+'m</span>':'')
+      + (failed?' <span class="pill bad">'+n(failed)+' chunk'+(failed===1?'':'s')+' failed</span>':'')
+      + '</div></div>'
+    + '<div class="acts">'
+      + (/run|merg|queue|wait/.test(st)?'<button class="btn danger" data-ja="abandon" data-j="'+esc(id)+'">Abandon run</button>':'')
+      + '<button class="btn danger" data-ja="purge" data-j="'+esc(id)+'">Purge chunk detail</button>'
+    + '</div></div>';
+
+  var strip = '<div class="strip">'
+    + [{k:'Chunks done',v:done+' / '+total, c:failed?'warn':'ok'},
+       {k:'Failed',v:failed, c:failed?'bad':null},
+       {k:'Rows',v:f(j,'rows')||0, c:'info'},
+       {k:'Probes',v:f(j,'probes')||0},
+       {k:'Version',v:f(j,'version')||'—', c:'moss'}]
+      .map(function(t){
+        var zero = typeof t.v!=='string' && !Number(t.v);
+        return '<div class="tile'+(t.c&&!zero?' '+t.c:'')+(zero?' zero':'')+'"><div class="v">'
+          + (typeof t.v==='string'?esc(t.v):n(t.v))+'</div><div class="k">'+esc(t.k)+'</div></div>'; }).join('')
+    + '</div>';
+
+  var facts = '<div class="panel"><div class="eyebrow">The request</div><div class="kv">'
+    + '<span class="k">Source</span><span class="v">'+esc(f(j,'source')||'—')+'</span>'
+    + '<span class="k">Date field</span><span class="v mono">'+esc(f(j,'dateField','date_field')||'—')+'</span>'
+    + '<span class="k">Direction</span><span class="v mono">'+esc(f(j,'dir')||'—')+'</span>'
+    + '<span class="k">Range</span><span class="v num">'+dayRange(f(j,'from'),f(j,'to'))+'</span>'
+    + '<span class="k">Started</span><span class="v">'+cairo(f(j,'createdAt','created_at'))+' <span class="usub">'+esc(rel(f(j,'createdAt','created_at'))||'')+'</span></span>'
+    + '<span class="k">Last update</span><span class="v">'+cairo(jobSeen(j))+' <span class="usub">'+esc(rel(jobSeen(j))||'')+'</span></span>'
+    + '</div>'
+    + (stk ? '<div class="callout bad" style="margin-top:14px"><span class="cl">wedged</span><span class="cb">'
+        + 'This run is in <span class="mono">'+esc(st)+'</span> and has not advanced in over '+STUCK_MIN+' minutes. '
+        + 'The chunk below still in <span class="mono">running</span> is where it stopped. Abandon releases it.</span></div>' : '')
+    + '</div>';
+
+  var progress = '<div class="panel"><div class="eyebrow">Progress</div>'
+    + '<div class="runrow" style="border:none;padding-top:0">'
+    + '<div><div class="who">'+n(done)+' of '+n(total)+' chunks</div>'
+      + '<div class="meta">'+n(f(j,'rows'))+' rows &middot; '+n(failed)+' failed &middot; '+esc(rel(jobSeen(j))||'')+'</div></div>'
+    + '<div style="text-align:right"><div class="cnt">'+pct(done,total)+'<small>%</small></div></div>'
+    + '<div class="bar'+(/run|merg/.test(st)?' live':'')+'"><i style="width:'+pct(done,total)+'%"></i></div></div></div>';
+
+  /* The purged case is a first-class state, not an empty table. The contract has
+     no `purged` flag, so this reads one if the backend sends one and otherwise
+     infers it: a job that planned N chunks and reports none is a job whose detail
+     was dropped. Both readings are labelled honestly. */
+  var flagged = !!f(j,'purged','chunksPurged','chunks_purged');
+  var timeline;
+  if(!chunks.length && (flagged || total>0)){
+    timeline = '<div class="panel"><div class="eyebrow">Chunk timeline</div>'
+      + '<div class="callout info"><span class="cl">purged</span><span class="cb">'
+      + '<b>The chunk detail for this run was dropped.</b> '
+      + (flagged ? 'The server reports it as purged. ' : 'The run planned <b>'+n(total)+'</b> chunks and returned none, which is what a purge leaves behind. ')
+      + 'What survives is the header above: user, client, source, range, state, '+n(done)+'/'+n(total)+' chunks, '+n(f(j,'rows'))+' rows. '
+      + 'Per-chunk ranges, counts and warnings cannot be recovered.'
+      + '<div class="ref">purge keeps the job history &middot; it drops only the chunk rows</div></span></div></div>';
+  } else if(!chunks.length){
+    timeline = '<div class="panel"><div class="eyebrow">Chunk timeline</div>'
+      + '<div class="callout warn"><span class="cl">none</span><span class="cb">'
+      + 'This run never recorded a chunk. It stopped before planning finished — a rejected date range, a failed probe, '
+      + 'or an abandon while queued. The state above (<span class="mono">'+esc(st)+'</span>) is the whole story.</span></div></div>';
+  } else {
+    var bad=0, warned=0;
+    chunks.forEach(function(c){ var k=chunkClass(c); if(k==='bad') bad++; if(k==='warn'||c.warn) warned++; });
+    var ladder = '<div class="ladder">'+chunks.map(function(c,i){
+        var k=chunkClass(c), idx=(c.idx!=null?c.idx:i+1);
+        return '<button class="ck '+k+'" data-ck="'+esc(String(idx))+'" title="'+esc('#'+idx+'  '+dayRange(c.from,c.to).replace('&rarr;','→')+'  '+(c.state||'')+(c.count!=null?'  · '+c.count+' rows':'')+(c.warn?'  · '+c.warn:''))+'" aria-label="Chunk '+esc(String(idx))+'"></button>';
+      }).join('')+'</div>';
+    var legendRow = '<div class="legend">'
+      + '<span><i style="background:var(--ok)"></i>done</span>'
+      + '<span><i style="background:var(--warn)"></i>done with a warning</span>'
+      + '<span><i style="background:var(--run)"></i>running</span>'
+      + '<span><i style="background:var(--bad)"></i>failed</span>'
+      + '<span><i style="background:var(--well);box-shadow:inset 0 0 0 1px var(--line2)"></i>not started</span></div>';
+
+    var rows = chunks.map(function(c,i){
+      var k=chunkClass(c), idx=(c.idx!=null?c.idx:i+1);
+      var sub = (c.subF||c.subT) ? '<div class="usub num">split '+dayRange(c.subF,c.subT)+'</div>' : '';
+      return '<tr class="ch '+(k==='done'?'':k)+'" data-chunk="'+esc(String(idx))+'">'
+        + '<td class="num"><b>'+esc(String(idx))+'</b></td>'
+        + '<td class="num nowrap">'+dayRange(c.from,c.to)+sub+'</td>'
+        + '<td>'+(c.label?'<span class="tag">'+esc(c.label)+'</span>':'<span class="faint">—</span>')+'</td>'
+        + '<td class="num">'+(c.count==null?'<span class="faint">—</span>':n(c.count))+'</td>'
+        + '<td><span class="pill '+(k==='done'?'':k==='wait'?'muted':k)+'">'+esc(c.state||'—')+'</span></td>'
+        + '<td>'+(c.warn?'<div class="warnline">'+esc(c.warn)+'</div>':'<span class="faint">—</span>')+'</td>'
+        + '<td class="mono usub">'+esc(String(c.chunkId||'').slice(0,14))+'</td></tr>';
+    }).join('');
+
+    timeline = '<div class="panel"><div class="eyebrow">Chunk timeline &middot; <b>'+chunks.length+'</b></div>'
+      + '<p class="hint">One square per chunk, in order. This is the artefact that answers &ldquo;the export failed&rdquo; without asking the user for a log — '
+      + 'click a square to jump to its row.</p>'
+      + ladder + legendRow
+      + ((bad||warned) ? '<div class="callout '+(bad?'bad':'warn')+'" style="margin-top:14px"><span class="cl">'+(bad?'failed':'warned')+'</span><span class="cb">'
+          + (bad?'<b>'+bad+'</b> chunk'+(bad===1?'':'s')+' failed':'')
+          + (bad&&warned?' &middot; ':'')
+          + (warned?'<b>'+warned+'</b> completed with a warning':'')
+          + '. The rows below carry the reason the server recorded.</span></div>' : '')
+      + '</div>'
+      + '<div class="tablewrap"><table class="wide"><thead><tr>'
+      + '<th style="width:52px">#</th><th>Range</th><th>Part label</th><th>Count</th><th>State</th><th>Warning</th><th>Chunk id</th>'
+      + '</tr></thead><tbody>'+rows+'</tbody></table></div>';
+  }
+
+  return back + header + strip + '<div class="grid2">'+facts+progress+'</div>' + timeline;
+};
+WIRE.job = function(){
+  wireCommon();
+  q('#views [data-ja]', function(b){ b.onclick=function(){ jobAction(b.getAttribute('data-j'), b.getAttribute('data-ja')); }; });
+  q('#views [data-uopen]', function(a){ a.onclick=function(e){ e.preventDefault(); var v=a.getAttribute('data-uopen'); if(v) openUser(v); }; });
+  q('#views [data-copen]', function(a){ a.onclick=function(e){ e.preventDefault(); var v=a.getAttribute('data-copen'); if(v) openClient(v); }; });
+  q('#views [data-ck]', function(b){ b.onclick=function(){
+    var idx=b.getAttribute('data-ck');
+    var tr=document.querySelector('#views tr[data-chunk="'+idx.replace(/"/g,'')+'"]');
+    if(!tr) return;
+    q('#views tr.ch.hit', function(x){ x.classList.remove('hit'); });
+    tr.classList.add('hit');
+    try{ tr.scrollIntoView({block:'center',behavior:'smooth'}); }
+    catch(e){ try{ tr.scrollIntoView(); }catch(e2){} }
+  }; });
 };
 
 /* ═══ CHARTS — inline SVG, no libraries ═══════════════════════════════════ */
@@ -1274,6 +1875,202 @@ function svgSplit(parts){
 }
 function legend(parts){ return '<div class="legend">'+parts.map(function(p){ return '<span><i style="background:'+p.color+'"></i>'+esc(p.label)+': '+p.value+'</span>'; }).join('')+'</div>'; }
 function chart(title,hint,inner){ return '<div class="panel chartcard"><div class="eyebrow">'+esc(title)+'</div><p class="hint">'+hint+'</p>'+inner+'</div>'; }
+
+/* ═══ ACTIVATION ══════════════════════════════════════════════════════════ */
+/* GET /api/plans   POST /api/plan (upsert)   POST /api/plan/delete   SPEC-017 slice 3 */
+function planUsersOnPage(id){
+  var nn=0; (S.users||[]).forEach(function(u){ if(String(u.plan||'')===String(id)) nn++; });
+  return nn;
+}
+function featureChips(sel,attr){
+  sel = sel||[];
+  return '<div class="chips">'+FEATURES.map(function(x){
+    var on = sel.indexOf(x.id)>=0;
+    return '<button type="button" class="chip'+(on?' on':'')+'" '+attr+'="'+esc(x.id)+'">'+esc(x.id)+'</button>';
+  }).join('')
+  + sel.filter(function(id){ return !featureKnown(id); }).map(function(id){
+      return '<button type="button" class="chip on" '+attr+'="'+esc(id)+'" title="Not in the known vocabulary">'+esc(id)+' ?</button>';
+    }).join('')
+  + '</div>';
+}
+function planEditor(){
+  var p=S.planEdit; if(!p) return '';
+  var isNew=!p.existing;
+  return '<div class="planed">'
+    + '<div class="eyebrow">'+(isNew?'New plan':'Editing <b>'+esc(p.id)+'</b>')+'</div>'
+    + '<div class="grid2">'
+      + '<div class="field"><label>Plan id — sent to the extension</label>'
+        + '<input id="pl_id" class="mono" placeholder="e.g. standard" value="'+esc(p.id||'')+'"'+(isNew?'':' disabled')+'></div>'
+      + '<div class="field"><label>Display name</label><input id="pl_name" placeholder="e.g. Standard" value="'+esc(p.name||'')+'"></div>'
+    + '</div><div class="grid2">'
+      + '<div class="field"><label>Client quota</label><input id="pl_quota" type="number" min="0" value="'+esc(p.quota==null?1:p.quota)+'"></div>'
+      + '<div class="field"><label>Price — free text, billing is out of scope</label><input id="pl_price" placeholder="e.g. EGP 1,200 / yr" value="'+esc(p.price||'')+'"></div>'
+    + '</div>'
+    + '<div class="field"><label>Features granted by this plan</label>'
+      + featureChips(p.features||[],'data-pf')
+      + '<div class="usub" style="margin-top:7px">A per-user override on any account wins over this list.</div></div>'
+    + '<div class="field"><label>Availability</label>'
+      + '<label class="switch"><input type="checkbox" id="pl_active"'+(Number(p.active)?' checked':'')+'><span class="swtrack"></span>'
+      + '<span style="font-size:13px" class="'+(Number(p.active)?'':'muted')+'">'+(Number(p.active)?'Active — selectable':'Inactive — hidden from new assignments')+'</span></label></div>'
+    + '<div class="inline" style="margin-top:6px"><button class="btn primary" id="pl_save">'+(isNew?'Create plan':'Save plan')+'</button>'
+      + '<button class="btn ghost" id="pl_cancel">Cancel</button>'
+      + '<span class="mlabel">POST /api/plan</span></div></div>';
+}
+RENDER.activation = function(){
+  var plans=S.plans||[];
+
+  var refused = S.planRefused ? '<div class="callout bad"><span class="cl">refused</span><span class="cb">'
+      + '<b class="mono">'+esc(S.planRefused.id)+'</b> was not deleted — the server answered <span class="mono">'
+      + esc(S.planRefused.error||'conflict')+'</span>'+(S.planRefused.status?' (HTTP '+esc(String(S.planRefused.status))+')':'')+'. '
+      + (S.planRefused.count!=null
+          ? '<b>'+n(S.planRefused.count)+'</b> user'+(Number(S.planRefused.count)===1?'':'s')+' still reference'+(Number(S.planRefused.count)===1?'s':'')+' it. '
+          : 'It did not say how many accounts reference it. ')
+      + 'A plan in use cannot be deleted — move those accounts to another plan first.'
+      + '<div style="margin-top:9px"><button class="btn tiny" data-goplan="'+esc(S.planRefused.id)+'">Show those users</button> '
+      + '<button class="btn tiny ghost" id="prdismiss">Dismiss</button></div></span></div>' : '';
+
+  var table;
+  if(S.plansErr){
+    table = '<div class="empty" style="margin:0"><span class="mlabel">Plans</span>'
+      + '<div class="big">GET /api/plans returned <span class="mono">'+esc(S.plansErr)+'</span></div>'
+      + 'The plan editor is slice 3&#39;s backend half. Per-user plan, quota and expiry on the Users pages keep working without it — '
+      + 'only the plan&#39;s own feature list is unknown until this answers.</div>';
+  } else if(!plans.length){
+    table = '<div class="empty" style="margin:0"><span class="mlabel">Plans</span>'
+      + '<div class="big">'+(S.plansDone?'No plans defined':'Loading…')+'</div>'
+      + (S.plansDone?'The migration seeds <span class="mono">free</span>, <span class="mono">standard</span> and <span class="mono">pro</span>. Create one below if it has not run yet.':'')+'</div>';
+  } else {
+    table = '<div class="tablewrap" style="margin-bottom:0"><table class="wide"><thead><tr>'
+      + '<th>Id</th><th>Name</th><th>Quota</th><th>Features</th><th>Price</th><th>State</th><th>On this plan</th><th></th>'
+      + '</tr></thead><tbody>'
+      + plans.map(function(p){
+          var fl=featList(p.features)||[];
+          var used=planUsersOnPage(p.id);
+          return '<tr class="planrow"><td class="mono"><b>'+esc(p.id)+'</b></td>'
+            + '<td>'+esc(p.name||'—')+'</td>'
+            + '<td class="num">'+(p.quota==null?'∞':n(p.quota))+'</td>'
+            + '<td>'+(fl.length?fl.map(function(x){
+                  return featureKnown(x)
+                    ? '<span class="tag">'+esc(x)+'</span>'
+                    : '<span class="tag" style="color:var(--warn);background:var(--warnbg);border-color:var(--warnln)" title="Not in the known vocabulary — nothing gates on it">'+esc(x)+' ?</span>'; }).join('')
+                : '<span class="faint">none</span>')+'</td>'
+            + '<td class="usub">'+esc(p.price||'—')+'</td>'
+            + '<td>'+(Number(p.active)?'<span class="pill">active</span>':'<span class="pill muted">inactive</span>')+'</td>'
+            + '<td class="num">'+(used?n(used):'<span class="faint">0</span>')+'</td>'
+            + '<td><div class="act"><button class="btn tiny" data-pedit="'+esc(p.id)+'">Edit</button>'
+            + '<button class="btn tiny danger" data-pdel="'+esc(p.id)+'">Delete</button></div></td></tr>';
+        }).join('')
+      + '</tbody></table></div>'
+      + '<div class="usub" style="margin-top:9px">&ldquo;On this plan&rdquo; counts only the <b>'+n((S.users||[]).length)+'</b> accounts loaded on the current Users page — '
+        + 'it is a hint, not the estate. The server is the authority, and it says so by refusing a delete.</div>';
+  }
+
+  var plansPanel = '<div class="panel"><div class="eyebrow">Plans</div>'
+    + '<p class="hint">A plan carries a quota and a feature list. In slice 3 all three bind: <span class="mono">/session</span> fills '
+    + '<span class="mono">features</span> from the plan, an expired <span class="mono">valid_until</span> answers '
+    + '<span class="mono">allowed:false, reason:&#39;expired&#39;</span>, and quota is counted across all of a user&#39;s devices instead of per device.</p>'
+    + refused
+    + (S.planEdit ? planEditor() : '<div style="margin-bottom:14px"><button class="btn primary" id="pnew">New plan</button></div>')
+    + table + '</div>';
+
+  var vocab = '<div class="panel"><div class="eyebrow">Feature vocabulary</div>'
+    + '<p class="hint">Fixed for now. Editors offer these as toggles rather than a text field, because a typo in a feature name '
+    + 'does not fail — it silently grants nothing.</p>'
+    + '<div class="feats">'+FEATURES.map(function(x){
+        var onPlans=(S.plans||[]).filter(function(p){ return (featList(p.features)||[]).indexOf(x.id)>=0; }).map(function(p){ return p.id; });
+        return '<div class="feat"><div class="fh"><span class="fn">'+esc(x.id)+'</span></div>'
+          + '<div class="fw">'+x.what+'</div>'
+          + '<div class="fw"><b>'+(onPlans.length?'On plans: '+esc(onPlans.join(', ')):'On no plan yet')+'</b></div></div>';
+      }).join('')+'</div></div>';
+
+  var eb=expiryBuckets();
+  var expRows=eb.exp.concat(eb.soon);
+  var expiry = '<div class="panel"><div class="eyebrow">Expiry &middot; <b>'+eb.exp.length+' expired</b> &middot; '+eb.soon.length+' within 14 days</div>'
+    + '<p class="hint">From the <b>'+n((S.users||[]).length)+'</b> accounts on the current Users page. The dashboard tile counts the whole estate; '
+    + 'these are the names. An expired account is refused with <span class="mono">reason:&#39;expired&#39;</span> — a distinct answer from '
+    + '&ldquo;locked&rdquo;, so the drawer can tell the user to renew instead of to contact support.</p>'
+    + (expRows.length
+      ? '<div class="tablewrap" style="margin-bottom:0"><table><thead><tr><th>User</th><th>Plan</th><th>Valid until</th><th>Status</th><th></th></tr></thead><tbody>'
+        + expRows.map(function(u){
+            return '<tr class="click" data-uopen="'+esc(u.email||'')+'"><td><div class="uname">'+esc(u.name||u.email||'—')+'</div>'
+              + '<div class="usub mono">'+esc(u.email||'')+'</div></td>'
+              + '<td><span class="pill accent">'+esc(u.plan||'free')+'</span></td>'
+              + '<td>'+expiryCell(u)+'</td>'
+              + '<td>'+userPills(u)+'</td>'
+              + '<td><div class="act"><button class="btn tiny" data-uext="'+esc(u.email||'')+'">Extend</button></div></td></tr>';
+          }).join('')+'</tbody></table></div>'
+      : '<div class="callout ok"><span class="cl">clear</span><span class="cb">No loaded account is expired or expires inside 14 days.</span></div>')
+    + '</div>';
+
+  return plansPanel + '<div class="grid2">'+vocab+expiry+'</div>';
+};
+WIRE.activation = function(){
+  if($('pnew')) $('pnew').onclick=function(){ S.planEdit={id:'',name:'',quota:1,features:[],price:'',active:1,existing:false}; paint(); };
+  if($('prdismiss')) $('prdismiss').onclick=function(){ S.planRefused=null; paint(); };
+  q('#views [data-goplan]', function(b){ b.onclick=function(){
+    S.uplan=b.getAttribute('data-goplan'); S.ustatus='all'; S.upage=1; go('users'); loadUsers(); }; });
+  q('#views [data-pedit]', function(b){ b.onclick=function(){
+    var p=planById(b.getAttribute('data-pedit')); if(!p) return;
+    S.planEdit={id:p.id,name:p.name||'',quota:(p.quota==null?1:p.quota),features:(featList(p.features)||[]),
+                price:p.price||'',active:Number(p.active)?1:0,existing:true};
+    paint(); }; });
+  q('#views [data-pdel]', function(b){ b.onclick=function(){ planDelete(b.getAttribute('data-pdel')); }; });
+  /* Feature chips repaint, so harvest the half-typed fields first — a toggle must
+     not eat the name someone is in the middle of writing. */
+  q('#views [data-pf]', function(b){ b.onclick=function(){
+    harvestPlan();
+    var id=b.getAttribute('data-pf'), fs=S.planEdit.features||[], i=fs.indexOf(id);
+    if(i>=0) fs.splice(i,1); else fs.push(id);
+    S.planEdit.features=fs; paint(); }; });
+  if($('pl_cancel')) $('pl_cancel').onclick=function(){ S.planEdit=null; paint(); };
+  if($('pl_active')) $('pl_active').onchange=function(){ harvestPlan(); S.planEdit.active=$('pl_active').checked?1:0; paint(); };
+  if($('pl_save')) $('pl_save').onclick=savePlan;
+  q('#views tr.click[data-uopen]', function(tr){ tr.onclick=function(e){ if(e.target.closest('button,a,input')) return; openUser(tr.getAttribute('data-uopen')); }; });
+  q('#views [data-uext]', function(b){ b.onclick=function(e){ e.stopPropagation();
+    var em=b.getAttribute('data-uext');
+    var u=(S.users||[]).filter(function(x){ return x.email===em; })[0]||{};
+    editField(em,'setValidUntil',u); }; });
+};
+function harvestPlan(){
+  if(!S.planEdit) return;
+  if($('pl_id')&&!S.planEdit.existing) S.planEdit.id=$('pl_id').value.trim();
+  if($('pl_name'))  S.planEdit.name=$('pl_name').value;
+  if($('pl_quota')){ var qv=$('pl_quota').value; S.planEdit.quota = qv===''?'':parseInt(qv,10); }
+  if($('pl_price')) S.planEdit.price=$('pl_price').value;
+  if($('pl_active'))S.planEdit.active=$('pl_active').checked?1:0;
+}
+function savePlan(){
+  harvestPlan();
+  var p=S.planEdit; if(!p) return;
+  if(!p.id){ toast('A plan needs an id','bad'); return; }
+  if(!/^[a-z0-9][a-z0-9_-]*$/.test(p.id)){ toast('Plan id: lowercase letters, digits, dash, underscore','bad'); return; }
+  if(p.quota===''||p.quota==null||isNaN(Number(p.quota))||Number(p.quota)<0){ toast('Quota must be 0 or more','bad'); return; }
+  post('/api/plan',{id:p.id,name:p.name||p.id,quota:Number(p.quota),features:p.features||[],price:p.price||'',active:p.active?1:0})
+    .then(function(j){ if(!j.ok) return;
+      toast(p.existing?'Plan saved':'Plan created','ok');
+      S.planEdit=null; S.planRefused=null; loadPlans(); loadUsers(); loadAudit(); paint(); });
+}
+/* The 409 is the interesting answer here, not the failure. It is the only place
+   the server tells an admin that a plan is load-bearing, so it is rendered in
+   full instead of being flattened into a toast. */
+function planDelete(id){
+  confirmDanger('Delete plan '+id+'?',
+    'Removes the plan definition. The server refuses while any account references it — that refusal is shown here with its reason, not swallowed.',
+    'Delete plan').then(function(v){
+    if(!v) return;
+    if(DEMO){   /* show the refusal the real server would send */
+      S.planRefused={id:id,error:'plan_in_use',status:409,count:planUsersOnPage(id)};
+      toast('Demo — this is the refusal the server would send','n'); paint(); return;
+    }
+    post('/api/plan/delete',{id:id},true).then(function(j){
+      if(j.ok){ toast('Plan deleted','ok'); S.planRefused=null; loadPlans(); loadAudit(); return; }
+      var cnt=f(j,'count','users','userCount','inUse','in_use');
+      S.planRefused={id:id, error:j.error||'refused', status:j._status, count:(typeof cnt==='number'?cnt:null)};
+      toast('Plan '+id+' was not deleted','bad');
+      paint();
+    });
+  });
+}
 
 /* ═══ INSIGHTS ════════════════════════════════════════════════════════════ */
 RENDER.insights = function(){
@@ -1580,7 +2377,8 @@ document.addEventListener('keydown',function(e){
   if($('shell').hidden) return;
   if(!$('modal-root').hidden) return;
   if(e.target && /INPUT|TEXTAREA|SELECT/.test(e.target.tagName)){ if(e.key==='Escape') e.target.blur(); return; }
-  var KEYS={d:'dashboard',u:'users',c:'clients',i:'insights',q:'requests',b:'bugs',a:'activity',t:'tools'};
+  var KEYS={d:'dashboard',j:'jobs',u:'users',c:'clients',i:'insights',q:'requests',b:'bugs',a:'activity',p:'activation',t:'tools'};
+  if(e.key==='s'){ S.jstuck=S.jstuck?0:1; S.jpage=1; go('jobs'); loadJobs(); return; }   /* "is anything stuck" */
   if(e.key==='/'){ e.preventDefault(); if(S.section!=='users'&&S.section!=='clients') go('users');
     setTimeout(function(){ var s=$('usearch')||$('csearch'); if(s) s.focus(); },30); return; }
   if(e.key==='r'){ loadAll(); toast('Refreshed','ok',1100); return; }
@@ -1591,24 +2389,47 @@ document.addEventListener('keydown',function(e){
 /* ── demo fixtures: shapes copied verbatim from the SPEC-017 contract ─────── */
 function demoGet(p){
   var now=Date.now(), iso=function(m){ return new Date(now-m*60000).toISOString(); };
+  var day=function(d){ return new Date(now+d*86400000).toISOString().slice(0,10); };
   if(p.indexOf('/api/dashboard')===0) return {ok:true,
     stats:{users:38,clients:64,devices:52,activeJobs:2,jobsToday:17,docsToday:24193,openBugs:3,pendingRequests:2,expiringSoon:4},
-    active:[{jobId:'job_8f21ac93',user:'Hala Mansour',rin:'204918377',source:'Sales',state:'running',done:1840,total:4200,updatedAt:iso(1)},
-            {jobId:'job_11c4de07',user:'Karim Adel',rin:'318772041',source:'Purchases',state:'running',done:390,total:1500,updatedAt:iso(4)}],
+    active:[{jobId:'job_8f21ac93',user:'hala@mansour.co',rin:'204918377',source:'Sales',state:'running',done:18,total:42,updatedAt:iso(1)},
+            {jobId:'job_3d19aa20',user:'nour@fahmy.eg',rin:'552019887',source:'Sales',state:'merging',done:36,total:36,updatedAt:iso(2)},
+            {jobId:'job_7b02c1d5',user:'karim@adel.eg',rin:'318772041',source:'Purchases',state:'running',done:11,total:40,updatedAt:iso(46)}],
     recent:[{at:iso(3),kind:'job.done',text:'Nour Fahmy finished Sales export for 552019887',ref:'job_44ae'},
             {at:iso(12),kind:'user.locked',text:'Adel Sabry locked by token',ref:'adel@sabry.eg'},
             {at:iso(31),kind:'client.move',text:'RIN 204918377 moved to hala@mansour.co',ref:'204918377'},
             {at:iso(64),kind:'bug.open',text:'New bug report from Karim Adel',ref:'bug_9912'},
             {at:iso(140),kind:'job.failed',text:'Purchases run failed after 3 chunk retries',ref:'job_7b02'}],
-    alerts:[{level:'danger',text:'job_7b02 has not advanced in 46 minutes',ref:'job_7b02'},
+    alerts:[{level:'danger',text:'Purchases run for 318772041 has not advanced in 46 minutes',ref:'job_7b02c1d5'},
             {level:'warning',text:'4 plans expire within 14 days',ref:'plan'},
             {level:'warning',text:'sig_fail rate is 7x the 24h baseline',ref:'/session'}]};
-  if(p.indexOf('/api/users')===0) return {ok:true,total:3,users:[
-    {email:'hala@mansour.co',name:'Hala Mansour',company:'Mansour & Co',plan:'pro',quota:5,clientCount:4,deviceCount:2,jobCount:61,docs:184220,status:'active',validUntil:'2026-09-01',lastSeen:iso(6),tags:['priority']},
-    {email:'karim@adel.eg',name:'Karim Adel',company:'Adel Accounting',plan:'free',quota:1,clientCount:1,deviceCount:1,jobCount:8,docs:9120,status:'active',validUntil:'2026-08-18',lastSeen:iso(220),tags:[]},
-    {email:'adel@sabry.eg',name:'Adel Sabry',company:'Sabry Audit',plan:'team',quota:12,clientCount:12,deviceCount:5,jobCount:214,docs:912004,status:'locked',validUntil:'2027-01-01',lastSeen:iso(2900),tags:['watch']}]};
-  if(p.indexOf('/api/user?')===0) return {ok:true,
-    user:{email:'hala@mansour.co',name:'Hala Mansour',company:'Mansour & Co',phone:'+20 100 555 0110',plan:'pro',quota:5,clientCount:4,deviceCount:2,jobCount:61,docs:184220,status:'active',superadmin:0,validUntil:'2026-09-01',country:'EG',note:'',tags:['priority'],features:['auto-reject'],createdAt:'2026-02-11T09:12:00Z',lastSeen:iso(6)},
+  if(p.indexOf('/api/users')===0) return {ok:true,total:4,users:[
+    {email:'hala@mansour.co',name:'Hala Mansour',company:'Mansour & Co',plan:'pro',quota:5,clientCount:4,deviceCount:2,jobCount:61,docs:184220,status:'active',validUntil:day(23),lastSeen:iso(6),tags:['priority']},
+    {email:'karim@adel.eg',name:'Karim Adel',company:'Adel Accounting',plan:'free',quota:1,clientCount:1,deviceCount:1,jobCount:8,docs:9120,status:'active',validUntil:day(9),lastSeen:iso(220),tags:[]},
+    {email:'nour@fahmy.eg',name:'Nour Fahmy',company:'Fahmy Tax',plan:'standard',quota:5,clientCount:3,deviceCount:1,jobCount:44,docs:60110,status:'active',validUntil:day(-6),lastSeen:iso(90),tags:[]},
+    {email:'adel@sabry.eg',name:'Adel Sabry',company:'Sabry Audit',plan:'legacy',quota:12,clientCount:12,deviceCount:5,jobCount:214,docs:912004,status:'locked',validUntil:day(150),lastSeen:iso(2900),tags:['watch']}]};
+  if(p.indexOf('/api/user?')===0){
+    var em=decodeURIComponent((/[?&]email=([^&]*)/.exec(p)||[])[1]||'');
+    /* Two accounts that inherit, so the INHERITED half of the Features panel is
+       reachable in demo and not only the override half. */
+    if(em==='karim@adel.eg') return {ok:true,
+      user:{email:'karim@adel.eg',name:'Karim Adel',company:'Adel Accounting',phone:'+20 122 400 8871',plan:'free',quota:1,clientCount:1,deviceCount:1,jobCount:8,docs:9120,status:'active',superadmin:0,validUntil:day(9),country:'EG',note:'',tags:[],features:null,createdAt:'2026-05-04T08:40:00Z',lastSeen:iso(220)},
+      clients:[{rin:'318772041',company:'Cairo Print',voided:1,jobCount:8,docs:9120,lastExportAt:iso(1360)}],
+      devices:[{deviceId:'dev_77aa10bb42',version:'0.3.9',country:'EG',lastRin:'318772041',exports:8,docs:9120,lastSeen:iso(220)}],
+      jobs:[{jobId:'job_7b02c1d5',rin:'318772041',source:'Purchases',state:'running',done:11,total:40,createdAt:iso(96),updatedAt:iso(46)},
+            {jobId:'job_9c0b7744',rin:'318772041',source:'Purchases',state:'failed',done:14,total:30,createdAt:iso(1400)}],
+      bugs:[], audit:[{at:iso(1200),action:'setValidUntil',actor:'token',detail:{to:day(9)}}]};
+    if(em==='nour@fahmy.eg') return {ok:true,
+      user:{email:'nour@fahmy.eg',name:'Nour Fahmy',company:'Fahmy Tax',phone:'',plan:'standard',quota:5,clientCount:3,deviceCount:1,jobCount:44,docs:60110,status:'active',superadmin:0,validUntil:day(-6),country:'EG',note:'',tags:[],features:null,createdAt:'2026-01-19T12:00:00Z',lastSeen:iso(90)},
+      clients:[{rin:'552019887',company:'Delta Textiles',voided:0,jobCount:44,docs:60110,lastExportAt:iso(90)}],
+      devices:[{deviceId:'dev_5510cc9081',version:'0.4.1',country:'EG',lastRin:'552019887',exports:44,docs:60110,lastSeen:iso(90)}],
+      jobs:[{jobId:'job_3d19aa20',rin:'552019887',source:'Sales',state:'merging',done:36,total:36,createdAt:iso(58),updatedAt:iso(2)}],
+      bugs:[], audit:[]};
+    return {ok:true,
+    /* Plan pro grants auto-reject AND po-analytics; this account carries an
+       explicit override that keeps one and drops the other — the case the
+       Features panel exists to explain. */
+    user:{email:'hala@mansour.co',name:'Hala Mansour',company:'Mansour & Co',phone:'+20 100 555 0110',plan:'pro',quota:5,clientCount:4,deviceCount:2,jobCount:61,docs:184220,status:'active',superadmin:0,validUntil:day(23),country:'EG',note:'',tags:['priority'],features:['auto-reject'],createdAt:'2026-02-11T09:12:00Z',lastSeen:iso(6)},
     clients:[{rin:'204918377',company:'Nile Foods',voided:0,jobCount:31,docs:98220,lastExportAt:iso(6)},
              {rin:'552019887',company:'Delta Textiles',voided:0,jobCount:22,docs:71110,lastExportAt:iso(400)},
              {rin:'318772041',company:'Cairo Print',voided:1,jobCount:8,docs:14890,lastExportAt:iso(9000)}],
@@ -1619,18 +2440,94 @@ function demoGet(p){
     bugs:[{id:'bug_1',status:'open',at:iso(600),rin:'204918377',message:'Merge stalled at chunk 12 of 40.'}],
     audit:[{at:iso(31),action:'client.move',actor:'token',detail:{rin:'204918377'}},
            {at:iso(900),action:'setQuota',actor:'token',detail:{from:3,to:5}}]};
+  }
   if(p.indexOf('/api/clients')===0) return {ok:true,total:3,clients:[
     {rin:'204918377',company:'Nile Foods',userEmail:'hala@mansour.co',userName:'Hala Mansour',voided:0,jobCount:31,docs:98220,lastExportAt:iso(6)},
     {rin:'552019887',company:'Delta Textiles',userEmail:'hala@mansour.co',userName:'Hala Mansour',voided:0,jobCount:22,docs:71110,lastExportAt:iso(400)},
     {rin:'318772041',company:'Cairo Print',userEmail:'karim@adel.eg',userName:'Karim Adel',voided:1,jobCount:8,docs:14890,lastExportAt:iso(9000)}]};
   if(p.indexOf('/api/client?')===0) return {ok:true,
     client:{rin:'204918377',company:'Nile Foods',voided:0,jobCount:31,docs:98220,lastExportAt:iso(6),createdAt:'2026-03-02T10:00:00Z'},
-    user:{email:'hala@mansour.co',name:'Hala Mansour',company:'Mansour & Co',plan:'pro',status:'active',validUntil:'2026-09-01',lastSeen:iso(6)},
+    user:{email:'hala@mansour.co',name:'Hala Mansour',company:'Mansour & Co',plan:'pro',status:'active',validUntil:day(23),lastSeen:iso(6)},
     jobs:[{jobId:'job_8f21ac93',rin:'204918377',source:'Sales',state:'running',done:1840,total:4200,createdAt:iso(20)},
           {jobId:'job_2c99f180',rin:'204918377',source:'Sales',state:'done',done:3300,total:3300,createdAt:iso(2800)}]};
+  /* Slice 2 — jobs. Shapes copied from the contract:
+     job   { jobId,user,rin,source,dateField,dir,from,to,state,done,failed,total,rows,probes,version,createdAt,updatedAt }
+     chunk { idx,chunkId,from,to,subF,subT,label,count,warn,state } */
+  if(p.indexOf('/api/jobs')===0){
+    var all=demoJobs(iso);
+    var qs=function(k){ var m=new RegExp('[?&]'+k+'=([^&]*)').exec(p); return m?decodeURIComponent(m[1]):''; };
+    var st=qs('state'), us=qs('user'), rn=qs('rin'), sk=qs('stuck');
+    var out=all.filter(function(j){
+      if(st && String(j.state)!==st) return false;
+      if(us && String(j.user).toLowerCase().indexOf(us.toLowerCase())<0) return false;
+      if(rn && String(j.rin).indexOf(rn)<0) return false;
+      if(sk==='1' && !isStuck(j)) return false;
+      return true;
+    });
+    return {ok:true,total:out.length,jobs:out};
+  }
+  if(p.indexOf('/api/job?')===0){
+    var wanted=(/[?&]id=([^&]*)/.exec(p)||[])[1]||'';
+    wanted=decodeURIComponent(wanted);
+    var job=demoJobs(iso).filter(function(j){ return j.jobId===wanted; })[0]||demoJobs(iso)[0];
+    /* job_1188ef is the purged one — it keeps its history and returns no chunks. */
+    return {ok:true, job:job, chunks: job.jobId==='job_1188ef' ? [] : demoChunks(job)};
+  }
+  if(p.indexOf('/api/plans')===0) return {ok:true,plans:[
+    {id:'free',    name:'Free',     quota:1,  features:[],                           price:'—',                active:1},
+    {id:'standard',name:'Standard', quota:5,  features:['auto-reject'],              price:'EGP 4,800 / yr',   active:1},
+    {id:'pro',     name:'Pro',      quota:25, features:['auto-reject','po-analytics'],price:'EGP 18,000 / yr', active:1},
+    {id:'legacy',  name:'Legacy 2025',quota:3,features:['auto-rejct'],               price:'—',                active:0}]};
   if(p.indexOf('/api/stats')===0) return {ok:true,stats:{},cfg:{defaultQuota:1,globalKill:false,minVersion:'',killedVersions:[]}};
   if(p.indexOf('/api/health')===0) return {ok:true,health:{locksBound:true,kvOk:true,adminTokenSet:true,globalKill:false,minVersion:'',killedVersions:0,announcementActive:false}};
   return {ok:true,requests:[],bugs:[],voids:[],audit:[],errors:[],trash:[],snaps:[]};
+}
+function demoJobs(iso){
+  return [
+    {jobId:'job_8f21ac93',user:'hala@mansour.co',rin:'204918377',source:'Sales',dateField:'issue',dir:'desc',
+     from:'2026-07-01',to:'2026-07-31',state:'running',done:18,failed:0,total:42,rows:38410,probes:3,version:'0.4.1',
+     createdAt:iso(22),updatedAt:iso(1)},
+    {jobId:'job_3d19aa20',user:'nour@fahmy.eg',rin:'552019887',source:'Sales',dateField:'issue',dir:'asc',
+     from:'2026-06-01',to:'2026-06-30',state:'merging',done:36,failed:0,total:36,rows:91204,probes:2,version:'0.4.1',
+     createdAt:iso(58),updatedAt:iso(2)},
+    /* Wedged: running, last touched 46 minutes ago. This is the row the stuck
+       filter and the rail badge exist for. */
+    {jobId:'job_7b02c1d5',user:'karim@adel.eg',rin:'318772041',source:'Purchases',dateField:'received',dir:'desc',
+     from:'2026-05-01',to:'2026-05-31',state:'running',done:11,failed:1,total:40,rows:9120,probes:5,version:'0.3.9',
+     createdAt:iso(96),updatedAt:iso(46)},
+    {jobId:'job_9c0b7744',user:'karim@adel.eg',rin:'318772041',source:'Purchases',dateField:'received',dir:'desc',
+     from:'2026-04-01',to:'2026-04-30',state:'failed',done:14,failed:6,total:30,rows:11220,probes:9,version:'0.3.9',
+     createdAt:iso(1400),updatedAt:iso(1360)},
+    {jobId:'job_44ae0031',user:'hala@mansour.co',rin:'552019887',source:'Purchases',dateField:'issue',dir:'desc',
+     from:'2026-03-01',to:'2026-03-31',state:'done',done:24,failed:0,total:24,rows:70110,probes:1,version:'0.4.0',
+     createdAt:iso(420),updatedAt:iso(400)},
+    /* Purged: the history survives, the chunk detail does not. */
+    {jobId:'job_1188ef',user:'adel@sabry.eg',rin:'204918377',source:'Sales',dateField:'issue',dir:'desc',
+     from:'2026-01-01',to:'2026-01-31',state:'done',done:31,failed:0,total:31,rows:120480,probes:2,version:'0.3.7',
+     createdAt:iso(41000),updatedAt:iso(40800)}
+  ];
+}
+function demoChunks(j){
+  var total=Number(j.total||0), done=Number(j.done||0), failed=Number(j.failed||0), out=[], i;
+  var t0=Date.parse(j.from+'T00:00:00Z')||Date.now(), span=(86400000*30)/Math.max(1,total);
+  for(i=0;i<total;i++){
+    var a=new Date(t0+i*span), b=new Date(t0+(i+1)*span-1000);
+    var st = i<done ? 'done'
+           : i<done+failed ? 'failed'
+           : (i===done+failed && /run|merg/.test(j.state)) ? 'running' : 'pending';
+    var warn = st==='failed' ? 'ETA returned 500 on three consecutive attempts — chunk left for retry'
+             : (st==='done' && i%9===7) ? 'page 4 came back empty on the first attempt; the retry returned rows'
+             : '';
+    var split = (i%11===5);
+    out.push({idx:i+1, chunkId:j.jobId+'_c'+(i+1),
+      from:a.toISOString().slice(0,10), to:b.toISOString().slice(0,10),
+      subF: split?a.toISOString().slice(0,10):null,
+      subT: split?new Date(t0+(i+0.5)*span).toISOString().slice(0,10):null,
+      label:a.toISOString().slice(0,7)+(split?' · part 1':''),
+      count: st==='done' ? 40+((i*37)%420) : (st==='running'? null : 0),
+      warn:warn, state:st});
+  }
+  return out;
 }
 
 /* ── boot ─────────────────────────────────────────────────────────────────── */

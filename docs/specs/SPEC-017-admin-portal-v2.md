@@ -117,7 +117,10 @@ may change these unilaterally.
 
 ```
 GET  /api/jobs?state=&user=&rin=&stuck=&page=   → { jobs:[…], total }
-GET  /api/job?id=                               → { job, chunks:[…] }
+GET  /api/job?id=                               → { job, chunks:[…], purged }
+       purged  true when the plan was dropped by retention. An empty chunks[] means TWO opposite
+               things — retention worked, or the run died before planning — so it is stated, never
+               inferred by the caller.
 POST /api/job     { id, action }                actions: abandon | purge
        job    { jobId, user, rin, source, dateField, dir, from, to, state, done, failed,
                 total, rows, probes, version, createdAt, updatedAt }

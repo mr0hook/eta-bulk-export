@@ -3,12 +3,12 @@
 // when the path is not ours, so the entry router falls through.
 // Extracted verbatim from the pre-split worker.js (A0). Bodies are unchanged — only the module
 // header, imports and exports below are new.
-import { json, EMAIL_RE, cleanRin, randHex, isVersionBlocked } from '../lib/util.js';
-import { getDev, putDev, getCfg, isVoided, rinClaim, listPrefix, deviceRate } from '../lib/kv.js';
+import { json, EMAIL_RE, cleanRin, randHex, isVersionBlocked, isExpired } from '../lib/util.js';
+import { getDev, putDev, getCfg, isVoided, rinClaim, listPrefix, deviceRate, personHeld } from '../lib/kv.js';
 import { verifyEmail, verifySigned } from '../lib/auth.js';
 import { errlog } from '../lib/audit.js';
 import { computeVerdict } from '../lib/verdict.js';
-import { mirrorDevice } from '../users.js';
+import { mirrorDevice, resolveEntitlement } from '../users.js';
 
 export async function extensionRoutes(request, env, url, path) {
     // ── register (unsigned) ──────────────────────────────────────────────────
@@ -51,10 +51,21 @@ export async function extensionRoutes(request, env, url, path) {
       dev.emailVerified = ev.verified;
       dev.country = (request.cf && request.cf.country) || dev.country || '';
       dev.lastRin = rin; dev.lastSeen = now; dev.count = (dev.count || 0) + 1;
+      // SPEC-017 slice 3: the cap belongs to the PERSON, so count what they hold across every browser
+      // on this email — `dev.boundRins.length` counted one browser, which is exactly how a two-device
+      // user got two quotas out of one licence. The cap is the LARGER of the KV and D1 numbers: the
+      // legacy per-device setQuota in routes/admin.js writes KV only and the portal writes D1, so
+      // taking the smaller would silently confiscate an allowance an admin has already granted.
+      const held = await personHeld(env, email, dev);
+      let cap = dev.quota ?? 1;                       // ?? so a deliberate quota 0 binds nothing
+      try { const ent = await resolveEntitlement(env, email); if (ent) cap = Math.max(cap, ent.quotaEff); } catch {}
       // Bind + ATOMICALLY claim the RIN. Claim ONLY when we actually bind (never squat a RIN we're over quota to
       // hold). A losing claim means another account owns it → 409, with no half-bound record left behind.
       if (!dev.boundRins.includes(rin)) {
-        if (dev.boundRins.length < (dev.quota ?? 1)) {   // ?? so a deliberate quota 0 binds nothing
+        // Grandfather rule (SPEC-017): someone already over the cap KEEPS every RIN they hold and
+        // simply cannot add another. Retroactively confiscating one would break an export mid-quarter
+        // — a far worse failure for the user than one legacy over-allowance is for us.
+        if (held.rins.size < cap) {
           const claim = await rinClaim(env, rin, deviceId);
           if (!claim.ok) return regFail('rin_claimed', 'This registration number is already registered to another account. If this is your RIN (e.g. you cleared browser storage or moved devices), ask the admin to move it to your account.', 409);
           dev.boundRins.push(rin);
@@ -72,8 +83,19 @@ export async function extensionRoutes(request, env, url, path) {
       // or a deployment where /api/migrate has not yet created the tables — must never fail a
       // registration that has already succeeded. The next migration run picks the record up.
       try { await mirrorDevice(env, dev); } catch (e) { await errlog(env, request, 'dualwrite_fail', { msg: String((e && e.message) || e).slice(0, 120) }); }
-      const allowed = dev.boundRins.includes(rin) && !dev.locked && !dev.killed && !cfg.globalKill;
-      return json({ ok: true, clientKey: dev.clientKey, features: dev.features, boundRins: dev.boundRins, quota: dev.quota, allowed });
+      // Features and quota are reported AFTER the dual-write, so a user whose plan already exists in
+      // D1 sees their real entitlement on the very first screen instead of an empty list that only
+      // fills in on the next check-in — the gap would read as "my plan did not apply".
+      let feats = dev.features || [], expired = false;
+      try {
+        const ent = await resolveEntitlement(env, email);
+        if (ent) { if (ent.features.length) feats = ent.features; cap = Math.max(cap, ent.quotaEff); expired = isExpired(ent.validUntil); }
+      } catch {}
+      // Expiry counts here too. /register reporting allowed:true to someone whose licence lapsed,
+      // only for the first /session seconds later to say otherwise, would read as the tool breaking
+      // immediately after a successful registration rather than as a plan that needs renewing.
+      const allowed = dev.boundRins.includes(rin) && !dev.locked && !dev.killed && !cfg.globalKill && !(expired && !dev.superadmin);
+      return json({ ok: true, clientKey: dev.clientKey, features: feats, boundRins: dev.boundRins, quota: cap, allowed });
     }
 
     // ── session check-in (signed) — the enforcement source of truth ──────────
@@ -108,7 +130,11 @@ export async function extensionRoutes(request, env, url, path) {
       }));
       // Verdict comes from the shared rules — /plan/start enforces the identical function, so a
       // device this endpoint reports as blocked cannot mint a job. See lib/verdict.js.
-      const { allowed, locked, killed, globalKill, reason, superadmin: sa } = await computeVerdict(env, dev, { rin, version, cfg });
+      // features/quota come back RESOLVED (plan → per-user override → the KV record as a last
+      // resort). The extension has always received `features` and read it nowhere; slice 3 makes
+      // this the first payload it is expected to gate on, so it must describe the person's plan and
+      // not the browser's stale copy of it.
+      const { allowed, locked, killed, globalKill, expired, reason, superadmin: sa, features, quota } = await computeVerdict(env, dev, { rin, version, cfg });
       // Optional broadcast banner: the admin sets cfg.announcement { text, level, until? }; every allowed
       // extension surfaces it (a soft channel that isn't the kill-switch sledgehammer). Expired/empty → omit.
       let announcement = null;
@@ -116,7 +142,7 @@ export async function extensionRoutes(request, env, url, path) {
       if (ann && ann.text && (!ann.until || Date.parse(ann.until) > Date.now())) {
         announcement = { text: String(ann.text).slice(0, 400), level: ann.level === 'warn' || ann.level === 'alert' ? ann.level : 'info', id: ann.id || '' };
       }
-      return json({ ok: true, allowed, locked, killed, globalKill, reason, superadmin: sa, features: dev.features || [], boundRins: dev.boundRins || [], quota: dev.quota ?? 1, canRequestRin: true, announcement, message: dev.message || null });
+      return json({ ok: true, allowed, locked, killed, expired, globalKill, reason, superadmin: sa, features, boundRins: dev.boundRins || [], quota, canRequestRin: true, announcement, message: dev.message || null });
     }
 
     // ── request another RIN (signed) ─────────────────────────────────────────

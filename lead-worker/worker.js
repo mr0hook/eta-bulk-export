@@ -22,7 +22,13 @@
 //   GET  /api/dashboard            counters, live runs, alerts, recent events
 //   GET  /api/users|user?email=    people (not devices) · POST /api/user { email, action, value }
 //   GET  /api/clients|client?rin=  one row per TRN · POST /api/client { rin, action, value }
+//   GET  /api/jobs|job?id=         export runs (filter state/user/rin/stuck) · POST /api/job { id, action }
+//   GET  /api/plans                sellable plans · POST /api/plan (upsert) · POST /api/plan/delete
 //   POST /api/migrate              rebuild users/clients/devices from the KV dev: records (idempotent)
+//
+// Entitlement (SPEC-017 slice 3) is decided in src/lib/verdict.js from the PERSON's D1 row: features
+// come from their plan (a per-user override wins), an expired valid_until returns reason:'expired'
+// from both /session and /plan/start, and quota is counted across every device on their email.
 //
 // Version kill switch: the extension sends its `version` in /register and /session; if it is below
 // cfg.minVersion or listed in cfg.killedVersions, /session returns allowed:false, reason:'update_required'

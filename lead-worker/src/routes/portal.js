@@ -7,6 +7,11 @@
 //   POST /api/client      { rin, action, value }
 //   POST /api/migrate     rebuild users/clients/devices from the KV dev: records (idempotent)
 //
+// Slice 2 adds the Jobs section and slice 3 the plans that entitlement now reads:
+//   GET  /api/jobs        every run, filterable by state/user/rin and by `stuck=1`
+//   GET  /api/job?id=     one run with its chunk plan · POST /api/job { id, action:abandon|purge }
+//   GET  /api/plans       the sellable plans · POST /api/plan (upsert) · POST /api/plan/delete
+//
 // These read D1 while the extension API still enforces from KV — that split is deliberate and lasts
 // until slice 3. Two consequences are load-bearing:
 //   · the state changes that KV can actually enforce (lock/kill/super/quota/features/void) are
@@ -24,10 +29,15 @@ import { audit } from '../lib/audit.js';
 import {
   hasDb, ensureSchema, migrate, listUsers, getUser, listClients, getClient, listDevices,
   listJobs, listActiveJobs, dashboardStats, listExpiring, setUserField, deleteUser,
-  setClientVoided, moveClient,
+  setClientVoided, moveClient, listJobsPage, getJobRow, setJobState, purgeJobChunks,
+  listPlans, getPlan, upsertPlan, deletePlan, countPlanUsers,
 } from '../users.js';
+import { getChunks } from '../jobs.js';
 
-const OURS = new Set(['/api/dashboard', '/api/users', '/api/user', '/api/clients', '/api/client', '/api/migrate']);
+const OURS = new Set([
+  '/api/dashboard', '/api/users', '/api/user', '/api/clients', '/api/client', '/api/migrate',
+  '/api/jobs', '/api/job', '/api/plans', '/api/plan', '/api/plan/delete',
+]);
 
 const STALE_MS = 30 * 60000;      // a run that hasn't checkpointed in half an hour is stuck, not slow
 const EXPIRY_DAYS = 14;           // "expiring soon" — long enough to renew, short enough to matter
@@ -234,6 +244,92 @@ export async function portalRoutes(request, env, url, path, admin) {
     return json({ ok: true, client: shapeClient(await getClient(env, rin)) });
   }
 
+  // ── jobs (slice 2) ──────────────────────────────────────────────────────────────────────────────
+  if (request.method === 'GET' && path === '/api/jobs') {
+    const { jobs, total } = await listJobsPage(env, {
+      state: url.searchParams.get('state') || '', userEmail: url.searchParams.get('user') || '',
+      rin: url.searchParams.get('rin') || '', stuck: url.searchParams.get('stuck') === '1',
+      page: url.searchParams.get('page') || 1,
+      // The 30-minute line is computed HERE and bound as a value, so "stuck" means the same thing on
+      // the dashboard alerts and in this filter — two hard-coded intervals would drift.
+      staleBefore: new Date(Date.now() - STALE_MS).toISOString(),
+    });
+    return json({ ok: true, jobs: jobs.map(shapeJob), total });
+  }
+
+  if (request.method === 'GET' && path === '/api/job') {
+    const id = jobId(url.searchParams.get('id'));
+    const job = id ? await getJobRow(env, id) : null;
+    if (!job) return json({ ok: false, error: 'no such job' }, 404);
+    // Empty for a finished run: chunks are dropped at 'done' (jobs.js checkpoint) and by `purge`
+    // below. That is the retention rule, not a missing record — the job row still says what ran.
+    const chunks = await getChunks(env, id);
+    // State it rather than leave the UI to infer it. "The plan was purged" and "this job never had a
+    // plan" produce the same empty array but mean opposite things to whoever is reading the screen —
+    // one is retention working, the other is a run that failed before it planned anything.
+    const purged = chunks.length === 0 && (job.total_chunks | 0) > 0;
+    return json({ ok: true, job: shapeJob(job), chunks: chunks.map(shapeChunk), purged });
+  }
+
+  if (request.method === 'POST' && path === '/api/job') {
+    const id = jobId(b.id);
+    const job = id ? await getJobRow(env, id) : null;
+    if (!job) return json({ ok: false, error: 'no such job' }, 404);
+
+    if (b.action === 'abandon') {
+      // 'abandoned' is also the state /job/resumable excludes, so this does both halves of the job:
+      // the run stops counting as live on the dashboard AND the drawer stops offering the user a
+      // resume that support has already written off.
+      await setJobState(env, id, 'abandoned');
+    } else if (b.action === 'purge') {
+      // The chunk rows only — the jobs row survives, exactly as checkpoint() does on 'done'. What
+      // was exported stays in the history; the range-by-range working detail about a taxpayer's
+      // activity does not. The user-visible cost: an unfinished run purged this way can no longer be
+      // resumed (/job/plan answers 410), which is why it is an explicit button and not a sweeper.
+      await purgeJobChunks(env, id);
+    } else {
+      return json({ ok: false, error: 'unknown action' }, 400);
+    }
+    await audit(env, 'job:' + b.action, id, { action: b.action, user: job.user_email || '', rin: job.rin || '' }, 'token');
+    return json({ ok: true, job: shapeJob(await getJobRow(env, id)) });
+  }
+
+  // ── plans (slice 3) ─────────────────────────────────────────────────────────────────────────────
+  // ensureSchema first: the plans table and its three defaults are what entitlement resolves
+  // against, and an environment where /api/migrate has never run would otherwise show an empty
+  // Plans tab that silently means "nobody has any features".
+  if (request.method === 'GET' && path === '/api/plans') {
+    await ensureSchema(env);
+    return json({ ok: true, plans: (await listPlans(env)).map(shapePlan) });
+  }
+
+  if (request.method === 'POST' && path === '/api/plan') {
+    await ensureSchema(env);
+    const id = String(b.id || '').trim().toLowerCase().slice(0, 40);
+    if (!id) return json({ ok: false, error: 'plan id required' }, 400);
+    const features = toList(b.features).slice(0, 40);
+    await upsertPlan(env, {
+      id, name: b.name || id, quota: b.quota, features, price: b.price,
+      active: b.active === undefined ? true : !!b.active,       // omitted means active: a new plan nobody can be put on is not a plan
+    });
+    await audit(env, 'plan:upsert', id, { quota: b.quota | 0, features }, 'token');
+    return json({ ok: true, plan: shapePlan(await getPlan(env, id)) });
+  }
+
+  if (request.method === 'POST' && path === '/api/plan/delete') {
+    const id = String(b.id || '').trim().toLowerCase().slice(0, 40);
+    if (!id) return json({ ok: false, error: 'plan id required' }, 400);
+    const n = await countPlanUsers(env, id);
+    // Refused, never cascaded. Deleting a plan out from under its users would resolve their features
+    // and their plan quota to nothing on the next check-in — a silent downgrade nobody asked for and
+    // nobody would see until a user reported a missing tab. Name the count so the admin can judge
+    // the size of the move they are being asked to make first.
+    if (n) return json({ ok: false, error: n + ' user' + (n === 1 ? ' is' : 's are') + " still on plan '" + id + "' — move them to another plan first", users: n }, 409);
+    await deletePlan(env, id);
+    await audit(env, 'plan:delete', id, {}, 'token');
+    return json({ ok: true, deleted: true });
+  }
+
   // ── migration ───────────────────────────────────────────────────────────────────────────────────
   if (request.method === 'POST' && path === '/api/migrate') {
     await ensureSchema(env);
@@ -308,9 +404,23 @@ const shapeDevice = (d) => ({
   exports: d.exports | 0, docs: d.docs | 0, pdfs: d.pdfs | 0, createdAt: d.created_at || '',
 });
 
-const shapeJob = (j) => ({
+const jobId = (v) => String(v || '').trim().replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64);
+
+const shapeJob = (j) => j && ({
   jobId: j.id, user: j.user_email || '', rin: j.rin || '', source: j.source || '',
-  dateField: j.date_field || '', from: j.from_iso || '', to: j.to_iso || '', state: j.state,
-  done: j.done_count | 0, failed: j.failed_count | 0, total: j.total_chunks | 0, rows: j.total_rows | 0,
+  dateField: j.date_field || '', dir: j.dir || '', from: j.from_iso || '', to: j.to_iso || '',
+  state: j.state, done: j.done_count | 0, failed: j.failed_count | 0, total: j.total_chunks | 0,
+  rows: j.total_rows | 0, probes: j.probes | 0, version: j.version || '',
   createdAt: j.created_at || '', updatedAt: j.updated_at || '',
+});
+
+const shapeChunk = (c) => ({
+  idx: c.idx | 0, chunkId: c.chunk_id || '', from: c.from_iso || '', to: c.to_iso || '',
+  subF: c.sub_f || '', subT: c.sub_t || '', label: c.label || '', count: c.count | 0,
+  warn: c.warn || '', state: c.state || 'pending',
+});
+
+const shapePlan = (p) => p && ({
+  id: p.id, name: p.name || p.id, quota: p.quota | 0, features: parseJson(p.features, []),
+  price: p.price || '', active: !!p.active,
 });

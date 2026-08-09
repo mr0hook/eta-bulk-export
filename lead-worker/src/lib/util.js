@@ -36,4 +36,18 @@ const isVersionBlocked = (cfg, v) => {
   return false;
 };
 
-export { CORS, json, EMAIL_RE, enc, nowSec, hex, sha256hex, hmacHex, randHex, cleanRin, ctEq, cmpVersion, isVersionBlocked };
+// SPEC-017 slice 3 — has this licence run out?
+//   · a bare date is stretched to the END of that day: "valid until 2026-08-09" means through the
+//     9th, not until midnight UTC at the start of it, which in Cairo is 2am on the 9th — a user
+//     would lose the tool the night before the date printed on their invoice;
+//   · blank means no expiry, not "expired at the epoch";
+//   · an unparseable value is treated as NOT expired. A typo in an admin field must not lock a
+//     paying user out of an export; the portal is where a wrong date is visible and fixable.
+const isExpired = (validUntil, now = Date.now()) => {
+  const v = String(validUntil || '').trim();
+  if (!v) return false;
+  const t = Date.parse(v.length <= 10 ? v + 'T23:59:59.999Z' : v);
+  return Number.isFinite(t) && t < now;
+};
+
+export { CORS, json, EMAIL_RE, enc, nowSec, hex, sha256hex, hmacHex, randHex, cleanRin, ctEq, cmpVersion, isVersionBlocked, isExpired };

@@ -3,8 +3,9 @@
 // Extracted verbatim from the pre-split worker.js (A0). Bodies are unchanged — only the module
 // header, imports and exports below are new.
 import { json, CORS, cleanRin, randHex } from '../lib/util.js';
-import { devKey, getDev, putDev, listPrefix, withSeen, listKeys, getCfg, isVoided, rinOwnerGet, rinClaim, rinRelease } from '../lib/kv.js';
+import { devKey, getDev, putDev, listPrefix, withSeen, listKeys, getCfg, isVoided, rinOwnerGet, rinClaim, rinRelease, personHeld } from '../lib/kv.js';
 import { audit } from '../lib/audit.js';
+import { resolveEntitlement } from '../users.js';
 import DASH from '../assets/dash.html';
 import PRIVACY_HTML from '../assets/privacy.html';
 
@@ -214,9 +215,18 @@ export async function adminRoutes(request, env, url, path, admin) {
         if (b.action === 'approve') {
           const dev = await getDev(env, r.deviceId);
           if (dev && !dev.boundRins.includes(r.requestedRin)) {
+            // SPEC-017 slice 3: the cap is the PERSON's, counted across every device on their email.
+            // This used to raise dev.quota to fit whatever was approved, which meant the cap said
+            // nothing the moment anyone asked — approving was the supported way around it. Refusing
+            // makes the decision visible: an admin who wants to grant more raises the quota or the
+            // plan first, and that shows up in the audit trail as the entitlement change it is.
+            const held = await personHeld(env, dev.email, dev);
+            let cap = dev.quota ?? 1;
+            try { const ent = await resolveEntitlement(env, dev.email); if (ent) cap = Math.max(cap, ent.quotaEff); } catch {}
+            if (held.rins.size >= cap) return json({ ok: false, error: 'cannot approve — ' + (dev.email || 'this user') + ' already holds ' + held.rins.size + ' of ' + cap + ' clients across ' + held.devices + ' device(s). Raise their quota or plan first.' }, 409);
             const claim = await rinClaim(env, r.requestedRin, dev.deviceId);
             if (!claim.ok) return json({ ok: false, error: 'cannot approve — ' + r.requestedRin + ' is owned by another account (' + String(claim.owner || '').slice(0, 8) + ').' }, 409);
-            dev.boundRins.push(r.requestedRin); if (dev.boundRins.length > dev.quota) dev.quota = dev.boundRins.length; await putDev(env, dev);
+            dev.boundRins.push(r.requestedRin); await putDev(env, dev);
           }
           r.status = 'approved';
         } else r.status = 'denied';

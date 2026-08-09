@@ -44,8 +44,19 @@ const DDL = [
      id TEXT PRIMARY KEY, name TEXT, quota INTEGER, features TEXT, price TEXT, active INTEGER DEFAULT 1)`,
 ];
 
+// SPEC-017 slice 3 — the plans the product actually sells. Seeded from ensureSchema() rather than
+// from migrate(), because plans are not backfilled data: every users row points at one by name, and
+// on an environment where /api/migrate has never run a missing 'free' row would resolve every user's
+// features to nothing. INSERT OR IGNORE, never REPLACE — re-running must not undo an admin's edits.
+const DEFAULT_PLANS = [
+  { id: 'free', name: 'Free', quota: 1, features: [], price: '' },
+  { id: 'standard', name: 'Standard', quota: 5, features: ['auto-reject'], price: '' },
+  { id: 'pro', name: 'Pro', quota: 25, features: ['auto-reject', 'po-analytics'], price: '' },
+];
+
 /**
- * Create the portal tables if they are absent and give `jobs` its user_email column.
+ * Create the portal tables if they are absent, seed the default plans, and give `jobs` its
+ * user_email column.
  *
  * The column is the awkward one: SQLite has no `ADD COLUMN IF NOT EXISTS`, and a duplicate-column
  * error thrown mid-migration would abort everything after it. So ask the catalogue rather than
@@ -62,6 +73,9 @@ export async function ensureSchema(env) {
     try { await env.JOBS.prepare('ALTER TABLE jobs ADD COLUMN user_email TEXT').run(); } catch {}
   }
   await env.JOBS.prepare('CREATE INDEX IF NOT EXISTS jobs_user_created ON jobs (user_email, created_at DESC)').run();
+  await env.JOBS.batch(DEFAULT_PLANS.map((p) => env.JOBS.prepare(
+    `INSERT OR IGNORE INTO plans (id, name, quota, features, price, active) VALUES (?,?,?,?,?,1)`,
+  ).bind(p.id, p.name, p.quota, JSON.stringify(p.features), p.price)));
   return true;
 }
 
@@ -371,17 +385,77 @@ export async function listDevices(env, email) {
   return rows(r);
 }
 
+// Every column the SPEC-017 job shape needs, in one list — /api/jobs, /api/job and the drill-ins all
+// render the same row, and a column missing from one of them would show as a blank field rather than
+// as an error.
+const JOB_COLS = `id, user_email, device_id, rin, source, date_field, dir, from_iso, to_iso, state,
+       total_chunks, total_rows, done_count, failed_count, probes, version, created_at, updated_at`;
+
 /** One statement serves three callers: a user's jobs, a client's jobs, and the dashboard feed. */
 export async function listJobs(env, f = {}) {
   if (!hasDb(env)) return [];
   const email = S(f.userEmail, 254).toLowerCase(), rin = cleanRin(f.rin);
   const r = await env.JOBS.prepare(
-    `SELECT id, user_email, device_id, rin, source, date_field, from_iso, to_iso, state,
-            total_chunks, total_rows, done_count, failed_count, created_at, updated_at
+    `SELECT ${JOB_COLS}
        FROM jobs WHERE (? = '' OR user_email = ?) AND (? = '' OR rin = ?)
       ORDER BY created_at DESC LIMIT ?`,
   ).bind(email, email, rin, rin, N(f.limit) || 50).all();
   return rows(r);
+}
+
+// The Jobs section (slice 2). `stuck` is the support question "is anything wedged right now" as one
+// predicate: only a run that claims to be MOVING can be wedged, so 'planned' — a plan waiting for
+// the user to press Download — is deliberately excluded however old it is.
+const JOB_WHERE = `WHERE (? = '' OR state = ?)
+   AND (? = '' OR user_email = ?)
+   AND (? = '' OR rin = ?)
+   AND (? = 0 OR (state IN ('running','merging') AND updated_at < ?))`;
+
+const jobFilterBinds = (f) => {
+  const state = S(f.state, 16), email = S(f.userEmail, 254).toLowerCase(), rin = cleanRin(f.rin);
+  return [state, state, email, email, rin, rin, f.stuck ? 1 : 0, S(f.staleBefore, 40)];
+};
+
+export async function listJobsPage(env, f = {}) {
+  if (!hasDb(env)) return { jobs: [], total: 0 };
+  const page = Math.max(1, N(f.page) || 1);
+  const binds = jobFilterBinds(f);
+  const total = await env.JOBS.prepare(`/* jobs page */ SELECT COUNT(*) AS n FROM jobs ${JOB_WHERE}`).bind(...binds).first();
+  const r = await env.JOBS.prepare(
+    `/* jobs page */ SELECT ${JOB_COLS} FROM jobs ${JOB_WHERE} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+  ).bind(...binds, PAGE, (page - 1) * PAGE).all();
+  return { jobs: rows(r), total: (total && total.n) | 0 };
+}
+
+/**
+ * One job for the portal. NOT device-scoped, unlike jobs.js getJob(): there the job id is a
+ * bearer-ish handle and one device must never drive another's run, here the admin token is the
+ * authority and the whole point is to look at somebody else's job.
+ */
+export async function getJobRow(env, id) {
+  if (!hasDb(env)) return null;
+  const r = await env.JOBS.prepare(`/* job row */ SELECT ${JOB_COLS} FROM jobs WHERE id = ?`).bind(S(id, 64)).first();
+  return r || null;
+}
+
+/** Admin state change on a job (abandon). Counters are left alone — they are the run's history. */
+export async function setJobState(env, id, state) {
+  if (!hasDb(env)) return false;
+  await env.JOBS.prepare('UPDATE jobs SET state = ?, updated_at = ? WHERE id = ?')
+    .bind(S(state, 16), nowIso(), S(id, 64)).run();
+  return true;
+}
+
+/**
+ * Drop a job's working rows, keeping its history row — the SAME retention rule checkpoint() applies
+ * when a run reaches 'done'. Not device-scoped for the same reason as getJobRow. The user-visible
+ * cost is real and worth stating: /job/plan answers 410 afterwards, so a run purged mid-flight can
+ * no longer be resumed. That is why this is an explicit admin action and not something inferred.
+ */
+export async function purgeJobChunks(env, id) {
+  if (!hasDb(env)) return false;
+  await env.JOBS.prepare('/* admin */ DELETE FROM job_chunks WHERE job_id = ?').bind(S(id, 64)).run();
+  return true;
 }
 
 export async function listActiveJobs(env) {
@@ -417,6 +491,86 @@ export async function listExpiring(env, horizon) {
       ORDER BY valid_until ASC LIMIT 10`,
   ).bind(horizon).all();
   return rows(r);
+}
+
+// ── plans + entitlement (slice 3) ─────────────────────────────────────────────────────────────────
+const parseList = (v) => { try { const p = JSON.parse(v); return Array.isArray(p) ? p.map(String) : []; } catch { return []; } };
+
+export async function listPlans(env) {
+  if (!hasDb(env)) return [];
+  const r = await env.JOBS.prepare(
+    '/* plans */ SELECT id, name, quota, features, price, active FROM plans ORDER BY quota ASC, id ASC',
+  ).all();
+  return rows(r);
+}
+
+export async function getPlan(env, id) {
+  if (!hasDb(env)) return null;
+  const r = await env.JOBS.prepare('/* plan */ SELECT id, name, quota, features, price, active FROM plans WHERE id = ?')
+    .bind(S(id, 40).toLowerCase()).first();
+  return r || null;
+}
+
+export async function upsertPlan(env, p) {
+  if (!hasDb(env)) return false;
+  await env.JOBS.prepare(
+    `INSERT INTO plans (id, name, quota, features, price, active) VALUES (?,?,?,?,?,?)
+     ON CONFLICT(id) DO UPDATE SET name = excluded.name, quota = excluded.quota,
+       features = excluded.features, price = excluded.price, active = excluded.active`,
+  ).bind(
+    S(p.id, 40).toLowerCase(), S(p.name, 60), N(p.quota),
+    JSON.stringify(Array.isArray(p.features) ? p.features.map(String) : []), S(p.price, 60),
+    p.active ? 1 : 0,
+  ).run();
+  return true;
+}
+
+/** How many users would be orphaned by deleting this plan. The delete route refuses on any count. */
+export async function countPlanUsers(env, id) {
+  if (!hasDb(env)) return 0;
+  const r = await env.JOBS.prepare('/* plan users */ SELECT COUNT(*) AS n FROM users WHERE plan = ?')
+    .bind(S(id, 40).toLowerCase()).first();
+  return (r && r.n) | 0;
+}
+
+export async function deletePlan(env, id) {
+  if (!hasDb(env)) return false;
+  await env.JOBS.prepare('DELETE FROM plans WHERE id = ?').bind(S(id, 40).toLowerCase()).run();
+  return true;
+}
+
+/**
+ * What this PERSON is entitled to, resolved once and used by every gate.
+ *
+ * Returns null when there is no D1 row for them — a pre-migration install, or a device that has
+ * never registered since slice 1 shipped. Callers must fall back to the KV `dev:` record in that
+ * case: activation is meant to bind the plan, not to strip entitlements off installs the portal has
+ * not met yet.
+ *
+ *   features   the per-user override when set, otherwise the plan's grant. An empty override means
+ *              "unset", the same reading migrate() uses ('' / '[]'), so clearing an override hands
+ *              the user back to their plan rather than to nothing.
+ *   quotaEff   MAX(user, plan). The user column is what an admin typed by hand or what the migration
+ *              recovered from KV; the plan column is what the label promises. Taking the larger of
+ *              the two means moving somebody onto a bigger plan actually raises their cap, while a
+ *              bespoke allowance survives a plan rename. Lowering a cap stays an explicit setQuota.
+ */
+export async function resolveEntitlement(env, email) {
+  if (!hasDb(env) || !email) return null;
+  const u = await env.JOBS.prepare(
+    `/* entitlement */ SELECT email, plan, quota, valid_until, features, status FROM users WHERE email = ?`,
+  ).bind(String(email).trim().toLowerCase()).first();
+  if (!u) return null;
+  const plan = S(u.plan || 'free', 40);
+  const p = await getPlan(env, plan);
+  const own = parseList(u.features);
+  const planFeatures = (p && p.active) ? parseList(p.features) : [];
+  const planQuota = (p && p.active) ? N(p.quota) : 0;
+  return {
+    email: S(u.email, 254), plan, status: S(u.status || 'active', 16), validUntil: S(u.valid_until, 40),
+    quota: N(u.quota), planQuota, quotaEff: Math.max(N(u.quota), planQuota),
+    features: own.length ? own : planFeatures, override: own.length > 0,
+  };
 }
 
 // ── writes from the portal ────────────────────────────────────────────────────────────────────────
