@@ -5,7 +5,7 @@
 // is testable: a user who never opens Advanced must get the SAME documents as a fully-configured
 // run of the old three-card form. See test/flow.test.mjs (T-163…T-170).
 import { SOURCES, ALL_STATUSES } from '../api/sources.js';
-import { EN, AR } from '../core/i18n.js';
+import { EN, AR, t } from '../core/i18n.js';
 import { lsGet, lsSet } from '../core/ls.js';
 import { runKey } from '../core/store.js';
 
@@ -107,6 +107,26 @@ export function buildSel(kind, range, adv) {
     downloadPdf: a.downloadPdf,
     excludeColumns: [...a.excludeColumns],
   };
+}
+
+// ── /register refusals ───────────────────────────────────────────────────────────────────────────
+// SPEC-019 gave the device cap its own `reason`, and a reason exists to be read. Flattening
+// `reason:'device_limit'` into the generic server-error line would tell a user holding four browsers
+// on a one-device plan only that "something went wrong", which is the one reading that makes them
+// re-register — the exact action that cannot help and the exact fear the message must answer.
+//
+// Pure on purpose: it takes the parsed /register body and returns the line to show, so the two
+// counts and the wording are testable without a drawer. `held`/`allowed` are coerced here because
+// they arrive as JSON and a missing count must read as 0, never as "undefined devices".
+//
+// Any other refusal returns null — the caller keeps whatever it already said. A refusal this module
+// does not recognise is not this module's to phrase.
+export function registerRefusal(res) {
+  const r = res && typeof res === 'object' ? res : {};
+  if (r.ok || r.reason !== 'device_limit') return null;
+  const held = Math.max(0, Math.trunc(Number(r.held) || 0));
+  const allowed = Math.max(0, Math.trunc(Number(r.allowed) || 0));
+  return { reason: 'device_limit', held, allowed, text: t('reg.deviceLimit', { held, allowed }) };
 }
 
 // ── the rejection tab gate ───────────────────────────────────────────────────────────────────────

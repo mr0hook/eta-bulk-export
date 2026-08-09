@@ -128,6 +128,10 @@ select{cursor:pointer}
   transition:color var(--d2),background var(--d2),border-color var(--d2)}
 .chip:hover{color:var(--text);border-color:var(--line2)}
 .chip.on{background:var(--accent-soft);border-color:color-mix(in srgb,var(--accent) 42%,transparent);color:var(--accent)}
+/* A retired catalogue id can be taken away but never newly granted — the server's
+   rule, shown before the click instead of as a refusal after it. */
+.chip[disabled]{opacity:.42;cursor:not-allowed}
+.chip[disabled]:hover{color:var(--muted);border-color:var(--line)}
 .chips{display:flex;gap:6px;flex-wrap:wrap}
 .chk{width:15px;height:15px;accent-color:var(--accent);cursor:pointer}
 kbd{font:500 11px var(--font-mono);background:var(--panel2);border:1px solid var(--line);
@@ -1050,6 +1054,32 @@ function allowance(u,kind){
   }
   return {value:eff, own:own, planValue:plv, src:src, derived:derived};
 }
+/* GET /api/user resolves the entitlement server-side and hands back BOTH numbers and
+   a `source` map — {clients,devices,features} each 'plan' | 'custom' | 'override'.
+   That map is the answer; allowance() above is only the fallback for the list
+   endpoint, whose rows arrive without one. Prefer the server wherever it spoke: it
+   read the plans table at resolve time and applied the custom rule, the table row
+   did not. `derived:false` is what drops the dashed border off the tag. */
+function entAllow(ent,u,kind){
+  if(!ent) return null;
+  var dev = kind==='device';
+  var val = numOr(dev ? ent.devices : ent.clients);
+  if(val==null) return null;
+  var told = (ent.source && ent.source[dev?'devices':'clients']) || null;
+  /* 'plan' is the map's word for "inherited"; the tag wants the plan's NAME, which
+     is the only thing that tells an admin which row to go and edit. */
+  var src = told==='plan' ? String(ent.plan||'') : (told || String(ent.plan||''));
+  return {
+    value: val,
+    own: numOr(dev ? f(u,'deviceQuota','device_quota') : (u&&u.quota)),
+    /* A custom account has no plan to compare against — planClients/planDevices come
+       back as 0 and mean "not applicable", not "zero allowed". */
+    planValue: ent.custom ? null : numOr(dev ? ent.planDevices : ent.planClients),
+    /* A server that sent the numbers but no `source` map has still only been half
+       read: keep the dashed tag, because the WHERE is then this file's inference. */
+    src: src, derived: !told
+  };
+}
 /* The tag itself. `from pro` (inherited) · `custom` (negotiated) · `override`
    (written on top of a plan). Dashed when the portal worked it out rather than
    being told, so nobody reads a guess as a fact. */
@@ -1372,6 +1402,169 @@ function bulk(action){
   });
 }
 
+/* ── the plan selector, with `custom` as a first-class choice ──────────────── */
+/* `custom` is not a tier and not a plan row: it is the account saying "my numbers
+   are written on me". It belongs in this list anyway, because the alternative is
+   an admin who has to KNOW that typing the word into the plan field detaches the
+   account — and the two moves in and out of it are the two most expensive edits
+   on this page, so both are gated by a warning that names the actual numbers. */
+function planChoices(cur){
+  var out=[], seen={};
+  (S.plans||[]).forEach(function(p){
+    if(!Number(p.active) && String(p.id)!==cur) return;      /* retired plans: only the one already in use */
+    seen[String(p.id)]=1;
+    out.push({id:String(p.id), label:String(p.id)
+      + ' — '+(p.quota==null?'∞':p.quota)+' clients, '+planDevices(p)+' device'+(planDevices(p)===1?'':'s')
+      + (Number(p.active)?'':' · retired')});
+  });
+  /* No /api/plans (or a plan the table does not know) must never mean "no way back":
+     the account's current plan is always selectable, even when nothing describes it. */
+  if(cur!=='custom' && !seen[cur]) out.unshift({id:cur, label:cur+(S.plansDone&&!S.plansErr?' — not in the plans table':' — plan details unknown')});
+  if(!out.length) ['free','standard','pro'].forEach(function(id){ if(id!==cur) out.push({id:id,label:id+' — plan details unknown'}); });
+  return out;
+}
+function planDevices(p){ var d=numOr(f(p,'deviceQuota','device_quota')); return d==null?1:d; }
+function planClients(p){ var c=numOr(p&&p.quota); return c==null?0:c; }
+function planPicker(u,v){
+  var cur=String(u.plan||'free');
+  var opts=planChoices(cur).map(function(o){
+    return '<option value="'+esc(o.id)+'"'+(o.id===cur?' selected':'')+'>'+esc(o.label)+'</option>'; }).join('');
+  var custom='<option value="custom"'+(cur==='custom'?' selected':'')+'>custom — negotiated on this account, no plan consulted</option>';
+  var bar = v.custom
+    ? '<div class="srcbar ovr"><span class="pill accent">CUSTOM</span>'
+      + '<span style="flex:1;min-width:180px">Detached from the plans table. Its allowances and features are read from the account verbatim — '
+      + 'the <span class="mono">MAX(account, plan)</span> rule does <b>not</b> apply here, which is the only way a cap can be negotiated <b>lower</b> than a standard plan. '
+      + 'No edit to any plan can reach this account.</span></div>'
+    : '<div class="srcbar"><span class="pill muted">ON A PLAN</span>'
+      + '<span style="flex:1;min-width:180px">Everything not written on the account itself comes from plan <b>'+esc(cur)+'</b>, '
+      + 'and every allowance resolves to <span class="mono">MAX(account, plan)</span> — so moving this account to a bigger plan is never a downgrade by accident.</span></div>';
+  return bar
+    + '<div class="field" style="margin-bottom:0"><label>Plan</label>'
+    + '<select id="uplanpick">'+opts+custom+'</select>'
+    + '<div class="usub" style="margin-top:6px">Changing this writes <span class="mono">setPlan</span>. Moving in or out of <b>custom</b> asks first — both directions rewrite what the account gets.</div></div>';
+}
+/* Everything the two warnings need, in the words the admin is looking at. */
+function effLine(u,v){
+  var ent=(S.user&&S.user.entitlement)||null;
+  var aq=entAllow(ent,u,'quota')||allowance(u,'quota'), ad=entAllow(ent,u,'device')||allowance(u,'device');
+  return {
+    clients: aq.value==null?'unlimited':String(aq.value),
+    devices: ad.value==null?'unlimited':String(ad.value),
+    feats: (v.eff&&v.eff.length)?v.eff.join(', '):'none',
+    q:aq, d:ad
+  };
+}
+function changePlan(email,next){
+  var u=(S.user&&S.user.user)||{}, cur=String(u.plan||'free');
+  next=String(next||'');
+  if(!next||next===cur){ paint(); return; }
+  var v=featureView(u), e=effLine(u,v);
+  var apply=function(){ actUser(email,'setPlan',next).then(function(j){ if(j.ok){ toast('Plan set to '+next,'ok'); S.custEdit=null; afterUserEdit(email); } else paint(); }); };
+
+  /* OFF custom. The expensive direction: the negotiated figures stop being the only
+     source and go back through MAX(account, plan), so anything negotiated BELOW the
+     plan is gone the moment this saves. Say which numbers, and say which survive. */
+  if(cur==='custom'){
+    var p=planById(next);
+    var pc=p?planClients(p):null, pd=p?planDevices(p):null;
+    var pf=p?(featList(p.features)||[]):null;
+    modal({title:'Move this account off custom to “'+next+'”?',
+      message:'Custom means this account’s numbers are written on the account itself: '+e.clients+' clients, '+e.devices+' devices, and the feature list '+e.feats+'. '
+        + 'Moving it to “'+next+'” hands it back to the plan and to the MAX(account, plan) rule. '
+        + (p ? 'Plan “'+next+'” gives '+pc+' clients, '+pd+' device'+(pd===1?'':'s')+' and '+(pf&&pf.length?pf.join(', '):'no features')+'. ' : 'The plan’s own numbers are not loaded, so what this account will get cannot be shown here. ')
+        + 'Every negotiated figure lower than the plan’s is replaced by the plan’s and cannot be recovered from this screen; only a figure larger than the plan’s survives, as a per-account override. '
+        + 'Features come from “'+next+'” unless an explicit per-account list is kept. '
+        + 'Write the negotiated numbers down now if you may ever need them back.',
+      confirmText:'Replace with '+next, danger:true}).then(function(ok){ if(ok) apply(); else paint(); });
+    return;
+  }
+
+  /* ONTO custom. Detaching is not itself a downgrade — but reading the account
+     verbatim can be one, because `quota` and `device_quota` may be blank or smaller
+     than the plan was giving. So the switch WRITES today's effective numbers onto
+     the account first and flips the plan last: the moment of the change grants
+     exactly what it granted a second earlier, and negotiating starts from there. */
+  if(next==='custom'){
+    modal({title:'Detach this account from the plans table?',
+      message:'custom means the account’s own numbers become the only source: no plan is consulted, and the MAX(account, plan) rule stops applying — which is what lets you negotiate a cap LOWER than any plan. '
+        + 'So that the switch itself changes nothing, what the account gets today ('+e.clients+' clients, '+e.devices+' devices, features: '+e.feats+') is written onto the account first, and the plan is changed last. '
+        + 'Edit those three in the panel that appears. From then on, no edit to plan “'+cur+'” reaches this account.',
+      confirmText:'Make custom'}).then(function(ok){
+      if(!ok){ paint(); return; }
+      seedCustom(email, e.q.value, e.d.value, (v.eff||[]).slice()).then(function(){ apply(); });
+    });
+    return;
+  }
+  apply();
+}
+/* Numbers first, plan last — a failure half-way leaves the account on the plan it
+   already had rather than on custom with somebody else's figures. */
+function seedCustom(email,clients,devices,feats){
+  /* A number the portal could not resolve is NOT written: sending 0 for "unknown"
+     would cap the account at nothing in the same click that detached it. */
+  var skip=function(){ return Promise.resolve({ok:true}); };
+  return (clients==null ? skip() : actUser(email,'setQuota',clients))
+    .then(function(){ return devices==null ? skip() : actUser(email,'setDeviceQuota',devices); })
+    .then(function(){ return actUser(email,'setFeatures',feats); })
+    .then(function(j){
+      /* A feature the plan still grants but the catalogue has since deactivated cannot
+         be re-granted — the server says so by name. Not fatal, but not silent either. */
+      if(j&&!j.ok) toast('Allowances written; the feature list was refused — '+(j.error||'see the catalogue'),'bad',6000);
+      return j;
+    });
+}
+/* ── the custom editor ─────────────────────────────────────────────────────── */
+/* Only reachable on plan = custom, because on any other plan these three fields
+   mean something different (an override that only wins when it is larger). */
+function custDraft(u){
+  var em=String(u.email||'');
+  if(!S.custEdit || S.custEdit.email!==em){
+    S.custEdit={ email:em,
+      clients:(u.quota==null?'':String(u.quota)),
+      devices:(f(u,'deviceQuota','device_quota')==null?'':String(f(u,'deviceQuota','device_quota'))),
+      features:(featList(u.features)||[]).slice() };
+  }
+  return S.custEdit;
+}
+function customEditor(u,v){
+  var d=custDraft(u);
+  return '<div class="custed"><div class="eyebrow">Negotiated terms</div>'
+    + '<div class="usub" style="margin:0 0 14px;max-width:76ch">These three values are the whole entitlement of this account. They are read verbatim: '
+    + 'no plan is consulted and nothing is compared against one, which is what lets a number here be smaller than any plan sells.</div>'
+    + '<div class="grid2">'
+      + '<div class="field"><label>Client allowance — registration numbers</label>'
+        + '<input id="cu_clients" type="number" min="0" value="'+esc(d.clients)+'"'
+        + ' placeholder="0"></div>'
+      + '<div class="field"><label>Device allowance — browsers</label>'
+        + '<input id="cu_devices" type="number" min="0" value="'+esc(d.devices)+'" placeholder="1">'
+        + '<div class="usub">Left blank this falls to the one-device floor — on a custom account there is no plan to inherit from.</div></div>'
+    + '</div>'
+    + '<div class="field"><label>Features granted to this account</label>'
+      + featureChips(d.features,'data-cf')
+      + '<div class="usub" style="margin-top:7px">Written straight onto the account. An id the catalogue does not know, or one it has deactivated, is refused by name.</div></div>'
+    + '<div class="inline"><button class="btn primary" id="cu_save">Save negotiated terms</button>'
+      + '<button class="btn ghost" id="cu_revert">Revert</button>'
+      + '<span class="mlabel">setQuota &middot; setDeviceQuota &middot; setFeatures</span></div></div>';
+}
+function harvestCustom(){
+  if(!S.custEdit) return;
+  if($('cu_clients')) S.custEdit.clients=$('cu_clients').value.trim();
+  if($('cu_devices')) S.custEdit.devices=$('cu_devices').value.trim();
+}
+function saveCustom(email){
+  harvestCustom();
+  var d=S.custEdit; if(!d) return;
+  if(d.clients==='' || isNaN(Number(d.clients)) || Number(d.clients)<0){ toast('Client allowance must be 0 or more','bad'); return; }
+  if(d.devices!=='' && (isNaN(Number(d.devices)) || Number(d.devices)<0)){ toast('Device allowance must be 0 or more, or blank','bad'); return; }
+  actUser(email,'setQuota',Math.trunc(Number(d.clients)))
+    .then(function(){ return actUser(email,'setDeviceQuota', d.devices===''?null:Math.trunc(Number(d.devices))); })
+    .then(function(){ return actUser(email,'setFeatures', d.features||[]); })
+    .then(function(j){
+      if(j&&!j.ok) return;                      /* post() has already surfaced the refusal by name */
+      toast('Negotiated terms saved','ok'); S.custEdit=null; afterUserEdit(email);
+    });
+}
+
 /* ═══ USER DETAIL ═════════════════════════════════════════════════════════ */
 RENDER.user = function(){
   var back='<button class="back" data-back="users">&larr; All users</button>';
@@ -1395,8 +1588,18 @@ RENDER.user = function(){
       + '<button class="btn danger" id="udel">Delete</button>'
     + '</div></div>';
 
-  var aq=allowance(u,'quota'), ad=allowance(u,'device');
-  var heldC=(u.clientCount!=null?u.clientCount:cs.length), heldD=(f(u,'deviceCount','device_count')!=null?Number(f(u,'deviceCount','device_count')):ds.length);
+  /* The server's own reading, when it sent one. Everything on this page reads from
+     these two — the strip, the panel and the meters — so a number can never say
+     "from pro" in one place and "custom" three inches lower. */
+  var ent=S.user.entitlement||null;
+  var aq=entAllow(ent,u,'quota')||allowance(u,'quota'), ad=entAllow(ent,u,'device')||allowance(u,'device');
+  var heldC=(u.clientCount!=null?u.clientCount:cs.length);
+  /* devicesUsed is counted by the same query that resolved the allowance, so the two
+     sides of "4 of 1" always agree. The device LIST is capped at 100 rows and would
+     under-report a big account. */
+  var heldD=(ent&&ent.devicesUsed!=null)?Number(ent.devicesUsed)
+           :(f(u,'deviceCount','device_count')!=null?Number(f(u,'deviceCount','device_count')):ds.length);
+  var overD=ent?!!ent.overDevices:(ad.value!=null&&heldD>ad.value);
   var totals = '<div class="strip">'
     + [{k:'Clients',v:heldC},{k:'Devices',v:heldD},
        {k:'Jobs',v:(u.jobCount!=null?u.jobCount:js.length)},{k:'Documents',v:u.docs,c:'info'},
@@ -1426,12 +1629,28 @@ RENDER.user = function(){
       + '</span>'
     + '<span class="k">Device allowance</span><span class="v">'+allowLine(heldD,ad,'devices',{nobar:true})
       + (v.custom ? '' : ' <button class="btn tiny" data-ue="setDeviceQuota">set</button>')
-      + '<div class="usub">Enforced in <span class="mono">/register</span> and only there. A browser already on record is never a new device and is never refused.</div>'
+      + (!v.custom && f(u,'deviceQuota','device_quota')==null
+          ? '<div class="usub">No per-account override — this is the plan&#39;s number. Setting one raises the allowance for this account only; clearing it hands the account back to the plan.</div>'
+          : '')
+      + '<div class="usub">Enforced in <span class="mono">/register</span> and only there. A browser already on record is never a new device and is never refused, however far over the cap the account is.</div>'
       + '</span>'
     + '<span class="k">Valid until</span><span class="v">'+expiryCell(u)
       + '<div style="margin-top:5px"><button class="btn tiny" data-ue="setValidUntil">set</button></div></span>'
     + '<span class="k">Tags</span><span class="v">'+(tags.length?tags.map(function(t){ return '<span class="tag">'+esc(t)+'</span>'; }).join(''):'<span class="muted">none</span>')+' <button class="btn tiny" data-ue="setTags">edit</button></span>'
     + '</div>'
+    /* Over the cap is a STATE, not an incident. Said in the calmest words available,
+       because an admin who reads it as an outage starts unregistering browsers —
+       the one thing SPEC-019 promises never happens by itself. Never a red callout. */
+    + (overD
+        ? '<div class="callout info" style="margin-top:14px"><span class="cl">grandfathered</span><span class="cb">'
+          + 'This account holds <b>'+n(heldD)+'</b> device'+(heldD===1?'':'s')+' against an allowance of <b>'+(ad.value==null?'∞':n(ad.value))+'</b>. '
+          + 'That is allowed and nothing is wrong: every browser it already has keeps working, and none was or will be unregistered. '
+          + 'Only the <b>next</b> one is refused, by <span class="mono">/register</span>, with <span class="mono">reason:&#39;device_limit&#39;</span>. '
+          + 'Raise the allowance below if that refusal would be wrong.</span></div>'
+        : '')
+    + (!ent
+        ? '<div class="usub" style="margin-top:12px">The server sent no resolved entitlement with this account, so the numbers above are the portal&#39;s own reading of the plan and the account — shown with a dashed tag wherever that is the case.</div>'
+        : '')
     + '<div class="field" style="margin-top:16px"><label>Admin note — private</label>'
     + '<textarea id="unote" placeholder="Why is this account locked / trusted / suspicious?">'+esc(u.note||'')+'</textarea></div>'
     + '<button class="btn tiny" id="unotesave">Save note</button></div>';
@@ -1439,7 +1658,11 @@ RENDER.user = function(){
   /* Features get their own panel because the question is never "which flags does
      she have" — it is "WHY does she have them". Left edge = source, fill = effect. */
   var featPanel = '<div class="panel"><div class="eyebrow">Features</div>'
-    + (v.ovr!=null
+    + (v.custom
+        ? '<div class="srcbar ovr"><span class="pill accent">CUSTOM</span>'
+          + '<span style="flex:1;min-width:180px">This list <b>is</b> the account&#39;s entitlement — no plan is consulted and none can be. '
+          + 'Edit it in the negotiated-terms panel above; the toggles below write the same <span class="mono">setFeatures</span> list.</span></div>'
+      : v.ovr!=null
         ? '<div class="srcbar ovr"><span class="pill accent">OVERRIDE</span>'
           + '<span style="flex:1;min-width:180px">An explicit list is written on this account. Plan <b>'+esc(u.plan||'free')+'</b> no longer decides — editing the plan will not change what she gets.</span>'
           + '<button class="btn tiny" id="ufclear">Clear override</button></div>'
@@ -1451,9 +1674,14 @@ RENDER.user = function(){
         var meta=featureKnown(id);
         var on=v.eff.indexOf(id)>=0;
         var inPlan=v.planFeats ? v.planFeats.indexOf(id)>=0 : null;
-        var overridden = v.ovr!=null;
+        var overridden = v.custom || v.ovr!=null;
         var why;
-        if(!overridden){
+        if(v.custom){
+          /* No plan exists to compare against, so there is no "the plan grants it too"
+             here — on a custom account this list is the entire answer. */
+          why = on ? '<b>Negotiated on this account.</b> Nothing else grants it and no plan edit can take it away.'
+                   : 'Not negotiated for this account. On a custom account there is no plan to fall back to, so it is simply off.';
+        } else if(!overridden){
           why = inPlan==null ? 'Plan list unknown — this reflects nothing until <span class="mono">/api/plans</span> answers.'
               : inPlan ? 'Granted by plan <b>'+esc(u.plan||'free')+'</b>.'
                        : 'Plan <b>'+esc(u.plan||'free')+'</b> does not include it.';
@@ -1466,19 +1694,25 @@ RENDER.user = function(){
               : inPlan ? '<b>Removed for this account only</b> — plan <b>'+esc(u.plan||'free')+'</b> does include it.'
                        : 'Off. Neither the plan nor the override grants it.';
         }
-        return '<div class="feat'+(on?' on':'')+(overridden?' ovr':'')+(meta?'':' unknown')+'">'
+        return '<div class="feat'+(on?' on':'')+(overridden?' ovr':'')+(meta?'':' unknown')+(meta&&!Number(meta.active)?' dead':'')+'">'
           + '<div class="fh"><span class="fn">'+esc(id)+'</span>'
             + '<span class="pill '+(on?'':'muted')+'">'+(on?'ON':'off')+'</span>'
-            + '<span class="pill '+(overridden?'accent':'muted')+'">'+(overridden?'override':'plan')+'</span>'
+            + '<span class="pill '+(overridden?'accent':'muted')+'">'+(v.custom?'custom':overridden?'override':'plan')+'</span>'
+            + (meta&&!Number(meta.active)?'<span class="pill warn" title="Retired from the catalogue. Grants already made keep working; new ones are refused.">retired</span>':'')
             + '<button class="btn tiny" data-uf="'+esc(id)+'">'+(on?'Turn off':'Turn on')+'</button></div>'
           + '<div class="fw">'+why+'</div>'
-          + (meta ? '<div class="fw">'+meta.what+'</div>'
-                  : '<div class="fw" style="color:var(--warn)">Not in the known vocabulary — probably a typo. Nothing gates on it.</div>')
+          + (meta ? '<div class="fd">'+esc(meta.name||id)+(meta.description?' — '+esc(meta.description):'')+'</div>'
+                    + '<div class="fw">'+(isWired(id) ? WIRED[id]
+                        : '<b style="color:var(--warn)">Not wired.</b> The extension never asks for this id, so granting it changes nothing a user can see until one line in the drawer checks for it.')+'</div>'
+                  : '<div class="fw" style="color:var(--warn)">Not in the catalogue — probably a typo, or a row that was deleted. Nothing gates on it and nothing can.</div>')
+          + (meta&&!Number(meta.active)&&on
+              ? '<div class="fw" style="color:var(--warn)">Retired but still granted here — grandfathered on purpose. Turning it off cannot be undone from this screen.</div>' : '')
           + '</div>';
       }).join('')+'</div>'
     + '<p class="hint" style="margin:14px 0 0">Toggling anything here writes an explicit list onto the account: '
     + '<span class="mono">setFeatures</span> with a JSON array, matching the <span class="mono">features TEXT</span> column. '
-    + 'The extension receives it on every check-in.</p></div>';
+    + 'The extension receives it on every check-in. Only ids that are in the catalogue <b>and</b> active can be newly granted — '
+    + 'the server refuses anything else by name. <button class="btn tiny ghost" data-go2="features">Open the catalogue</button></p></div>';
 
   var clients = '<div class="panel flush"><div style="padding:18px 20px 0"><div class="eyebrow">Clients &middot; <b>'+cs.length+'</b></div></div>'
     + (cs.length ? '<div class="tablewrap" style="border:none;border-radius:0;box-shadow:none;margin:0"><table><thead><tr>'
@@ -1570,6 +1804,18 @@ WIRE.user = function(){
   q('#views [data-cact]', function(b){ b.onclick=function(e){ e.stopPropagation(); clientAction(b.getAttribute('data-cact'), b.getAttribute('data-r'), function(){ loadUser(email); }); }; });
   q('#views [data-uf]', function(b){ b.onclick=function(){ toggleFeature(email,b.getAttribute('data-uf')); }; });
   if($('ufclear')) $('ufclear').onclick=function(){ clearOverride(email); };
+  /* The plan selector. A cancelled warning has to put the <select> back, which is
+     what the paint() inside changePlan() is for — the control must never show a
+     plan the account is not on. */
+  if($('uplanpick')) $('uplanpick').onchange=function(){ changePlan(email,$('uplanpick').value); };
+  /* Feature chips repaint, so harvest the two half-typed numbers first. */
+  q('#views [data-cf]', function(b){ b.onclick=function(){
+    harvestCustom();
+    var id=b.getAttribute('data-cf'), fs=(S.custEdit&&S.custEdit.features)||[], i=fs.indexOf(id);
+    if(i>=0) fs.splice(i,1); else fs.push(id);
+    S.custEdit.features=fs; paint(); }; });
+  if($('cu_save')) $('cu_save').onclick=function(){ saveCustom(email); };
+  if($('cu_revert')) $('cu_revert').onclick=function(){ S.custEdit=null; paint(); toast('Reverted to what the account holds','n',1400); };
   if($('umsgsend')) $('umsgsend').onclick=function(){
     var tx=$('umsg').value.trim(); if(!tx){ toast('Enter a message','bad'); return; }
     /* Out of the SPEC-017 action list — kept because dropping it would lose a shipped
@@ -1590,6 +1836,14 @@ function editField(email,action,uobj){
          message:'/api/plans is not answering, so this is a free-text id. Check it against the Activation section once that endpoint lands.'},
     setQuota:{title:'Client quota',label:'Maximum registration numbers',type:'number',min:0,value:u.quota==null?1:u.quota,
       message:'Enforced once, on the user. Devices inherit it. A user already over the cap keeps their clients and simply cannot add more.'},
+    /* The only field on this page where BLANK is a third value: null hands the
+       account back to its plan. Zero would mean "no browser may register", which
+       is a very different instruction, so the two must not collapse into one. */
+    setDeviceQuota:{title:'Device allowance',label:'Maximum browsers — blank to inherit the plan',type:'number',min:0,
+      value:(f(u,'deviceQuota','device_quota')==null?'':f(u,'deviceQuota','device_quota')), blankIsNull:true,
+      message:'How many browsers this person may register. Blank clears the override and hands the account back to its plan; 0 means no browser may register at all. '
+            + 'Effective allowance is MAX(account, plan), so this can only ever raise it — except on a custom account, where it is read verbatim. '
+            + 'Enforced in /register and only there: a browser already on record is never refused, and an account already over the cap keeps every device it has.'},
     setValidUntil:{title:'Valid until',label:'Date',type:'date',value:u.validUntil?String(u.validUntil).slice(0,10):'',
       message:'A date in the past makes /session answer allowed:false with reason "expired" — a different answer from "locked", and a different action for the user.'},
     setTags:{title:'Tags',label:'Comma-separated tags',value:(Array.isArray(u.tags)?u.tags.join(', '):(u.tags||''))}
@@ -1598,6 +1852,12 @@ function editField(email,action,uobj){
   modal({title:sp.title, message:sp.message, confirmText:'Save',
     input:{label:sp.label,type:sp.type,min:sp.min,value:sp.value,placeholder:sp.placeholder,options:sp.options}}).then(function(v){
     if(v===null) return;
+    /* An empty number box is "not set", not zero, wherever the field says so — the
+       same reading the server gives it. Everywhere else an empty number is still 0. */
+    if(sp.blankIsNull && String(v).trim()===''){
+      actUser(email,action,null).then(function(j){ if(j.ok){ toast(sp.title+' cleared — inheriting from the plan','ok'); afterUserEdit(email); } });
+      return;
+    }
     var val = sp.type==='number' ? (parseInt(v,10)||0) : v;
     actUser(email,action,val).then(function(j){ if(j.ok){ toast(sp.title+' saved','ok'); afterUserEdit(email); } });
   });
@@ -1616,9 +1876,11 @@ function toggleFeature(email,id){
   var i=base.indexOf(id);
   if(i>=0) base.splice(i,1); else base.push(id);
   var send=function(){
-    actUser(email,'setFeatures',base).then(function(j){ if(j.ok){ toast('Features saved','ok'); afterUserEdit(email); } });
+    actUser(email,'setFeatures',base).then(function(j){ if(j.ok){ toast('Features saved','ok'); S.custEdit=null; afterUserEdit(email); } });
   };
-  if(v.ovr!=null) return send();
+  /* On a custom account there is no override to create — this list IS the account's
+     entitlement, so the "you are detaching from the plan" warning would be a lie. */
+  if(v.custom || v.ovr!=null) return send();
   modal({title:'Create a per-user override?',
     message:'This account inherits its features from plan '+(u.plan||'free')+'. Saving here writes an explicit list onto the account, '
           + 'and from then on the plan no longer drives it — including future edits to the plan. Clearing the override restores inheritance.',
@@ -1634,6 +1896,7 @@ function clearOverride(email){
 }
 function wireCommon(){
   q('#views [data-back]', function(b){ b.onclick=function(){ go(b.getAttribute('data-back')); }; });
+  q('#views [data-go2]', function(b){ b.onclick=function(){ go(b.getAttribute('data-go2')); }; });
   q('#views [data-copy]', function(b){ b.onclick=function(e){ e.stopPropagation();
     try{ navigator.clipboard.writeText(b.getAttribute('data-copy')); toast('Copied','ok',1100); }catch(err){} }; });
 }
@@ -2058,16 +2321,30 @@ function planUsersOnPage(id){
   var nn=0; (S.users||[]).forEach(function(u){ if(String(u.plan||'')===String(id)) nn++; });
   return nn;
 }
+/* Toggles, never a text field: a mistyped id does not fail loudly, it silently grants
+   nothing. The chips come from the catalogue (SPEC-019) rather than a list in this
+   file — that is the whole point of the table. */
 function featureChips(sel,attr){
   sel = sel||[];
-  return '<div class="chips">'+FEATURES.map(function(x){
-    var on = sel.indexOf(x.id)>=0;
-    return '<button type="button" class="chip'+(on?' on':'')+'" '+attr+'="'+esc(x.id)+'">'+esc(x.id)+'</button>';
+  return '<div class="chips">'+catalogue().map(function(x){
+    var id=String(x.id), on=sel.indexOf(id)>=0, dead=!Number(x.active);
+    /* Retired: removable, never newly grantable. Exactly the rule the server applies,
+       said before the click rather than as a refusal after it. */
+    var tip=(x.name||id)+(x.description?' — '+x.description:'')
+      + (dead?' · retired: existing grants keep working, new ones are refused':'')
+      + (isWired(id)?'':' · NOT WIRED: nothing in the extension asks for this id yet');
+    return '<button type="button" class="chip'+(on?' on':'')+'"'+(dead&&!on?' disabled':'')+' '+attr+'="'+esc(id)+'" title="'+esc(tip)+'">'
+      + esc(id)+(dead?' &middot;retired':'')+'</button>';
   }).join('')
   + sel.filter(function(id){ return !featureKnown(id); }).map(function(id){
-      return '<button type="button" class="chip on" '+attr+'="'+esc(id)+'" title="Not in the known vocabulary">'+esc(id)+' ?</button>';
+      return '<button type="button" class="chip on" '+attr+'="'+esc(id)+'" title="Not in the catalogue — nothing gates on it, and the server will refuse it on the next save">'+esc(id)+' ?</button>';
     }).join('')
-  + '</div>';
+  + '</div>'
+  + (catalogueFallback()
+      ? '<div class="usub" style="margin-top:6px">'
+        + (S.featsErr ? '<span class="mono">/api/features</span> answered <span class="mono">'+esc(S.featsErr)+'</span> — showing the two ids <span class="mono">ensureSchema()</span> seeds.'
+                      : 'The catalogue is empty. Add a feature under <b>Features</b> before anything can be granted.')
+        + '</div>' : '');
 }
 function planEditor(){
   var p=S.planEdit; if(!p) return '';
@@ -2079,9 +2356,19 @@ function planEditor(){
         + '<input id="pl_id" class="mono" placeholder="e.g. standard" value="'+esc(p.id||'')+'"'+(isNew?'':' disabled')+'></div>'
       + '<div class="field"><label>Display name</label><input id="pl_name" placeholder="e.g. Standard" value="'+esc(p.name||'')+'"></div>'
     + '</div><div class="grid2">'
-      + '<div class="field"><label>Client quota</label><input id="pl_quota" type="number" min="0" value="'+esc(p.quota==null?1:p.quota)+'"></div>'
+      + '<div class="field"><label>Client quota — registration numbers</label><input id="pl_quota" type="number" min="0" value="'+esc(p.quota==null?1:p.quota)+'"></div>'
+      /* SPEC-019's other half. Left out of a save this field would have been reset to
+         one device for every account on the plan, which is why the server treats an
+         ABSENT deviceQuota as "leave it alone" — this box always sends a number. */
+      + '<div class="field"><label>Device quota — browsers per account</label><input id="pl_devq" type="number" min="0" value="'+esc(p.deviceQuota==null?1:p.deviceQuota)+'">'
+        + '<div class="usub">Enforced in <span class="mono">/register</span>. An account already over it keeps every browser it has and only the next one is refused.</div></div>'
+    + '</div><div class="grid2">'
       + '<div class="field"><label>Price — free text, billing is out of scope</label><input id="pl_price" placeholder="e.g. EGP 1,200 / yr" value="'+esc(p.price||'')+'"></div>'
+      + '<div class="field"><label>Who this edit reaches</label>'
+        + '<div class="usub" style="padding-top:7px"><b>'+n(planUsersOnPage(p.id))+'</b> account'+(planUsersOnPage(p.id)===1?'':'s')+' on the loaded Users page are on this plan '
+        + 'and will see both numbers change on their next check-in — except any on <b>custom</b>, which no plan edit can reach.</div></div>'
     + '</div>'
+    + (p.err ? '<div class="callout bad"><span class="cl">refused</span><span class="cb">'+esc(p.err)+'</span></div>' : '')
     + '<div class="field"><label>Features granted by this plan</label>'
       + featureChips(p.features||[],'data-pf')
       + '<div class="usub" style="margin-top:7px">A per-user override on any account wins over this list.</div></div>'
@@ -2117,7 +2404,7 @@ RENDER.activation = function(){
       + (S.plansDone?'The migration seeds <span class="mono">free</span>, <span class="mono">standard</span> and <span class="mono">pro</span>. Create one below if it has not run yet.':'')+'</div>';
   } else {
     table = '<div class="tablewrap" style="margin-bottom:0"><table class="wide"><thead><tr>'
-      + '<th>Id</th><th>Name</th><th>Quota</th><th>Features</th><th>Price</th><th>State</th><th>On this plan</th><th></th>'
+      + '<th>Id</th><th>Name</th><th>Clients</th><th>Devices</th><th>Features</th><th>Price</th><th>State</th><th>On this plan</th><th></th>'
       + '</tr></thead><tbody>'
       + plans.map(function(p){
           var fl=featList(p.features)||[];
@@ -2125,10 +2412,12 @@ RENDER.activation = function(){
           return '<tr class="planrow"><td class="mono"><b>'+esc(p.id)+'</b></td>'
             + '<td>'+esc(p.name||'—')+'</td>'
             + '<td class="num">'+(p.quota==null?'∞':n(p.quota))+'</td>'
+            + '<td class="num">'+n(planDevices(p))+'</td>'
             + '<td>'+(fl.length?fl.map(function(x){
-                  return featureKnown(x)
-                    ? '<span class="tag">'+esc(x)+'</span>'
-                    : '<span class="tag" style="color:var(--warn);background:var(--warnbg);border-color:var(--warnln)" title="Not in the known vocabulary — nothing gates on it">'+esc(x)+' ?</span>'; }).join('')
+                  var m=featureKnown(x);
+                  if(!m) return '<span class="tag" style="color:var(--warn);background:var(--warnbg);border-color:var(--warnln)" title="Not in the catalogue — nothing gates on it">'+esc(x)+' ?</span>';
+                  if(!Number(m.active)) return '<span class="tag" style="opacity:.6" title="Retired from the catalogue — this grant keeps working, but no new account can be given it">'+esc(x)+' &middot;retired</span>';
+                  return '<span class="tag"'+(isWired(x)?'':' title="Not wired — nothing in the extension asks for this id yet"')+'>'+esc(x)+'</span>'; }).join('')
                 : '<span class="faint">none</span>')+'</td>'
             + '<td class="usub">'+esc(p.price||'—')+'</td>'
             + '<td>'+(Number(p.active)?'<span class="pill">active</span>':'<span class="pill muted">inactive</span>')+'</td>'
@@ -2149,15 +2438,25 @@ RENDER.activation = function(){
     + (S.planEdit ? planEditor() : '<div style="margin-bottom:14px"><button class="btn primary" id="pnew">New plan</button></div>')
     + table + '</div>';
 
+  var cat=catalogue();
   var vocab = '<div class="panel"><div class="eyebrow">Feature vocabulary</div>'
-    + '<p class="hint">Fixed for now. Editors offer these as toggles rather than a text field, because a typo in a feature name '
-    + 'does not fail — it silently grants nothing.</p>'
-    + '<div class="feats">'+FEATURES.map(function(x){
-        var onPlans=(S.plans||[]).filter(function(p){ return (featList(p.features)||[]).indexOf(x.id)>=0; }).map(function(p){ return p.id; });
-        return '<div class="feat"><div class="fh"><span class="fn">'+esc(x.id)+'</span></div>'
-          + '<div class="fw">'+x.what+'</div>'
-          + '<div class="fw"><b>'+(onPlans.length?'On plans: '+esc(onPlans.join(', ')):'On no plan yet')+'</b></div></div>';
-      }).join('')+'</div></div>';
+    + '<p class="hint">The ids a plan is allowed to grant, from the catalogue. Editors offer them as toggles rather than a text field, '
+    + 'because a typo in a feature name does not fail loudly — it silently grants nothing. '
+    + 'Add, rename or retire them under <b>Features</b>.</p>'
+    + (cat.length
+      ? '<div class="feats">'+cat.map(function(x){
+          var id=String(x.id);
+          var onPlans=(S.plans||[]).filter(function(p){ return (featList(p.features)||[]).indexOf(id)>=0; }).map(function(p){ return p.id; });
+          return '<div class="feat'+(Number(x.active)?'':' dead')+(isWired(id)?' wired':'')+'">'
+            + '<div class="fh"><span class="fn">'+esc(id)+'</span>'
+            + (Number(x.active)?'':'<span class="pill warn">retired</span>')
+            + (isWired(id)?'<span class="pill moss">wired</span>':'<span class="pill warn">not wired</span>')+'</div>'
+            + '<div class="fd">'+esc(x.name||id)+(x.description?' — '+esc(x.description):'')+'</div>'
+            + '<div class="fw"><b>'+(onPlans.length?'On plans: '+esc(onPlans.join(', ')):'On no plan yet')+'</b></div></div>';
+        }).join('')+'</div>'
+      : '<div class="callout warn"><span class="cl">empty</span><span class="cb">The catalogue has no rows, so no plan and no account can be granted anything. '
+        + '<span class="mono">ensureSchema()</span> seeds two ids on the first portal request — press <b>Features</b> to look.</span></div>')
+    + '<div style="margin-top:12px"><button class="btn tiny" data-go2="features">Open the catalogue</button></div></div>';
 
   var eb=expiryBuckets();
   var expRows=eb.exp.concat(eb.soon);
@@ -2181,13 +2480,14 @@ RENDER.activation = function(){
   return plansPanel + '<div class="grid2">'+vocab+expiry+'</div>';
 };
 WIRE.activation = function(){
-  if($('pnew')) $('pnew').onclick=function(){ S.planEdit={id:'',name:'',quota:1,features:[],price:'',active:1,existing:false}; paint(); };
+  if($('pnew')) $('pnew').onclick=function(){ S.planEdit={id:'',name:'',quota:1,deviceQuota:1,features:[],price:'',active:1,existing:false}; paint(); };
   if($('prdismiss')) $('prdismiss').onclick=function(){ S.planRefused=null; paint(); };
   q('#views [data-goplan]', function(b){ b.onclick=function(){
     S.uplan=b.getAttribute('data-goplan'); S.ustatus='all'; S.upage=1; go('users'); loadUsers(); }; });
   q('#views [data-pedit]', function(b){ b.onclick=function(){
     var p=planById(b.getAttribute('data-pedit')); if(!p) return;
-    S.planEdit={id:p.id,name:p.name||'',quota:(p.quota==null?1:p.quota),features:(featList(p.features)||[]),
+    S.planEdit={id:p.id,name:p.name||'',quota:(p.quota==null?1:p.quota),deviceQuota:planDevices(p),
+                features:(featList(p.features)||[]),
                 price:p.price||'',active:Number(p.active)?1:0,existing:true};
     paint(); }; });
   q('#views [data-pdel]', function(b){ b.onclick=function(){ planDelete(b.getAttribute('data-pdel')); }; });
@@ -2202,6 +2502,7 @@ WIRE.activation = function(){
   if($('pl_active')) $('pl_active').onchange=function(){ harvestPlan(); S.planEdit.active=$('pl_active').checked?1:0; paint(); };
   if($('pl_save')) $('pl_save').onclick=savePlan;
   q('#views tr.click[data-uopen]', function(tr){ tr.onclick=function(e){ if(e.target.closest('button,a,input')) return; openUser(tr.getAttribute('data-uopen')); }; });
+  q('#views [data-go2]', function(b){ b.onclick=function(){ go(b.getAttribute('data-go2')); }; });
   q('#views [data-uext]', function(b){ b.onclick=function(e){ e.stopPropagation();
     var em=b.getAttribute('data-uext');
     var u=(S.users||[]).filter(function(x){ return x.email===em; })[0]||{};
@@ -2212,17 +2513,36 @@ function harvestPlan(){
   if($('pl_id')&&!S.planEdit.existing) S.planEdit.id=$('pl_id').value.trim();
   if($('pl_name'))  S.planEdit.name=$('pl_name').value;
   if($('pl_quota')){ var qv=$('pl_quota').value; S.planEdit.quota = qv===''?'':parseInt(qv,10); }
+  if($('pl_devq')){ var dv=$('pl_devq').value; S.planEdit.deviceQuota = dv===''?'':parseInt(dv,10); }
   if($('pl_price')) S.planEdit.price=$('pl_price').value;
   if($('pl_active'))S.planEdit.active=$('pl_active').checked?1:0;
 }
 function savePlan(){
   harvestPlan();
   var p=S.planEdit; if(!p) return;
+  p.err='';
   if(!p.id){ toast('A plan needs an id','bad'); return; }
   if(!/^[a-z0-9][a-z0-9_-]*$/.test(p.id)){ toast('Plan id: lowercase letters, digits, dash, underscore','bad'); return; }
-  if(p.quota===''||p.quota==null||isNaN(Number(p.quota))||Number(p.quota)<0){ toast('Quota must be 0 or more','bad'); return; }
-  post('/api/plan',{id:p.id,name:p.name||p.id,quota:Number(p.quota),features:p.features||[],price:p.price||'',active:p.active?1:0})
-    .then(function(j){ if(!j.ok) return;
+  /* The server refuses this id too, but saying it here means the admin learns WHY
+     before losing the form: `custom` already means "written on the account". */
+  if(p.id==='custom'){
+    p.err='“custom” is a reserved account type, not a plan. Set an account’s plan to custom on its own page to give it negotiated numbers; a plan row by that name would give one word two meanings.';
+    paint(); return;
+  }
+  if(p.quota===''||p.quota==null||isNaN(Number(p.quota))||Number(p.quota)<0){ toast('Client quota must be 0 or more','bad'); return; }
+  if(p.deviceQuota===''||p.deviceQuota==null||isNaN(Number(p.deviceQuota))||Number(p.deviceQuota)<0){ toast('Device quota must be 0 or more','bad'); return; }
+  post('/api/plan',{id:p.id,name:p.name||p.id,quota:Number(p.quota),deviceQuota:Number(p.deviceQuota),
+                    features:p.features||[],price:p.price||'',active:p.active?1:0}, true)
+    .then(function(j){
+      /* A grant refusal (400) names the ids: unknown ones are typos, inactive ones are
+         retired and can no longer be sold. Rendered in the editor, not thrown into a
+         toast that disappears before the admin can fix the chips. */
+      if(!j.ok){
+        p.err=(j.error||'The server refused this plan.')
+          + (j.unknown&&j.unknown.length?' · not in the catalogue: '+j.unknown.join(', '):'')
+          + (j.inactive&&j.inactive.length?' · retired: '+j.inactive.join(', '):'');
+        paint(); return;
+      }
       toast(p.existing?'Plan saved':'Plan created','ok');
       S.planEdit=null; S.planRefused=null; loadPlans(); loadUsers(); loadAudit(); paint(); });
 }
@@ -2243,6 +2563,172 @@ function planDelete(id){
       var cnt=f(j,'count','users','userCount','inUse','in_use');
       S.planRefused={id:id, error:j.error||'refused', status:j._status, count:(typeof cnt==='number'?cnt:null)};
       toast('Plan '+id+' was not deleted','bad');
+      paint();
+    });
+  });
+}
+
+/* ═══ FEATURE CATALOGUE ═══════════════════════════════════════════════════ */
+/* GET /api/features   POST /api/feature (upsert)   POST /api/feature/delete
+   SPEC-019. Features stop being a vocabulary hard-coded in this file and become
+   rows an admin owns. The one thing a row CANNOT do is gate anything by itself,
+   and this section says so before anybody creates one — otherwise the first new
+   feature is sold on a Tuesday and appears to do nothing forever. */
+function featEditor(){
+  var x=S.featEdit; if(!x) return '';
+  var isNew=!x.existing;
+  return '<div class="planed">'
+    + '<div class="eyebrow">'+(isNew?'New feature':'Editing <b>'+esc(x.id)+'</b>')+'</div>'
+    + '<div class="grid2">'
+      + '<div class="field"><label>Id — written verbatim into every grant</label>'
+        + '<input id="ft_id" class="mono" placeholder="e.g. bulk-pdf" value="'+esc(x.id||'')+'"'+(isNew?'':' disabled')+'>'
+        + '<div class="usub">'+(isNew
+            ? 'Lowercase slug. It is the primary key and can never be changed: a grant stores this string, so renaming it would revoke the feature everywhere it had been sold.'
+            : 'Immutable. Renaming would revoke this feature on every plan and account holding it — create a new id and grant that instead.')+'</div></div>'
+      + '<div class="field"><label>Name — shown in the portal</label>'
+        + '<input id="ft_name" placeholder="e.g. Bulk PDF download" value="'+esc(x.name||'')+'"></div>'
+    + '</div>'
+    + '<div class="field"><label>Description — what the customer gets</label>'
+      + '<textarea id="ft_desc" maxlength="400" placeholder="One sentence a salesperson could read out.">'+esc(x.description||'')+'</textarea></div>'
+    + '<div class="field"><label>Availability</label>'
+      + '<label class="switch"><input type="checkbox" id="ft_active"'+(Number(x.active)?' checked':'')+'><span class="swtrack"></span>'
+      + '<span style="font-size:13px" class="'+(Number(x.active)?'':'muted')+'">'
+      + (Number(x.active)?'Active — can be granted to plans and accounts':'Retired — everyone holding it keeps it; nobody new can be given it')+'</span></label>'
+      + '<div class="usub">Retiring is the safe opposite of deleting: it stops new grants without taking anything away from anybody.</div></div>'
+    + (x.err ? '<div class="callout bad"><span class="cl">refused</span><span class="cb">'+esc(x.err)+'</span></div>' : '')
+    + '<div class="inline" style="margin-top:6px"><button class="btn primary" id="ft_save">'+(isNew?'Create feature':'Save feature')+'</button>'
+      + '<button class="btn ghost" id="ft_cancel">Cancel</button>'
+      + '<span class="mlabel">POST /api/feature</span></div></div>';
+}
+RENDER.features = function(){
+  var cat=catalogue();
+
+  /* The honest limit, first and unmissable. A catalogue row is a price-list entry;
+     the gate is a line in the extension. Anyone creating a feature here has to read
+     this before they read anything else. */
+  var wire = '<div class="wirebar"><span class="cl">read first</span><span>'
+    + 'A row here is a <b>sellable label, not a gate</b>. A feature only does something when a line in the extension asks for its id by name — '
+    + '<span class="mono">auto-reject</span> opens the Rejection tab because <span class="mono">src/ui/flow.js</span> asks for it. '
+    + 'Creating <span class="mono">bulk-pdf</span> here and granting it changes <b>nothing a user can see</b> until that line is written and shipped. '
+    + 'Sell a new feature only once it is marked <b>wired</b> below.</span></div>';
+
+  var refused = S.featRefused ? '<div class="callout bad"><span class="cl">refused</span><span class="cb">'
+      + '<b class="mono">'+esc(S.featRefused.id)+'</b> was not deleted. '
+      + (S.featRefused.plans!=null
+          ? '<b>'+n(S.featRefused.plans)+'</b> plan'+(Number(S.featRefused.plans)===1?'':'s')+' and <b>'+n(S.featRefused.users)+'</b> account'+(Number(S.featRefused.users)===1?'':'s')+' still grant it. '
+          : esc(S.featRefused.error||'The server refused it.')+' ')
+      + 'A grant stores this id as a string, so deleting the row would leave live grants pointing at nothing. '
+      + 'Remove those grants first — or retire it instead, which stops new grants without taking it away from anybody.'
+      + '<div style="margin-top:9px"><button class="btn tiny" data-ftoff="'+esc(S.featRefused.id)+'">Retire it instead</button> '
+      + '<button class="btn tiny ghost" id="frdismiss">Dismiss</button></div></span></div>' : '';
+
+  var body;
+  if(S.featsErr){
+    body = '<div class="empty" style="margin:0"><span class="mlabel">Catalogue</span>'
+      + '<div class="big">GET /api/features returned <span class="mono">'+esc(S.featsErr)+'</span></div>'
+      + 'Until it answers, every editor falls back to the two ids <span class="mono">ensureSchema()</span> seeds — '
+      + 'so nothing is lost, but a feature added since will not be offered.</div>';
+  } else if(!cat.length){
+    body = '<div class="empty" style="margin:0"><span class="mlabel">Catalogue</span>'
+      + '<div class="big">'+(S.featsDone?'No features defined':'Loading…')+'</div>'
+      + (S.featsDone?'With an empty catalogue nothing can be granted at all — <span class="mono">setFeatures</span> refuses every id. The schema seeds <span class="mono">auto-reject</span> and <span class="mono">po-analytics</span> on the first portal request.':'')+'</div>';
+  } else {
+    body = '<div class="feats">'+cat.map(function(x){
+      var id=String(x.id), live=!!Number(x.active), use=featureUse(id), wired=isWired(id);
+      return '<div class="feat'+(live?'':' dead')+(wired?' wired':'')+'">'
+        + '<div class="fh"><span class="fn">'+esc(id)+'</span>'
+          + (live?'<span class="pill">active</span>':'<span class="pill warn">retired</span>')
+          + (wired?'<span class="pill moss" title="An extension code path asks for this id by name">wired</span>'
+                 :'<span class="pill warn" title="Nothing in the extension asks for this id — granting it has no visible effect yet">not wired</span>')
+          + '</div>'
+        + '<div class="fd">'+esc(x.name||id)+(x.description?' — '+esc(x.description):'')+'</div>'
+        + '<div class="fw">'+(wired ? WIRED[id]
+            : '<b>Not wired.</b> Nothing in the extension checks this id, so granting it is a line on an invoice and nothing more until someone adds the check.')+'</div>'
+        + '<div class="fw"><b>'+(use.plans.length?'On plans: '+esc(use.plans.join(', ')):'On no plan')+'</b>'
+          + ' &middot; '+(use.users?'<b>'+use.users+'</b> loaded account'+(use.users===1?'':'s')+' grant'+(use.users===1?'s':'')+' it directly':'no loaded account grants it directly')+'</div>'
+        + (!live ? '<div class="fw" style="color:var(--warn)">Retired: everyone already holding it keeps it and it keeps working. Only new grants are refused.</div>' : '')
+        + '<div class="act" style="margin-top:9px"><button class="btn tiny" data-ftedit="'+esc(id)+'">Edit</button>'
+          + '<button class="btn tiny" data-ft'+(live?'off':'on')+'="'+esc(id)+'">'+(live?'Retire':'Reactivate')+'</button>'
+          + '<button class="btn tiny danger" data-ftdel="'+esc(id)+'">Delete</button></div>'
+        + '</div>';
+    }).join('')+'</div>'
+    + (catalogueFallback() ? '<div class="usub" style="margin-top:12px">These are the seeded ids, shown because <span class="mono">/api/features</span> has not answered yet — not the saved catalogue.</div>' : '');
+  }
+
+  return '<div class="panel">'+wire
+    + '<p class="hint">The catalogue is the list of ids a plan or an account may be granted. '
+    + '<span class="mono">setFeatures</span> accepts nothing else: an id that is absent is a typo and an id that is retired can no longer be sold, '
+    + 'and the server names which is which rather than silently granting a feature nobody will ever hold.</p>'
+    + refused
+    + (S.featEdit ? featEditor() : '<div style="margin-bottom:14px"><button class="btn primary" id="fnew">New feature</button></div>')
+    + body + '</div>';
+};
+WIRE.features = function(){
+  if($('fnew')) $('fnew').onclick=function(){ S.featEdit={id:'',name:'',description:'',active:1,existing:false}; paint(); };
+  if($('frdismiss')) $('frdismiss').onclick=function(){ S.featRefused=null; paint(); };
+  if($('ft_cancel')) $('ft_cancel').onclick=function(){ S.featEdit=null; paint(); };
+  if($('ft_active')) $('ft_active').onchange=function(){ harvestFeature(); S.featEdit.active=$('ft_active').checked?1:0; paint(); };
+  if($('ft_save')) $('ft_save').onclick=saveFeature;
+  q('#views [data-ftedit]', function(b){ b.onclick=function(){
+    var x=featureKnown(b.getAttribute('data-ftedit')); if(!x) return;
+    S.featEdit={id:String(x.id),name:x.name||'',description:x.description||'',active:Number(x.active)?1:0,existing:true};
+    paint(); }; });
+  q('#views [data-ftoff]', function(b){ b.onclick=function(){ setFeatureActive(b.getAttribute('data-ftoff'),false); }; });
+  q('#views [data-fton]', function(b){ b.onclick=function(){ setFeatureActive(b.getAttribute('data-fton'),true); }; });
+  q('#views [data-ftdel]', function(b){ b.onclick=function(){ featureDelete(b.getAttribute('data-ftdel')); }; });
+};
+function harvestFeature(){
+  if(!S.featEdit) return;
+  if($('ft_id')&&!S.featEdit.existing) S.featEdit.id=$('ft_id').value.trim().toLowerCase();
+  if($('ft_name')) S.featEdit.name=$('ft_name').value;
+  if($('ft_desc')) S.featEdit.description=$('ft_desc').value;
+  if($('ft_active')) S.featEdit.active=$('ft_active').checked?1:0;
+}
+function saveFeature(){
+  harvestFeature();
+  var x=S.featEdit; if(!x) return;
+  x.err='';
+  if(!x.id){ toast('A feature needs an id','bad'); return; }
+  /* The server slugs anything it is given; refusing here instead means the admin sees
+     the id they will actually be stuck with, before it becomes a primary key. */
+  if(!/^[a-z0-9][a-z0-9._-]*$/.test(x.id)){ toast('Id: lowercase letters, digits, dot, dash, underscore','bad'); return; }
+  if(!x.existing && featureKnown(x.id)){ x.err='“'+x.id+'” is already in the catalogue. Edit that row instead — creating it again would overwrite its name and description.'; paint(); return; }
+  post('/api/feature',{id:x.id,name:x.name||x.id,description:x.description||'',active:x.active?1:0}, true)
+    .then(function(j){
+      if(!j.ok){ x.err=j.error||'The server refused this feature.'; paint(); return; }
+      toast(x.existing?'Feature saved':'Feature created — a label until the extension asks for it','ok',4200);
+      S.featEdit=null; loadFeatures(); loadPlans(); loadAudit(); paint(); });
+}
+function setFeatureActive(id,on){
+  var x=featureKnown(id); if(!x) return;
+  var go2=function(){
+    post('/api/feature',{id:id,name:x.name||id,description:x.description||'',active:on?1:0})
+      .then(function(j){ if(j.ok){ toast(on?'Reactivated':'Retired — existing grants keep working','ok'); loadFeatures(); loadAudit(); } });
+  };
+  if(on) return go2();
+  var use=featureUse(id);
+  modal({title:'Retire “'+id+'”?',
+    message:'Nothing is taken away: every plan and account holding this feature keeps it, and it keeps working exactly as it does now'
+      + (use.plans.length?' (still granted by '+use.plans.join(', ')+')':'')
+      + '. Retiring only stops NEW grants — setFeatures will refuse this id from now on. Reactivating is one click.',
+    confirmText:'Retire'}).then(function(ok){ if(ok) go2(); });
+}
+/* The 409 is the interesting answer, exactly as it is for a plan: it is the only
+   place the server says a feature is load-bearing, and it names both counts because
+   they need different fixes — a plan is one edit, N accounts are N. */
+function featureDelete(id){
+  var use=featureUse(id);
+  confirmDanger('Delete “'+id+'” from the catalogue?',
+    'Deleting removes the row entirely. Any plan or account still granting this id would be left pointing at a feature that no longer exists, so the server refuses while any grant remains — and names how many. '
+    + (use.plans.length||use.users ? 'The loaded pages already show '+use.plans.length+' plan(s) and '+use.users+' account(s) granting it, so this will almost certainly be refused. ' : '')
+    + 'Retiring is the reversible move: it stops new grants without taking anything away.',
+    'Delete').then(function(v){
+    if(!v) return;
+    if(DEMO){ S.featRefused={id:id,plans:use.plans.length,users:use.users}; toast('Demo — this is the refusal the server would send','n'); paint(); return; }
+    post('/api/feature/delete',{id:id},true).then(function(j){
+      if(j.ok){ toast('Feature deleted','ok'); S.featRefused=null; loadFeatures(); loadPlans(); loadAudit(); return; }
+      S.featRefused={id:id, plans:(typeof j.plans==='number'?j.plans:null), users:(typeof j.users==='number'?j.users:null), error:j.error||'refused'};
+      toast(id+' was not deleted','bad');
       paint();
     });
   });
@@ -2583,7 +3069,9 @@ function demoGet(p){
     {email:'hala@mansour.co',name:'Hala Mansour',company:'Mansour & Co',plan:'pro',quota:5,clientCount:4,deviceCount:2,jobCount:61,docs:184220,status:'active',validUntil:day(23),lastSeen:iso(6),tags:['priority']},
     {email:'karim@adel.eg',name:'Karim Adel',company:'Adel Accounting',plan:'free',quota:1,clientCount:1,deviceCount:1,jobCount:8,docs:9120,status:'active',validUntil:day(9),lastSeen:iso(220),tags:[]},
     {email:'nour@fahmy.eg',name:'Nour Fahmy',company:'Fahmy Tax',plan:'standard',quota:5,clientCount:3,deviceCount:1,jobCount:44,docs:60110,status:'active',validUntil:day(-6),lastSeen:iso(90),tags:[]},
-    {email:'adel@sabry.eg',name:'Adel Sabry',company:'Sabry Audit',plan:'legacy',quota:12,clientCount:12,deviceCount:5,jobCount:214,docs:912004,status:'locked',validUntil:day(150),lastSeen:iso(2900),tags:['watch']}]};
+    /* A negotiated account, holding more browsers than it is allowed: the grandfathered
+       case both the Users page and the entitlement panel exist to say calmly. */
+    {email:'adel@sabry.eg',name:'Adel Sabry',company:'Sabry Audit',plan:'custom',quota:12,deviceQuota:3,clientCount:12,deviceCount:5,jobCount:214,docs:912004,status:'locked',validUntil:day(150),lastSeen:iso(2900),tags:['watch']}]};
   if(p.indexOf('/api/user?')===0){
     var em=decodeURIComponent((/[?&]email=([^&]*)/.exec(p)||[])[1]||'');
     /* Two accounts that inherit, so the INHERITED half of the Features panel is
@@ -2594,12 +3082,30 @@ function demoGet(p){
       devices:[{deviceId:'dev_77aa10bb42',version:'0.3.9',country:'EG',lastRin:'318772041',exports:8,docs:9120,lastSeen:iso(220)}],
       jobs:[{jobId:'job_7b02c1d5',rin:'318772041',source:'Purchases',state:'running',done:11,total:40,createdAt:iso(96),updatedAt:iso(46)},
             {jobId:'job_9c0b7744',rin:'318772041',source:'Purchases',state:'failed',done:14,total:30,createdAt:iso(1400)}],
+      entitlement:{plan:'free',custom:false,clients:1,devices:1,features:[],planClients:1,planDevices:1,
+                   devicesUsed:1,overDevices:false,source:{clients:'plan',devices:'plan',features:'plan'}},
       bugs:[], audit:[{at:iso(1200),action:'setValidUntil',actor:'token',detail:{to:day(9)}}]};
+    /* The negotiated account: every number comes from the account, and it is over its
+       device allowance — grandfathered, not broken. */
+    if(em==='adel@sabry.eg') return {ok:true,
+      user:{email:'adel@sabry.eg',name:'Adel Sabry',company:'Sabry Audit',phone:'+20 111 200 4412',plan:'custom',quota:12,deviceQuota:3,clientCount:12,deviceCount:5,jobCount:214,docs:912004,status:'locked',superadmin:0,validUntil:day(150),country:'EG',note:'Negotiated 2025 — 12 TRNs, 3 seats.',tags:['watch'],features:['auto-reject','legacy-xml'],createdAt:'2025-09-30T07:00:00Z',lastSeen:iso(2900)},
+      entitlement:{plan:'custom',custom:true,clients:12,devices:3,features:['auto-reject','legacy-xml'],
+                   planClients:0,planDevices:0,devicesUsed:5,overDevices:true,
+                   source:{clients:'custom',devices:'custom',features:'custom'}},
+      clients:[{rin:'204918377',company:'Nile Foods',voided:0,jobCount:31,docs:98220,lastExportAt:iso(9000)}],
+      devices:[{deviceId:'dev_aa01',version:'0.4.1',country:'EG',lastRin:'204918377',exports:80,docs:410000,lastSeen:iso(2900)},
+               {deviceId:'dev_aa02',version:'0.4.0',country:'EG',lastRin:'204918377',exports:60,docs:300000,lastSeen:iso(4400)},
+               {deviceId:'dev_aa03',version:'0.3.9',country:'EG',lastRin:'204918377',exports:40,docs:120000,lastSeen:iso(9000)},
+               {deviceId:'dev_aa04',version:'0.3.9',country:'EG',lastRin:'204918377',exports:20,docs:60000,lastSeen:iso(14000)},
+               {deviceId:'dev_aa05',version:'0.3.7',country:'EG',lastRin:'204918377',exports:14,docs:22004,lastSeen:iso(41000)}],
+      jobs:[], bugs:[], audit:[{at:iso(5000),action:'setDeviceQuota',actor:'token',detail:{value:3}}]};
     if(em==='nour@fahmy.eg') return {ok:true,
       user:{email:'nour@fahmy.eg',name:'Nour Fahmy',company:'Fahmy Tax',phone:'',plan:'standard',quota:5,clientCount:3,deviceCount:1,jobCount:44,docs:60110,status:'active',superadmin:0,validUntil:day(-6),country:'EG',note:'',tags:[],features:null,createdAt:'2026-01-19T12:00:00Z',lastSeen:iso(90)},
       clients:[{rin:'552019887',company:'Delta Textiles',voided:0,jobCount:44,docs:60110,lastExportAt:iso(90)}],
       devices:[{deviceId:'dev_5510cc9081',version:'0.4.1',country:'EG',lastRin:'552019887',exports:44,docs:60110,lastSeen:iso(90)}],
       jobs:[{jobId:'job_3d19aa20',rin:'552019887',source:'Sales',state:'merging',done:36,total:36,createdAt:iso(58),updatedAt:iso(2)}],
+      entitlement:{plan:'standard',custom:false,clients:5,devices:3,features:['auto-reject'],planClients:5,planDevices:3,
+                   devicesUsed:1,overDevices:false,source:{clients:'plan',devices:'plan',features:'plan'}},
       bugs:[], audit:[]};
     return {ok:true,
     /* Plan pro grants auto-reject AND po-analytics; this account carries an
@@ -2613,6 +3119,10 @@ function demoGet(p){
              {deviceId:'dev_3b02aa1177',version:'0.3.9',country:'EG',lastRin:'552019887',exports:17,docs:44120,lastSeen:iso(1400)}],
     jobs:[{jobId:'job_8f21ac93',rin:'204918377',source:'Sales',state:'running',done:1840,total:4200,createdAt:iso(20)},
           {jobId:'job_44ae0031',rin:'552019887',source:'Purchases',state:'done',done:2100,total:2100,createdAt:iso(400)}],
+    /* Plan pro gives 25 clients and 10 devices; the account carries 5, which loses to
+       the plan — the "your override is not larger, so it does not win" line. */
+    entitlement:{plan:'pro',custom:false,clients:25,devices:10,features:['auto-reject'],planClients:25,planDevices:10,
+                 devicesUsed:2,overDevices:false,source:{clients:'plan',devices:'plan',features:'override'}},
     bugs:[{id:'bug_1',status:'open',at:iso(600),rin:'204918377',message:'Merge stalled at chunk 12 of 40.'}],
     audit:[{at:iso(31),action:'client.move',actor:'token',detail:{rin:'204918377'}},
            {at:iso(900),action:'setQuota',actor:'token',detail:{from:3,to:5}}]};
@@ -2650,10 +3160,17 @@ function demoGet(p){
     return {ok:true, job:job, chunks: job.jobId==='job_1188ef' ? [] : demoChunks(job)};
   }
   if(p.indexOf('/api/plans')===0) return {ok:true,plans:[
-    {id:'free',    name:'Free',     quota:1,  features:[],                           price:'—',                active:1},
-    {id:'standard',name:'Standard', quota:5,  features:['auto-reject'],              price:'EGP 4,800 / yr',   active:1},
-    {id:'pro',     name:'Pro',      quota:25, features:['auto-reject','po-analytics'],price:'EGP 18,000 / yr', active:1},
-    {id:'legacy',  name:'Legacy 2025',quota:3,features:['auto-rejct'],               price:'—',                active:0}]};
+    {id:'free',    name:'Free',     quota:1,  deviceQuota:1, features:[],                           price:'—',                active:1},
+    {id:'standard',name:'Standard', quota:5,  deviceQuota:3, features:['auto-reject'],              price:'EGP 4,800 / yr',   active:1},
+    {id:'pro',     name:'Pro',      quota:25, deviceQuota:10,features:['auto-reject','po-analytics'],price:'EGP 18,000 / yr', active:1},
+    {id:'legacy',  name:'Legacy 2025',quota:3,deviceQuota:1, features:['auto-rejct'],               price:'—',                active:0}]};
+  /* SPEC-019 catalogue. `bulk-pdf` is the case the whole section exists to make
+     visible: a real, active, sellable row that nothing in the extension asks for. */
+  if(p.indexOf('/api/features')===0) return {ok:true,features:[
+    {id:'auto-reject',  name:'Auto rejection',   description:'The Rejection tab and its scan/submit flow', active:1, createdAt:'2026-06-01T00:00:00Z'},
+    {id:'bulk-pdf',     name:'Bulk PDF download',description:'Official PDFs alongside the workbook',       active:1, createdAt:'2026-08-01T00:00:00Z'},
+    {id:'po-analytics', name:'PO reconciliation',description:'The purchase-order matching card',           active:1, createdAt:'2026-06-01T00:00:00Z'},
+    {id:'legacy-xml',   name:'Raw XML export',   description:'Withdrawn in 0.4 — kept for the accounts that still hold it', active:0, createdAt:'2025-11-02T00:00:00Z'}]};
   if(p.indexOf('/api/stats')===0) return {ok:true,stats:{},cfg:{defaultQuota:1,globalKill:false,minVersion:'',killedVersions:[]}};
   if(p.indexOf('/api/health')===0) return {ok:true,health:{locksBound:true,kvOk:true,adminTokenSet:true,globalKill:false,minVersion:'',killedVersions:0,announcementActive:false}};
   return {ok:true,requests:[],bugs:[],voids:[],audit:[],errors:[],trash:[],snaps:[]};

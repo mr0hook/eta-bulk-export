@@ -28,6 +28,7 @@ import { renderPoAnalytics, renderPoTemplate, poAnalyticsName } from '../reject/
 import {
   defaultRange, defaultAdvanced, normalizeAdvanced, loadAdvanced, saveAdvanced, advancedChanges,
   buildSel, sourceOfKind, kindOf, rejectionAllowed, resumeEntry, planFromJob, finishRun, runFinished, runClean,
+  registerRefusal,
 } from './flow.js';
 
 const CSS = `
@@ -821,7 +822,14 @@ export function mountUI() {
     try {
       const res = await register({ name: $('rg-name').value, email: $('rg-email').value, phone: $('rg-phone').value, company: $('rg-company').value, consent: $('rg-consent').checked });
       if (res.ok) { msg.textContent = ''; await refreshLicense(); setFt('ok', t('ft.registered')); }
-      else { msg.style.color = 'var(--err)'; msg.textContent = res.error || t('gate.regFailed'); }
+      else {
+        // A device-limit refusal is not a failure the user can retry their way out of — it names
+        // two counts and needs an admin. registerRefusal() phrases it; anything else keeps the
+        // server's own error, which is already written for the person reading it.
+        const refusal = registerRefusal(res);
+        msg.style.color = 'var(--err)';
+        msg.textContent = (refusal && refusal.text) || res.error || t('gate.regFailed');
+      }
     } catch (e) {
       msg.style.color = 'var(--err)'; msg.textContent = t('gate.regError', { msg: e && e.message ? e.message : e });   // never leave the button stuck on "Submitting…"
     } finally {

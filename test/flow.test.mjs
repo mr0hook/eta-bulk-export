@@ -8,11 +8,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { SOURCES, ALL_STATUSES } from '../src/api/sources.js';
-import { EN, AR } from '../src/core/i18n.js';
+import { EN, AR, setLang } from '../src/core/i18n.js';
 import {
   KINDS, selOfKind, kindOf, defaultRange, defaultAdvanced, normalizeAdvanced,
   loadAdvanced, saveAdvanced, advancedChanges, buildSel, yearLabel,
   rejectionAllowed, resumeEntry, planFromJob, isUnreadableSkip, finishRun, runFinished, runClean,
+  registerRefusal,
 } from '../src/ui/flow.js';
 
 // A localStorage that behaves like the browser's, for the persistence cases. ls.js swallows a
@@ -332,4 +333,49 @@ test('RTL: the new flow chrome uses logical properties and leaves Arabic alone',
     assert.deepEqual(rules, [], `physical property "${bad}" — use the logical one so RTL mirrors`);
   }
   assert.match(css, /\.drawer\[dir=rtl\][\s\S]*text-transform:none/, 'RTL must neutralise the uppercase micro-labels');
+});
+
+// ── T-185 — the device-limit refusal is its own message ──────────────────────────────────────────
+// SPEC-019 gives the cap its own `reason` so the drawer can explain it. The failure this guards
+// against is the cheap one: catching the refusal in the generic "server error" arm, where a user
+// holding four browsers on a one-device plan learns nothing and re-registers, which cannot help.
+test('T-185 /register device_limit renders its own line naming both counts', () => {
+  const r = registerRefusal({ ok: false, error: 'device limit reached', reason: 'device_limit', held: 4, allowed: 1 });
+  assert.ok(r, 'a device_limit refusal must be recognised');
+  assert.equal(r.reason, 'device_limit');
+  assert.equal(r.held, 4);
+  assert.equal(r.allowed, 1);
+  // Both counts, in the sentence, in that order — the whole point of the reason carrying two numbers.
+  assert.match(r.text, /already uses 4 of 1 devices/);
+  // And it must say what did NOT happen: the natural reading of a refusal here is "my licence broke".
+  assert.match(r.text, /keeps working/);
+  assert.ok(!/\{\w+\}/.test(r.text), 'no placeholder may survive into the rendered line');
+  assert.notEqual(r.text, EN['reg.serverError'], 'not the generic failure');
+
+  // Arabic renders the same two numbers rather than falling back to English.
+  setLang('ar');
+  try {
+    const ar = registerRefusal({ ok: false, reason: 'device_limit', held: 4, allowed: 1 });
+    assert.equal(ar.text, AR['reg.deviceLimit'].replace('{held}', '4').replace('{allowed}', '1'));
+    assert.ok(ar.text.includes('4') && ar.text.includes('1'));
+  } finally { setLang('en'); }
+});
+
+test('T-185 every other /register answer is left to the caller, and counts are coerced', () => {
+  // A success, an unrelated refusal and rubbish all mean "not mine" — never a device-limit line.
+  assert.equal(registerRefusal({ ok: true }), null);
+  assert.equal(registerRefusal({ ok: false, error: 'rin already bound', reason: 'rin_not_allowed' }), null);
+  assert.equal(registerRefusal({ ok: false, error: 'boom' }), null);
+  assert.equal(registerRefusal(null), null);
+  assert.equal(registerRefusal('device_limit'), null);
+  // ok:true wins even if a reason rode along — a registration that succeeded was not refused.
+  assert.equal(registerRefusal({ ok: true, reason: 'device_limit', held: 4, allowed: 1 }), null);
+
+  // Counts arrive as JSON: a missing or unusable one must read as 0, never as "undefined devices".
+  const r = registerRefusal({ ok: false, reason: 'device_limit' });
+  assert.equal(r.held, 0);
+  assert.equal(r.allowed, 0);
+  assert.ok(!/undefined|NaN/.test(r.text));
+  assert.equal(registerRefusal({ ok: false, reason: 'device_limit', held: '4', allowed: '1' }).held, 4);
+  assert.equal(registerRefusal({ ok: false, reason: 'device_limit', held: -3, allowed: 1.9 }).held, 0);
 });

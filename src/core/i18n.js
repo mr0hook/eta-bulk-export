@@ -93,6 +93,11 @@ export const EN = {
   'reg.unreachable': 'Could not reach the registration server ({err}). Set LEAD_URL, run npm run build, then remove & re-add the extension.',
   'reg.serverError': 'Server error ({status}).',
   'reg.storageBlocked': 'Registered on the server, but this browser blocked local storage. Turn off private/incognito mode or allow site data for the ETA portal, then retry.',
+  // SPEC-019 — the device allowance refusal. Its own message, not a generic failure: the server sent
+  // both counts, and "This account already uses 4 of 1 devices" is the only sentence that lets
+  // somebody act. It also has to say what did NOT happen, because the natural reading of a refusal
+  // at this moment is "my licence broke" — nothing was unregistered, and no other browser is affected.
+  'reg.deviceLimit': 'This account already uses {held} of {allowed} devices, so this browser cannot be added. Nothing was lost — every browser already registered keeps working. Use one of those, or ask your administrator to raise the device allowance.',
   // ── drawer chrome ──
   'plan.contacting': 'Asking the server to plan this range…',
   'plan.retry': '⏳ Server unreachable — retrying in {s}s…',
@@ -342,6 +347,7 @@ export const AR = {
   'reg.unreachable': 'تعذّر الوصول إلى خادم التسجيل ({err}). أعد المحاولة لاحقًا.',
   'reg.serverError': 'خطأ من الخادم ({status}).',
   'reg.storageBlocked': 'تم التسجيل على الخادم، لكن المتصفح منع التخزين المحلي. أوقف وضع التصفح الخفي أو اسمح ببيانات الموقع لبوابة الضرائب ثم أعد المحاولة.',
+  'reg.deviceLimit': 'هذا الحساب يستخدم بالفعل {held} من {allowed} أجهزة، لذلك لا يمكن إضافة هذا المتصفح. لم يُفقد شيء — كل متصفح مسجَّل من قبل ما زال يعمل. استخدم أحدها، أو اطلب من المسؤول رفع عدد الأجهزة المسموح بها.',
   'plan.contacting': 'جارٍ الطلب من الخادم تخطيط هذه الفترة…',
   'plan.retry': '⏳ تعذّر الوصول إلى الخادم — إعادة المحاولة خلال {s} ثانية…',
   'plan.ready': '✅ الخطة جاهزة: {n} جزء',
