@@ -210,3 +210,95 @@ extension API, and the portal reports the truth about that rather than hiding it
 - **Gate the rejection tab** on `features.includes('auto-reject')`. Note: the drawer currently reads
   `features` NOWHERE — `/session` returns it and nothing consumes it. This is the first gate, not a
   change to an existing one.
+
+---
+
+## API contract — slice 4 (bugs + audit trail)
+
+Appended by the slice 4 build. Same rules as every section above: admin bearer token,
+`{ok:true,…}` / `{ok:false,error}`, and **neither the backend nor the frontend may change these
+unilaterally.**
+
+```
+GET  /api/bugs?status=&q=&page=      → { bugs:[…], total, page, pages, openCount }
+       status  open | resolved | '' (all)      q  matches name·email·rin·message·deviceId·diag.version
+       bug   { id, at, status, message, name, email, rin, deviceId, ua, version,
+               diag, note, resolvedAt,                    ← the record as filed, fields unchanged
+               user:   { …the /api/users user shape } | null,
+               device: { deviceId, version, country, lastSeen, lastRin, … } | null,
+               job:    { …the slice-2 job shape } | null,
+               jobMatch: 'exact' | 'inferred' | 'none' }
+       note  { text, at, by }                  by = the actor who assigned it
+
+GET  /api/bug?id=                    → { bug, user, device, job, jobMatch, events:[…], eventWindowMs }
+       events  the shipped run log AROUND the moment the report was filed (±10 min), oldest first.
+               Empty for a run that reached 'done' — the log is purged with the chunks. The tail the
+               CLIENT attached survives that, in bug.diag.log, because it is part of the report.
+
+POST /api/bug   { id, action, value }  actions: resolve | reopen | delete | note (value = text)
+                                     → { ok, bug:{ id, status, note, resolvedAt } } | { ok, deleted }
+
+GET  /api/audit?page=&actor=&target=&action=   → { entries:[…], audit:[…], total, page, pages,
+                                                   scanned, truncated }
+       entry { at, action, actor, via, target, detail }
+       via   'access' | 'token'   where the actor's name came from — never inferred by the reader
+       audit an alias for `entries`; the legacy KV dashboard reads that key. Drop it with that page.
+```
+
+**The job join.** A report knows the browser it came from; the diag bundle already carries the plan
+summary the user had on screen. The runs of that device made at or before the report are scored
+against it (source ·2, from ·2, to ·2, chunk count ·3); ≥5 is `exact`. Otherwise the newest run that
+device touched within 6 hours is offered as `inferred` — labelled, never presented as certain. A
+browser that had made no run answers `none`, which is the correct answer for most reports.
+
+**Filtering the trail** is a scan: `audit:` keys carry a descending timestamp and no index. It is
+bounded at the newest 1000 records, and the answer says how many it read (`scanned`) and whether it
+hit that ceiling (`truncated`) — a filtered list that quietly stopped early is worse than a refusal.
+
+### Every mutating call carries an actor — and what changed
+
+`detail` may now carry `before` / `after` (and `field`, where one column moved). Entitlement actions
+always do: `setQuota`, `setDeviceQuota`, `setPlan`, `setValidUntil`, `setFeatures`, `setTags`,
+`lock`/`unlock`, `kill`/`revive`, `super`/`unsuper`, plus plan and feature upserts and deletes, the
+config edit, `void`/`unvoid`, `move`, and the job state changes. "Who set this to 1" is unanswerable
+from an entry that records only that a button was pressed.
+
+**Not logged, on purpose:**
+
+| | Why |
+|---|---|
+| `clientKey`, bearer tokens, signatures, nonces | The trail lives 180 days and is read by more people than the secret store is. A redactor strips any detail key whose NAME looks like a credential, so this stays true when a field is added in a hurry. |
+| the body of a support note or admin note | Free text about a named person, quoted from them. The entry records that a note was written and how long it was; the note itself lives on the record where whoever picks it up next will see it. |
+| the body of a bug report on delete | The user's own words about their own tax data. Deleting it must not copy it somewhere longer-lived. |
+| the text of an admin → device message | Already capped to a 60-character subject, as before. |
+
+### Admin identity
+
+`Cf-Access-Authenticated-User-Email` is read when present and becomes the actor; anything else is
+`'token'`, exactly as before. **This is a label, not verification** — proving it means validating the
+`Cf-Access-Jwt-Assertion` JWT against the team's public keys, which needs the team domain and
+application AUD from the account owner's Cloudflare dashboard and is therefore out of scope here.
+The action was already authorised by the bearer token; the header only says who was holding it. `via`
+records which of the two the name came from so nobody reading the trail can mistake one for the
+other. The day Access is switched on, the trail starts naming people with no code change.
+
+### Audit gaps this slice closed
+
+Two mutating endpoints wrote nothing at all before it, which is worse than having no trail because
+the trail looked complete: `POST /api/bug` (resolve, reopen and **delete** — a user's report could be
+destroyed without a record) and `POST /api/request` with `action=delete` (clearing clutter and making
+an approval disappear are the same keystroke, and only one of them was visible). Both are audited
+now. `POST /api/bug` and `GET /api/audit` moved from `routes/admin.js` to `routes/portal.js`, and
+both are answered **before** the D1 gate: reading your own history and closing a report must not
+depend on a binding the joins need.
+
+### Test cases
+
+| ID | Case |
+|---|---|
+| T-189 | A bug report joins to its user, its device and the run it came out of; a report with no diagnostics is `inferred`; a device that never ran an export is `none` |
+| T-190 | resolve · reopen · delete · note are stored on the report and audited — including the two endpoints that used to mutate in silence |
+| T-191 | The actor is the Access identity when the header is present, `'token'` when it is absent or malformed |
+| T-192 | An entitlement change records the value on both sides of it; a support note records only its shape |
+| T-193 | `/api/audit` pages and filters by actor, target and action |
+| T-194 | No endpoint writes an entry without an actor, and no secret ever reaches the trail |

@@ -160,6 +160,15 @@ function makeD1() {
     // and the reads agree about the columns.
     if (sql.includes('pragma_table_info')) return [{ n: 1 }];
 
+    // ── slice 4: the two reads the bug↔user↔job join needs ──
+    // A device BY ID (listDevices only answers "this person's browsers", and a bug report may know a
+    // device and no email), and the runs a device has made, newest first.
+    if (sql.includes('/* device row */')) { const d = devices.get(a[0]); return d ? [d] : []; }
+    if (sql.includes('/* bug jobs */')) {
+      return [...jobs.values()].filter((j) => j.device_id === a[0])
+        .sort((x, y) => String(y.created_at).localeCompare(String(x.created_at))).slice(0, a[1]);
+    }
+
     // ── slice 3: plans + the entitlement resolve ──
     if (sql.includes('/* plans */')) return [...plans.values()].sort((x, y) => (x.quota | 0) - (y.quota | 0) || String(x.id).localeCompare(String(y.id)));
     if (sql.includes('/* plan */')) { const p = plans.get(a[0]); return p ? [p] : []; }
@@ -893,6 +902,125 @@ try {
   const reserved = await admin('/api/plan', { id: 'custom', name: 'Custom', quota: 9 });
   check('T-188 POST /api/plan refuses the reserved id "custom"',
     reserved.status === 400 && /reserved/.test((await reserved.json()).error) && !JOBS._plans.has('custom'));
+
+  // ── SPEC-017 slice 4: bugs joined to people and runs, and a real audit trail ──────────────────
+  // The same admin token, plus the header Cloudflare Access stamps on every request it lets through.
+  const adminAs = (who, path, body) => call(path, body
+    ? { method: 'POST', body: JSON.stringify(body), headers: { authorization: 'Bearer testtok', 'content-type': 'application/json', 'cf-access-authenticated-user-email': who } }
+    : { headers: { authorization: 'Bearer testtok', 'cf-access-authenticated-user-email': who } });
+
+  // A run with a range of its OWN: the three earlier jobs all share startBody's dates, so a report
+  // matched against them would be asserting luck rather than the matcher.
+  const bugRange = { ...startBody, from: '2024-03-01', to: '2024-03-31' };
+  const bJob = await (await signed('/plan/start', bugRange, PK, PD)).json();
+  {
+    let c = bJob.cursor, i = bJob.instruction, n = 0;
+    while (i && n++ < 50) {
+      const obs = i.kind === 'detectMaxSub' ? { maxSub: null } : { count: probeFor(i.fromISO || i.subF, i.toISO || i.subT) };
+      const r = await (await signed('/plan/step', { jobId: bJob.jobId, cursor: c, observation: obs }, PK, PD)).json();
+      if (r.done) break;
+      c = r.cursor; i = r.instruction;
+    }
+  }
+  const bChunks = JOBS._jobs.get(bJob.jobId).total_chunks;
+  // Log lines timestamped AROUND now, because "the lines around the report" is a time window and a
+  // 2026-01-01 fixture would only ever exercise the fallback.
+  await signed('/job/log', { jobId: bJob.jobId, lines: [
+    { at: new Date(Date.now() - 60000).toISOString(), level: 'run', kind: 'page', text: 'chunk 1/1 fetching 100/100' },
+    { at: new Date(Date.now() - 30000).toISOString(), level: 'warn', kind: null, text: '2 documents dropped in chunk 1' },
+  ] }, PK, PD);
+
+  const bugRep = await (await signed('/bug', { message: 'export stalled at chunk 1', diag: {
+    version: '9.9.9', last: 'Fetching', log: ['chunk 1/1 fetching 100/100'],
+    plan: { source: 'invoices', year: '2024', from: '2024-03-01', to: '2024-03-31', chunks: bChunks, done: 0, failed: 0, rows: 100, pdf: false },
+  } }, PK, PD)).json();
+
+  const bd = await (await admin('/api/bug?id=' + bugRep.id)).json();
+  check('T-189 a bug report joins to its user, its device and the run it came out of',
+    bd.ok && bd.user && bd.user.email === 'planner@gmail.com' && bd.device && bd.device.deviceId === PD
+    && !('clientKey' in bd.device)                                          // the HMAC secret never leaves D1
+    && bd.job && bd.job.jobId === bJob.jobId && bd.jobMatch === 'exact'
+    && bd.events.length === 2 && bd.events[1].text === '2 documents dropped in chunk 1');
+
+  const bugNoDiag = await (await signed('/bug', { message: 'no diagnostics from this build' }, PK, PD)).json();
+  const bd2 = await (await admin('/api/bug?id=' + bugNoDiag.id)).json();
+  check('T-189 a report with no diagnostics falls back to the run that browser last touched, labelled inferred',
+    bd2.ok && bd2.jobMatch === 'inferred' && bd2.job && bd2.job.jobId === bJob.jobId);
+
+  const bl = await (await admin('/api/bugs')).json();
+  const blRow = bl.bugs.find((g) => g.id === bugRep.id);
+  const blOrphan = bl.bugs.find((g) => g.deviceId === 'dev-1');
+  check('T-189 /api/bugs joins every row, keeps the legacy fields, and says when no run is determinable',
+    bl.ok && blRow && blRow.job.jobId === bJob.jobId && blRow.jobMatch === 'exact'
+    && blRow.user.email === 'planner@gmail.com' && blRow.device.deviceId === PD
+    && blRow.message === 'export stalled at chunk 1' && !!blRow.diag                 // …and the KV dashboard's shape survives
+    && blOrphan && blOrphan.job === null && blOrphan.jobMatch === 'none'             // dev-1 never ran an export
+    && bl.total === [...store.keys()].filter((k) => k.startsWith('bug:')).length);
+
+  const bugResolved = await (await admin('/api/bug', { id: bugRep.id, action: 'resolve' })).json();
+  const bugNoted = await (await admin('/api/bug', { id: bugRep.id, action: 'note', value: 'called the user, the ETA portal was down' })).json();
+  const openOnly = await (await admin('/api/bugs?status=open')).json();
+  const emptyNote = await admin('/api/bug', { id: bugRep.id, action: 'note', value: '   ' });
+  check('T-190 resolve and an assigned note are stored on the report, audited, and the note body is NOT in the trail',
+    bugResolved.ok && bugNoted.ok && bugNoted.bug.note.text.startsWith('called the user')
+    && bugNoted.bug.note.by === 'token' && emptyNote.status === 400
+    && !openOnly.bugs.some((g) => g.id === bugRep.id) && openOnly.bugs.some((g) => g.id === bugNoDiag.id)
+    && auditAll().some((e) => e.action === 'bug:resolve' && e.target === bugRep.id && e.detail.before === 'open' && e.detail.after === 'resolved')
+    && auditAll().some((e) => e.action === 'bug:note' && e.detail.chars > 0)
+    && !/called the user/.test(JSON.stringify(auditAll())));
+
+  const reopened = await (await adminAs('omar@firm.example', '/api/bug', { id: bugRep.id, action: 'reopen' })).json();
+  const junkHeader = await (await adminAs('not-an-email', '/api/bug', { id: bugRep.id, action: 'resolve' })).json();
+  const eReopen = auditAll().find((e) => e.action === 'bug:reopen' && e.target === bugRep.id);
+  const eResolve = auditAll().find((e) => e.action === 'bug:resolve' && e.target === bugRep.id);
+  check('T-191 the actor is the Access identity when the header is present and falls back to "token" when it is not',
+    reopened.ok && junkHeader.ok
+    && eReopen && eReopen.actor === 'omar@firm.example' && eReopen.via === 'access'
+    && eResolve && eResolve.actor === 'token' && eResolve.via === 'token');   // newest resolve: the junk header was refused
+
+  // Entitlement changes carry both sides. `other@example.com` is on pro with the migrated quota of 1.
+  await admin('/api/user', { email: 'other@example.com', action: 'setQuota', value: 7 });
+  await adminAs('boss@firm.example', '/api/user', { email: 'other@example.com', action: 'setPlan', value: 'standard' });
+  await admin('/api/user', { email: 'cat@example.com', action: 'setFeatures', value: 'auto-reject,po-analytics' });
+  await admin('/api/user', { email: 'other@example.com', action: 'setNote', value: 'renewal call booked for Tuesday' });
+  const eQuota = auditAll().find((e) => e.action === 'user:setQuota' && e.target === 'other@example.com');
+  const ePlan = auditAll().find((e) => e.action === 'user:setPlan' && e.target === 'other@example.com');
+  const eFeat = auditAll().find((e) => e.action === 'user:setFeatures' && e.target === 'cat@example.com');
+  check('T-192 an entitlement change records the value on BOTH sides of it, and a support note records only its shape',
+    eQuota && eQuota.detail.field === 'quota' && eQuota.detail.before === 1 && eQuota.detail.after === 7
+    && ePlan && ePlan.detail.before === 'pro' && ePlan.detail.after === 'standard' && ePlan.actor === 'boss@firm.example'
+    && eFeat && eFeat.detail.before.join() === 'auto-reject' && eFeat.detail.after.join() === 'auto-reject,po-analytics'
+    && !/renewal call booked/.test(JSON.stringify(auditAll())));
+
+  // The two endpoints that mutated in silence before this slice.
+  await admin('/api/request', { id: rr.id, action: 'delete' });
+  await admin('/api/bug', { id: bug2.id, action: 'delete' });
+  check('T-190 the two endpoints that used to mutate silently now write an entry',
+    auditAll().some((e) => e.action === 'request_delete' && e.detail.after === '(deleted)')
+    && auditAll().some((e) => e.action === 'bug:delete' && e.target === bug2.id)
+    && !store.has('bug:' + bug2.id) && !store.has('req:' + rr.id));
+
+  const audAll = await (await admin('/api/audit')).json();
+  const audActor = await (await admin('/api/audit?actor=boss@firm.example')).json();
+  const audTarget = await (await admin('/api/audit?target=other@example.com')).json();
+  const audAction = await (await admin('/api/audit?action=bug:')).json();
+  const audPage2 = await (await admin('/api/audit?page=2')).json();
+  check('T-193 /api/audit pages, and filters by actor, target and action',
+    audAll.ok && audAll.total === auditAll().length && audAll.entries.length === Math.min(50, audAll.total)
+    && audAll.audit.length === audAll.entries.length                          // the legacy alias the KV dashboard reads
+    && audAll.entries[0].at >= audAll.entries[audAll.entries.length - 1].at    // newest first
+    && audActor.total >= 1 && audActor.entries.every((e) => e.actor === 'boss@firm.example')
+    && audTarget.total >= 1 && audTarget.entries.every((e) => String(e.target).includes('other@example.com'))
+    && audAction.total >= 3 && audAction.entries.every((e) => e.action.startsWith('bug:'))
+    && audPage2.page === 2 && audPage2.pages === audAll.pages
+    && audPage2.entries[0].at <= audAll.entries[49].at);
+
+  const trail = auditAll();
+  check('T-194 no endpoint writes an audit entry without an actor, and no secret ever reaches the trail',
+    trail.length > 0
+    && trail.every((e) => typeof e.actor === 'string' && e.actor.length > 0 && (e.via === 'token' || e.via === 'access'))
+    && !JSON.stringify(trail).includes(PK) && !JSON.stringify(trail).includes(reg.clientKey)
+    && !JSON.stringify(trail).includes('testtok'));
 
   // ── top-level catch ──
   const origGet = LEADS.get; LEADS.get = async () => { throw new Error('kv exploded'); };

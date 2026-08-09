@@ -441,6 +441,23 @@ export async function listDevices(env, email) {
   return rows(r);
 }
 
+/**
+ * SPEC-017 slice 4 — one device by id, for the bug↔user join.
+ *
+ * listDevices() answers "this person's browsers"; a bug report knows a deviceId and may know no
+ * email at all (an old client, or a report filed before the person was migrated), so the join has to
+ * be able to walk the other way. client_key is omitted for the same reason it is omitted there: it
+ * is the device's HMAC secret, not display data.
+ */
+export async function getDevice(env, deviceId) {
+  if (!hasDb(env)) return null;
+  const r = await env.JOBS.prepare(
+    `/* device row */ SELECT device_id, user_email, version, country, last_seen, last_rin, exports, docs, pdfs, created_at
+       FROM devices WHERE device_id = ?`,
+  ).bind(S(deviceId, 80)).first();
+  return r || null;
+}
+
 // Every column the SPEC-017 job shape needs, in one list — /api/jobs, /api/job and the drill-ins all
 // render the same row, and a column missing from one of them would show as a blank field rather than
 // as an error.
@@ -456,6 +473,20 @@ export async function listJobs(env, f = {}) {
        FROM jobs WHERE (? = '' OR user_email = ?) AND (? = '' OR rin = ?)
       ORDER BY created_at DESC LIMIT ?`,
   ).bind(email, email, rin, rin, N(f.limit) || 50).all();
+  return rows(r);
+}
+
+/**
+ * SPEC-017 slice 4 — the runs a DEVICE has made, newest first, so a bug report filed from that
+ * browser can be matched against the run that was in flight when it was filed. Device-keyed rather
+ * than person-keyed on purpose: the report names the browser it came from, and two of a person's
+ * browsers can be exporting different things at the same moment.
+ */
+export async function listJobsForDevice(env, deviceId, limit = 20) {
+  if (!hasDb(env)) return [];
+  const r = await env.JOBS.prepare(
+    `/* bug jobs */ SELECT ${JOB_COLS} FROM jobs WHERE device_id = ? ORDER BY created_at DESC LIMIT ?`,
+  ).bind(S(deviceId, 80), N(limit) || 20).all();
   return rows(r);
 }
 

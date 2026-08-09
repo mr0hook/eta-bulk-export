@@ -23,16 +23,21 @@
 // /api/users is redefined by the SPEC-017 contract and is served here. POST /api/user is
 // discriminated by its body: `{ email, … }` is a portal action, `{ deviceId, … }` is a legacy
 // per-device action and falls through to admin.js untouched.
+// Slice 4 adds the bug reports and the audit trail, both joined to the people they are about:
+//   GET  /api/bugs        every report, joined to its user, its device and the job it came out of
+//   GET  /api/bug?id=     one report with that join plus the run log around the moment it was filed
+//   POST /api/bug         { id, action:resolve|reopen|delete|note, value }   — audited
+//   GET  /api/audit       the trail itself, paged and filterable by actor / target / action
 import { json, cleanRin, randHex } from '../lib/util.js';
 import { getDev, putDev, listPrefix, withSeen } from '../lib/kv.js';
-import { audit } from '../lib/audit.js';
+import { audit, actorOf } from '../lib/audit.js';
 import {
   hasDb, ensureSchema, migrate, listUsers, getUser, listClients, getClient, listDevices,
   listJobs, listActiveJobs, dashboardStats, listExpiring, setUserField, deleteUser,
   setClientVoided, moveClient, listJobsPage, getJobRow, setJobState, purgeJobChunks,
   listPlans, getPlan, upsertPlan, deletePlan, countPlanUsers, resolveEntitlement,
   listFeatures, getFeature, upsertFeature, deleteFeature, countFeatureGrants, checkFeatureIds,
-  featureId, CUSTOM_PLAN,
+  getDevice, listJobsForDevice, featureId, CUSTOM_PLAN, PAGE,
 } from '../users.js';
 import { getChunks, getEvents } from '../jobs.js';
 
@@ -40,11 +45,14 @@ const OURS = new Set([
   '/api/dashboard', '/api/users', '/api/user', '/api/clients', '/api/client', '/api/migrate',
   '/api/jobs', '/api/job', '/api/plans', '/api/plan', '/api/plan/delete',
   '/api/features', '/api/feature', '/api/feature/delete',
+  '/api/bugs', '/api/bug', '/api/audit',
 ]);
 
 const STALE_MS = 30 * 60000;      // a run that hasn't checkpointed in half an hour is stuck, not slow
 const EXPIRY_DAYS = 14;           // "expiring soon" — long enough to renew, short enough to matter
 const ERR_SPIKE = 20;             // extension failures in the last hour before it is worth a phone call
+const BUG_JOB_WINDOW = 6 * 3600000;   // a run this device touched within 6h of the report is plausibly the one
+const EVENT_WINDOW = 10 * 60000;      // "around it" — the log lines either side of the moment it was filed
 
 export async function portalRoutes(request, env, url, path, admin) {
   if (!OURS.has(path)) return null;
@@ -55,9 +63,22 @@ export async function portalRoutes(request, env, url, path, admin) {
   if (path === '/api/user' && request.method === 'POST' && !b.email) return null;   // legacy deviceId action
 
   if (!admin()) return json({ ok: false, error: 'unauthorized' }, 401);
+  // Who is doing this. Read once per request and threaded through every audit() below — a call site
+  // that forgets it silently records 'token' for a named person, which is the one failure mode this
+  // trail cannot tolerate (see the T-190 assertion: no entry without an actor, ever).
+  const actor = actorOf(request);
+
+  // KV-only surfaces, answered BEFORE the D1 gate. The audit trail and the bug records live entirely
+  // in KV; only the joins need D1. An environment without the binding must still be able to read its
+  // own history and close a bug report — the alternative is a console that answers 503 to the two
+  // questions asked when something has already gone wrong.
+  if (request.method === 'GET' && path === '/api/audit') return auditPage(env, url);
+  if (request.method === 'POST' && path === '/api/bug') return bugAction(env, b, actor);
+
   // No D1 (the default wrangler target binds none): say so plainly for the new endpoints, but hand
-  // GET /api/users back to the KV dashboard rather than 503ing a page that worked yesterday.
-  if (!hasDb(env)) return (path === '/api/users' && request.method === 'GET')
+  // GET /api/users and GET /api/bugs back to the KV dashboard rather than 503ing pages that worked
+  // yesterday — unjoined rows are a poorer answer than the portal's, and a far better one than none.
+  if (!hasDb(env)) return (request.method === 'GET' && (path === '/api/users' || path === '/api/bugs'))
     ? null : json({ ok: false, error: 'portal unavailable — no D1 binding' }, 503);
   // Once per portal request, not per endpoint. Every read shape here now depends on a schema that
   // grows with the specs — users.device_quota and the features table arrived with SPEC-019 — and a
@@ -213,12 +234,19 @@ export async function portalRoutes(request, env, url, path, admin) {
         // D1 only. The KV account survives on purpose: it is what the extension still enforces
         // against, and deleting it from a new surface would be an unreviewable second delete path.
         await deleteUser(env, email);
-        await audit(env, 'user:delete', email, { name: user.name }, 'token');
+        await audit(env, 'user:delete', email, { name: user.name, before: entSnapshot(user), after: null }, actor);
         return json({ ok: true, deleted: true });
       default: return json({ ok: false, error: 'unknown action' }, 400);
     }
-    await audit(env, 'user:' + b.action, email, detail, 'token');
-    return json({ ok: true, user: shapeUser(await getUser(env, email)) });
+    // What CHANGED, not merely what was pressed. An entitlement action reads back the field it
+    // touched and records both sides, so the trail can answer "who dropped this account to 1 client
+    // and what was it before" without a second system to diff against. Actions whose value is
+    // customer-support prose (setNote) or a one-way device message (setMessage) record their SHAPE
+    // only — see the redaction note by entField.
+    const after = await getUser(env, email);
+    Object.assign(detail, entChange(b.action, user, after));
+    await audit(env, 'user:' + b.action, email, detail, actor);
+    return json({ ok: true, user: shapeUser(after) });
   }
 
   // ── clients ─────────────────────────────────────────────────────────────────────────────────────
@@ -246,6 +274,8 @@ export async function portalRoutes(request, env, url, path, admin) {
 
     if (b.action === 'void' || b.action === 'unvoid') {
       const voided = b.action === 'void';
+      detail.before = client.voided ? 'voided' : 'active';
+      detail.after = voided ? 'voided' : 'active';
       await setClientVoided(env, rin, voided);
       // The KV void: blacklist is what /register and /session actually check — keep them in step or
       // the portal's void badge is decoration.
@@ -262,11 +292,11 @@ export async function portalRoutes(request, env, url, path, admin) {
       // The rinowner: Durable Object is NOT touched. It arbitrates which DEVICE may claim a RIN and
       // is still what the extension obeys; moving the portal's record of who manages a taxpayer is a
       // different question, and conflating them here would silently re-point a live registration.
-      detail = { action: 'move', from: client.user_email || '', to };
+      detail = { action: 'move', from: client.user_email || '', to, before: client.user_email || '', after: to };
     } else {
       return json({ ok: false, error: 'unknown action' }, 400);
     }
-    await audit(env, 'client:' + b.action, rin, detail, 'token');
+    await audit(env, 'client:' + b.action, rin, detail, actor);
     return json({ ok: true, client: shapeClient(await getClient(env, rin)) });
   }
 
@@ -324,7 +354,10 @@ export async function portalRoutes(request, env, url, path, admin) {
     } else {
       return json({ ok: false, error: 'unknown action' }, 400);
     }
-    await audit(env, 'job:' + b.action, id, { action: b.action, user: job.user_email || '', rin: job.rin || '' }, 'token');
+    await audit(env, 'job:' + b.action, id, {
+      action: b.action, user: job.user_email || '', rin: job.rin || '',
+      before: job.state, after: b.action === 'abandon' ? 'abandoned' : job.state,
+    }, actor);
     return json({ ok: true, job: shapeJob(await getJobRow(env, id)) });
   }
 
@@ -346,12 +379,19 @@ export async function portalRoutes(request, env, url, path, admin) {
     const features = toList(b.features).slice(0, 40);
     const bad = await checkFeatureIds(env, features);
     if (bad.bad.length) return featureRefusal(bad);
+    // Read before writing: a plan edit reprices every account on it, so "what did it used to say"
+    // is the first question after one goes wrong, and the plans table keeps no history of its own.
+    const was = await getPlan(env, id);
     await upsertPlan(env, {
       id, name: b.name || id, quota: b.quota, deviceQuota: numOrNull(b.deviceQuota), features, price: b.price,
       active: b.active === undefined ? true : !!b.active,       // omitted means active: a new plan nobody can be put on is not a plan
     });
-    await audit(env, 'plan:upsert', id, { quota: b.quota | 0, deviceQuota: b.deviceQuota, features }, 'token');
-    return json({ ok: true, plan: shapePlan(await getPlan(env, id)) });
+    const now = await getPlan(env, id);
+    await audit(env, 'plan:upsert', id, {
+      created: !was, quota: b.quota | 0, deviceQuota: b.deviceQuota, features,
+      before: was ? shapePlan(was) : null, after: shapePlan(now),
+    }, actor);
+    return json({ ok: true, plan: shapePlan(now) });
   }
 
   if (request.method === 'POST' && path === '/api/plan/delete') {
@@ -363,8 +403,9 @@ export async function portalRoutes(request, env, url, path, admin) {
     // nobody would see until a user reported a missing tab. Name the count so the admin can judge
     // the size of the move they are being asked to make first.
     if (n) return json({ ok: false, error: n + ' user' + (n === 1 ? ' is' : 's are') + " still on plan '" + id + "' — move them to another plan first", users: n }, 409);
+    const was = await getPlan(env, id);
     await deletePlan(env, id);
-    await audit(env, 'plan:delete', id, {}, 'token');
+    await audit(env, 'plan:delete', id, { before: was ? shapePlan(was) : null, after: null }, actor);
     return json({ ok: true, deleted: true });
   }
 
@@ -385,8 +426,12 @@ export async function portalRoutes(request, env, url, path, admin) {
       id, name: b.name || id, description: b.description,
       active: b.active === undefined ? true : !!b.active,       // omitted means active, as for plans
     });
-    await audit(env, 'feature:upsert', id, { created: !existing, active: b.active !== false }, 'token');
-    return json({ ok: true, feature: shapeFeature(await getFeature(env, id)), created: !existing });
+    const now = await getFeature(env, id);
+    await audit(env, 'feature:upsert', id, {
+      created: !existing, active: b.active !== false,
+      before: existing ? shapeFeature(existing) : null, after: shapeFeature(now),
+    }, actor);
+    return json({ ok: true, feature: shapeFeature(now), created: !existing });
   }
 
   if (request.method === 'POST' && path === '/api/feature/delete') {
@@ -403,8 +448,9 @@ export async function portalRoutes(request, env, url, path, admin) {
         error: `'${id}' is still granted by ${n.plans} plan${n.plans === 1 ? '' : 's'} and ${n.users} user${n.users === 1 ? '' : 's'} — remove those grants first, or deactivate it instead to stop new ones without taking it away from anybody`,
       }, 409);
     }
+    const was = await getFeature(env, id);
     await deleteFeature(env, id);
-    await audit(env, 'feature:delete', id, {}, 'token');
+    await audit(env, 'feature:delete', id, { before: was ? shapeFeature(was) : null, after: null }, actor);
     return json({ ok: true, deleted: true });
   }
 
@@ -412,11 +458,251 @@ export async function portalRoutes(request, env, url, path, admin) {
   if (request.method === 'POST' && path === '/api/migrate') {
     const devices = await withSeen(env, await listPrefix(env, 'dev:'));
     const report = await migrate(env, devices);
-    await audit(env, 'migrate', '', { users: report.users, clients: report.clients, devices: report.devices, conflicts: report.conflicts.length }, 'token');
+    await audit(env, 'migrate', '', { users: report.users, clients: report.clients, devices: report.devices, conflicts: report.conflicts.length }, actor);
     return json({ ok: true, ...report });
   }
 
+  // ── bug reports (slice 4) ───────────────────────────────────────────────────────────────────────
+  // The legacy list was a flat KV scan: a message, a name and a device id, with the diagnostics the
+  // client happened to attach. That answers "somebody is unhappy" and nothing else. The portal
+  // version resolves each report to the PERSON who filed it (by email, or by device when the report
+  // predates their email), to the browser it came from, and — where it can be determined — to the
+  // RUN that was in flight when they pressed the button. The last join is what turns a report into
+  // something actionable: the plan summary in the diag bundle already says which export it was.
+  if (request.method === 'GET' && path === '/api/bugs') {
+    const status = String(url.searchParams.get('status') || '').toLowerCase();
+    const q = String(url.searchParams.get('q') || '').trim().toLowerCase();
+    const page = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10) || 1);
+
+    let all = (await listPrefix(env, 'bug:')).sort((x, y) => String(y.at).localeCompare(String(x.at)));
+    const openCount = all.filter((g) => (g.status || 'open') === 'open').length;
+    if (status === 'open' || status === 'resolved') all = all.filter((g) => (g.status || 'open') === status);
+    if (q) all = all.filter((g) => [g.name, g.email, g.rin, g.message, g.deviceId, g.diag && g.diag.version]
+      .join(' ').toLowerCase().includes(q));
+    const total = all.length;
+    const bugs = await joinBugs(env, all.slice((page - 1) * PAGE, page * PAGE));
+    return json({ ok: true, bugs, total, page, pages: Math.max(1, Math.ceil(total / PAGE)), openCount });
+  }
+
+  if (request.method === 'GET' && path === '/api/bug') {
+    const id = bugId(url.searchParams.get('id'));
+    const raw = id ? await env.LEADS.get('bug:' + id, 'json') : null;
+    if (!raw) return json({ ok: false, error: 'no such bug report' }, 404);
+    const [bug] = await joinBugs(env, [raw]);
+    // The run log AROUND the report. Two sources, deliberately both: `events` is what the server
+    // holds for that job (purged with the chunks when the run reaches 'done', so a report about a
+    // finished export has none), and `bug.diag.log` is the tail the client shipped inside the report
+    // itself, which survives that retention because it is part of the report. Neither replaces the
+    // other — one is what the server saw, the other is what the user saw.
+    const events = bug.job ? windowEvents(await getEvents(env, bug.job.jobId), raw.at) : [];
+    return json({
+      ok: true, bug, user: bug.user, device: bug.device, job: bug.job, jobMatch: bug.jobMatch,
+      events, eventWindowMs: EVENT_WINDOW,
+    });
+  }
+
   return json({ ok: false, error: 'not found' }, 404);
+}
+
+// ── bugs: the join ────────────────────────────────────────────────────────────────────────────────
+/**
+ * Resolve a page of raw KV bug records to { …record, user, device, job, jobMatch }.
+ *
+ * Batched by design: a page of 50 reports typically comes from a handful of people and a handful of
+ * browsers, so users, devices and per-device job lists are each fetched once and reused. Doing it
+ * per report would be three D1 round trips per row for a list nobody scrolls past.
+ */
+async function joinBugs(env, raws) {
+  const users = new Map(), devs = new Map(), jobsBy = new Map();
+  const userOf = async (email) => {
+    const k = String(email || '').trim().toLowerCase();
+    if (!k) return null;
+    if (!users.has(k)) users.set(k, await getUser(env, k));
+    return users.get(k);
+  };
+  const out = [];
+  for (const g of raws) {
+    const devId = String(g.deviceId || '');
+    if (devId && !devs.has(devId)) devs.set(devId, await getDevice(env, devId));
+    const device = devId ? devs.get(devId) : null;
+    // Email first, device second. The report carries the email the device registered with, but a
+    // report filed before that person was migrated — or after their D1 row was deleted — still
+    // names a browser, and the browser still knows whose it is.
+    const user = (await userOf(g.email)) || (device ? await userOf(device.user_email) : null);
+    if (devId && !jobsBy.has(devId)) jobsBy.set(devId, await listJobsForDevice(env, devId, 20));
+    const m = matchJob(g, devId ? jobsBy.get(devId) : []);
+    out.push({
+      // The legacy fields stay at the top level and keep their names: the KV dashboard renders this
+      // same array, and a report is not the place to make somebody rewrite a template.
+      id: g.id, at: g.at || '', status: g.status || 'open', message: g.message || '',
+      name: g.name || '', email: g.email || '', rin: g.rin || '', deviceId: devId,
+      ua: g.ua || '', diag: g.diag || null, note: g.note || null, resolvedAt: g.resolvedAt || '',
+      // …and the joins are new.
+      version: (g.diag && g.diag.version) || (device && device.version) || '',
+      user: user ? shapeUser(user) : null,
+      device: device ? shapeDevice(device) : null,
+      job: m.job ? shapeJob(m.job) : null,
+      jobMatch: m.match,
+    });
+  }
+  return out;
+}
+
+/**
+ * Which run was this report about?
+ *
+ * The diag bundle carries a plan summary (source, year, from/to, chunk and row counts) because the
+ * client already had it on screen. Scored rather than matched exactly: a report can be filed from a
+ * client too old to send `from`/`to`, and a run can be re-planned, so demanding a perfect tuple
+ * would answer "unknown" for most of the reports worth reading.
+ *
+ *   'exact'    — the plan summary identifies one run beyond reasonable doubt (score ≥ 5)
+ *   'inferred' — no summary, or nothing scored: the newest run this browser touched within 6 hours
+ *                of the report. Labelled, never presented as certain.
+ *   'none'     — this browser had made no run by then. Common and correct: most reports are not
+ *                about an export at all.
+ */
+function matchJob(bug, jobs) {
+  const at = Date.parse(bug.at || '') || 0;
+  // +1 min of slack: the report is written after the run starts, but clocks and the client's own
+  // queueing mean a strict comparison would drop the run it is obviously about.
+  const before = (jobs || []).filter((j) => (Date.parse(j.created_at || '') || 0) <= at + 60000);
+  if (!before.length) return { job: null, match: 'none' };
+
+  const p = bug.diag && bug.diag.plan;
+  if (p) {
+    let best = null, bestScore = 0;
+    for (const j of before) {
+      let s = 0;
+      if (p.source && String(j.source || '') === String(p.source)) s += 2;
+      if (p.from && String(j.from_iso || '').slice(0, 10) === String(p.from)) s += 2;
+      if (p.to && String(j.to_iso || '').slice(0, 10) === String(p.to)) s += 2;
+      if ((p.chunks | 0) && (j.total_chunks | 0) === (p.chunks | 0)) s += 3;
+      if (s > bestScore) { bestScore = s; best = j; }      // ties keep the newer run: `before` is DESC
+    }
+    if (bestScore >= 5) return { job: best, match: 'exact' };
+  }
+  const near = before.find((j) => at - (Date.parse(j.updated_at || j.created_at || '') || 0) < BUG_JOB_WINDOW);
+  return near ? { job: near, match: 'inferred' } : { job: null, match: 'none' };
+}
+
+/**
+ * The log lines around the moment the report was filed. Falls back rather than returning nothing:
+ * an empty tail on a job that plainly has a log reads as a bug in the console, and the lines just
+ * before the complaint are the ones worth reading even when the clocks disagree.
+ */
+function windowEvents(events, atIso, limit = 60) {
+  const at = Date.parse(atIso || '') || 0;
+  if (!events.length) return [];
+  const shape = (e) => ({ at: e.at || '', level: e.level || 'info', kind: e.kind || null, text: e.text || '' });
+  if (at) {
+    const near = events.filter((e) => Math.abs((Date.parse(e.at || '') || 0) - at) <= EVENT_WINDOW);
+    if (near.length) return near.slice(-limit).map(shape);
+    const prior = events.filter((e) => (Date.parse(e.at || '') || 0) <= at);
+    if (prior.length) return prior.slice(-limit).map(shape);
+  }
+  return events.slice(-limit).map(shape);
+}
+
+/**
+ * resolve · reopen · delete · note — all audited, which the legacy handler did for none of them.
+ * KV-only, so it answers with or without a D1 binding.
+ */
+async function bugAction(env, b, actor) {
+  const id = bugId(b.id);
+  if (!id) return json({ ok: false, error: 'bug id required' }, 400);
+  const g = await env.LEADS.get('bug:' + id, 'json');
+  if (!g) return json({ ok: false, error: 'no such bug report' }, 404);
+  const who = { email: g.email || '', rin: g.rin || '', device: String(g.deviceId || '').slice(0, 8) };
+  const before = g.status || 'open';
+
+  if (b.action === 'delete') {
+    await env.LEADS.delete('bug:' + id);
+    // The message body is NOT recorded. It is the user's words about their own tax data, and the
+    // audit trail is a longer-lived, wider-read store than the report it is deleting.
+    await audit(env, 'bug:delete', id, { ...who, before, after: '(deleted)' }, actor);
+    return json({ ok: true, deleted: true });
+  }
+  if (b.action === 'resolve' || b.action === 'reopen') {
+    g.status = b.action === 'resolve' ? 'resolved' : 'open';
+    if (b.action === 'resolve') g.resolvedAt = new Date().toISOString(); else delete g.resolvedAt;
+  } else if (b.action === 'note') {
+    // The admin's own annotation, kept ON the report where whoever picks it up next will see it —
+    // not in the audit trail, which is a record that something was written, not a place to read it.
+    const text = String((b.value && b.value.text) || b.value || '').trim().slice(0, 2000);
+    if (!text) return json({ ok: false, error: 'empty note' }, 400);
+    g.note = { text, at: new Date().toISOString(), by: actor };
+  } else {
+    return json({ ok: false, error: 'unknown action' }, 400);
+  }
+  await env.LEADS.put('bug:' + id, JSON.stringify(g));
+  await audit(env, 'bug:' + b.action, id, b.action === 'note'
+    // Length, not content: a support note names people and quotes them.
+    ? { ...who, chars: g.note.text.length, before: '(note)', after: '(note)' }
+    : { ...who, before, after: g.status }, actor);
+  return json({ ok: true, bug: { id: g.id, status: g.status, note: g.note || null, resolvedAt: g.resolvedAt || '' } });
+}
+
+const bugId = (v) => String(v == null ? '' : v).trim().replace(/[^a-zA-Z0-9_-]/g, '').slice(0, 64);
+
+// ── the audit trail (slice 4) ─────────────────────────────────────────────────────────────────────
+// How far back a filtered query will look. The keys carry a descending timestamp and no index of any
+// kind, so a filter is a scan — bounded here rather than left to run until the request times out on
+// whichever namespace has the most history. The answer says how many records it read and whether it
+// hit the ceiling, because a filtered list that quietly stopped early is worse than a refusal.
+const AUDIT_SCAN = 1000;
+
+async function auditPage(env, url) {
+  const page = Math.max(1, parseInt(url.searchParams.get('page') || '1', 10) || 1);
+  const f = {
+    actor: String(url.searchParams.get('actor') || '').trim().toLowerCase(),
+    target: String(url.searchParams.get('target') || '').trim().toLowerCase(),
+    action: String(url.searchParams.get('action') || '').trim().toLowerCase(),
+  };
+  const filtered = !!(f.actor || f.target || f.action);
+
+  const names = []; let cursor;
+  do {
+    const l = await env.LEADS.list({ prefix: 'audit:', cursor });
+    for (const k of l.keys) names.push(k.name);
+    cursor = l.list_complete ? null : l.cursor;
+  } while (cursor && names.length < AUDIT_SCAN);
+  const scanned = names.slice(0, AUDIT_SCAN);          // already newest-first: the key prefix is 1e15 - ts
+
+  const off = (page - 1) * PAGE;
+  let entries, total;
+  if (filtered) {
+    // Substring, case-insensitive, on all three: 'user:' finds every user action, an email finds
+    // every entry about that person whether it is the target or the actor's own address.
+    const hit = (await getMany(env, scanned)).filter((e) =>
+      (!f.actor || String(e.actor || '').toLowerCase().includes(f.actor))
+      && (!f.target || String(e.target || '').toLowerCase().includes(f.target))
+      && (!f.action || String(e.action || '').toLowerCase().includes(f.action)));
+    total = hit.length;
+    entries = hit.slice(off, off + PAGE);
+  } else {
+    // The common case costs one multi-get of 50 keys, not a read of the whole trail.
+    total = scanned.length;
+    entries = await getMany(env, scanned.slice(off, off + PAGE));
+  }
+  return json({
+    ok: true, entries, total, page, pages: Math.max(1, Math.ceil(total / PAGE)),
+    scanned: scanned.length, truncated: scanned.length >= AUDIT_SCAN,
+    // The KV dashboard reads `audit` and this path now serves both consoles. One array, two names,
+    // until the legacy page is retired — a rename is not worth a broken Activity tab.
+    audit: entries,
+  });
+}
+
+/** Values for a list of KV keys, in key order, skipping any that expired between list and get. */
+async function getMany(env, keys) {
+  const out = [];
+  for (let i = 0; i < keys.length; i += 100) {
+    const part = keys.slice(i, i + 100);
+    const map = await env.LEADS.get(part, 'json');
+    for (const k of part) { const v = map.get(k); if (v) out.push(v); }
+  }
+  return out;
 }
 
 // ── helpers ───────────────────────────────────────────────────────────────────────────────────────
@@ -454,6 +740,47 @@ async function mirrorKv(env, email, apply) {
     return ids.length;
   } catch { return 0; }
 }
+
+/**
+ * Which users column each action moves — the map that lets one audit call record what changed for
+ * twelve different buttons.
+ *
+ * Three actions are deliberately absent. `setNote` writes customer-support prose about a named
+ * person; `setMessage` writes text that will be shown to them; `delete` has no "after". Recording
+ * their bodies would make the 180-day trail the longest-lived copy of the most sensitive free text
+ * in the system, so those record their shape (a length, a truncated subject) and stop there.
+ */
+const ENT_FIELD = {
+  lock: 'status', unlock: 'status', kill: 'status', revive: 'status',
+  super: 'superadmin', unsuper: 'superadmin',
+  setQuota: 'quota', setDeviceQuota: 'device_quota', setPlan: 'plan',
+  setValidUntil: 'valid_until', setFeatures: 'features', setTags: 'tags',
+};
+
+// features is a JSON string in the column and a list everywhere else; report the list, so a diff in
+// the trail reads the same way as the field in the form did.
+const entValue = (row, field) => {
+  if (!row) return null;
+  const v = row[field];
+  if (field === 'features') return parseJson(v, []);
+  if (field === 'superadmin') return !!v;
+  if (field === 'device_quota') return v == null ? null : v | 0;
+  if (field === 'quota') return v | 0;
+  return v == null ? '' : v;
+};
+
+const entChange = (action, before, after) => {
+  const field = ENT_FIELD[action];
+  if (!field) return {};
+  return { field, before: entValue(before, field), after: entValue(after, field) };
+};
+
+/** Everything a delete takes away that was an entitlement decision. Never the note or the tags. */
+const entSnapshot = (u) => u && ({
+  plan: u.plan || 'free', quota: u.quota | 0, deviceQuota: u.device_quota == null ? null : u.device_quota | 0,
+  status: u.status || 'active', validUntil: u.valid_until || '', features: parseJson(u.features, []),
+  superadmin: !!u.superadmin,
+});
 
 const toList = (v) => (Array.isArray(v) ? v.map(String) : String(v || '').split(',')).map((s) => s.trim()).filter(Boolean);
 const parseJson = (v, fallback) => { try { const p = JSON.parse(v); return Array.isArray(p) ? p : fallback; } catch { return fallback; } };

@@ -4,7 +4,7 @@
 // header, imports and exports below are new.
 import { json, CORS, cleanRin, randHex } from '../lib/util.js';
 import { devKey, getDev, putDev, listPrefix, withSeen, listKeys, getCfg, isVoided, rinOwnerGet, rinClaim, rinRelease, personHeld } from '../lib/kv.js';
-import { audit } from '../lib/audit.js';
+import { audit, actorOf } from '../lib/audit.js';
 import { resolveEntitlement } from '../users.js';
 import DASH from '../assets/dash.html';
 import PRIVACY_HTML from '../assets/privacy.html';
@@ -18,6 +18,11 @@ export async function adminRoutes(request, env, url, path, admin) {
     // ── admin API ────────────────────────────────────────────────────────────
     if (path.startsWith('/api/')) {
       if (!admin()) return json({ ok: false, error: 'unauthorized' }, 401);
+      // SPEC-017 slice 4 — the same identity the portal records, on the legacy KV actions too. These
+      // paths are still live (the KV dashboard's per-DEVICE buttons have no portal equivalent), so
+      // an actor recorded on one console and not the other would leave a trail that looks complete
+      // and names nobody for half of what happened.
+      const actor = actorOf(request);
 
       if (request.method === 'GET' && path === '/api/stats') {
         const users = await listPrefix(env, 'dev:');
@@ -49,13 +54,9 @@ export async function adminRoutes(request, env, url, path, admin) {
         const bound = (await listPrefix(env, 'dev:')).filter((d) => (d.boundRins || []).includes(rin)).map((d) => ({ deviceId: (d.deviceId || '').slice(0, 8), name: d.name, email: d.email, superadmin: !!d.superadmin, locked: !!d.locked, killed: !!d.killed }));
         return json({ ok: true, rin, voided: await isVoided(env, rin), owner: owner ? { deviceId: (owner.deviceId || '').slice(0, 8), name: owner.name, email: owner.email, company: owner.company } : null, bound });
       }
-      if (request.method === 'GET' && path === '/api/audit') {   // admin action history (newest first; keys sort descending)
-        const names = []; let cursor;
-        do { const l = await env.LEADS.list({ prefix: 'audit:', cursor }); for (const k of l.keys) names.push(k.name); cursor = l.list_complete ? null : l.cursor; } while (cursor && names.length < 500);
-        const slice = names.slice(0, 300); const out = [];
-        for (let i = 0; i < slice.length; i += 100) { const map = await env.LEADS.get(slice.slice(i, i + 100), 'json'); for (const n of slice.slice(i, i + 100)) { const v = map.get(n); if (v) out.push(v); } }
-        return json({ ok: true, audit: out });
-      }
+      // GET /api/audit moved to routes/portal.js in SPEC-017 slice 4 — paged, filterable by actor /
+      // target / action, and answered BEFORE the D1 gate so it works with or without a binding. It
+      // still returns the trail under `audit` as well as `entries`, so the page below keeps working.
       if (request.method === 'GET' && path === '/api/errors') {   // extension-facing failure log (newest first; keys sort descending; 30-day TTL)
         const names = []; let cursor;
         do { const l = await env.LEADS.list({ prefix: 'err:', cursor }); for (const k of l.keys) names.push(k.name); cursor = l.list_complete ? null : l.cursor; } while (cursor && names.length < 500);
@@ -106,12 +107,16 @@ export async function adminRoutes(request, env, url, path, admin) {
       let b = {}; try { b = await request.json(); } catch {}
       if (request.method === 'POST' && path === '/api/void') {
         const rin = cleanRin(b.rin); if (!rin) return json({ ok: false, error: 'no rin' }, 400);
+        const wasVoided = !!(await env.LEADS.get('void:' + rin));
         if (b.action === 'unvoid') await env.LEADS.delete('void:' + rin); else await env.LEADS.put('void:' + rin, new Date().toISOString());
-        await audit(env, b.action === 'unvoid' ? 'unvoid' : 'void', rin, {});
+        await audit(env, b.action === 'unvoid' ? 'unvoid' : 'void', rin, { before: wasVoided ? 'voided' : 'active', after: b.action === 'unvoid' ? 'active' : 'voided' }, actor);
         return json({ ok: true, rin, voided: b.action !== 'unvoid' });
       }
       if (request.method === 'POST' && path === '/api/config') {
         const cfg = await getCfg(env);
+        // The global kill switch and the version floor decide whether every install in the field
+        // keeps working. "It was turned on at 14:02" is half an answer without what it was before.
+        const wasCfg = { globalKill: !!cfg.globalKill, minVersion: cfg.minVersion || '', killedVersions: cfg.killedVersions || [], announcement: cfg.announcement ? String(cfg.announcement.text || '').slice(0, 60) : '' };
         if (typeof b.globalKill === 'boolean') cfg.globalKill = b.globalKill;
         if (Number.isFinite(b.defaultQuota)) cfg.defaultQuota = Math.max(0, b.defaultQuota | 0);
         if (typeof b.minVersion === 'string') cfg.minVersion = b.minVersion.trim().slice(0, 24);
@@ -123,11 +128,19 @@ export async function adminRoutes(request, env, url, path, admin) {
           else cfg.announcement = { text: String(a.text).slice(0, 400), level: (a.level === 'warn' || a.level === 'alert') ? a.level : 'info', until: a.until ? String(a.until).slice(0, 40) : '', id: randHex(4) };
         }
         await env.LEADS.put('cfg', JSON.stringify(cfg));
-        await audit(env, 'config', '', { globalKill: cfg.globalKill, minVersion: cfg.minVersion || '', killedVersions: cfg.killedVersions || [], announcement: cfg.announcement ? cfg.announcement.text.slice(0, 60) : '' });
+        const nowCfg = { globalKill: !!cfg.globalKill, minVersion: cfg.minVersion || '', killedVersions: cfg.killedVersions || [], announcement: cfg.announcement ? cfg.announcement.text.slice(0, 60) : '' };
+        await audit(env, 'config', '', { ...nowCfg, before: wasCfg, after: nowCfg }, actor);
         return json({ ok: true, cfg });
       }
       if (request.method === 'POST' && path === '/api/user') {
         const dev = await getDev(env, String(b.deviceId || '')); if (!dev) return json({ ok: false, error: 'no such device' }, 404);
+        // Snapshot the fields these buttons move, BEFORE the switch mutates dev in place. Same field
+        // map as the portal's, on the device shape: this console is where a per-device lock, quota or
+        // RIN binding still happens, so the trail has to be able to diff those too.
+        const DEV_FIELD = { lock: 'locked', unlock: 'locked', kill: 'killed', revive: 'killed', super: 'superadmin', unsuper: 'superadmin', setQuota: 'quota', setFeatures: 'features', setTags: 'tags', addRin: 'boundRins', removeRin: 'boundRins' };
+        const devField = DEV_FIELD[b.action];
+        const snap = (o) => (devField ? (Array.isArray(o[devField]) ? o[devField].slice() : (typeof o[devField] === 'boolean' ? !!o[devField] : (o[devField] == null ? null : o[devField]))) : undefined);
+        const wasDev = snap(dev);
         switch (b.action) {
           case 'lock': dev.locked = true; break;
           case 'unlock': dev.locked = false; break;
@@ -168,7 +181,7 @@ export async function adminRoutes(request, env, url, path, admin) {
             dev.boundRins = dev.boundRins.filter((x) => x !== r); await putDev(env, dev);
             if (!target.boundRins.includes(r)) { target.boundRins.push(r); if (target.boundRins.length > target.quota) target.quota = target.boundRins.length; }
             await putDev(env, target);
-            await audit(env, 'moveRin', dev.deviceId, { rin: r, from: (dev.deviceId || '').slice(0, 8), to: toId.slice(0, 8) });
+            await audit(env, 'moveRin', dev.deviceId, { rin: r, from: (dev.deviceId || '').slice(0, 8), to: toId.slice(0, 8), before: (dev.deviceId || '').slice(0, 8), after: toId.slice(0, 8) }, actor);
             return json({ ok: true, moved: true });
           }
           // one-way admin → device message, delivered on the next /session check-in (even to blocked
@@ -201,17 +214,29 @@ export async function adminRoutes(request, env, url, path, admin) {
             // remove this device's RIN requests + bug reports so nothing lingers as "pending" after the account is gone
             for (const r of myReqs) await env.LEADS.delete('req:' + r.id);
             for (const g of myBugs) await env.LEADS.delete('bug:' + g.id);
-            await audit(env, 'delete', dev.deviceId, { name: dev.name, email: dev.email, rins: dev.boundRins || [] });
+            await audit(env, 'delete', dev.deviceId, { name: dev.name, email: dev.email, rins: dev.boundRins || [], before: { locked: !!dev.locked, killed: !!dev.killed, quota: dev.quota | 0, rins: (dev.boundRins || []).length }, after: null }, actor);
             return json({ ok: true, deleted: true });
           }
           default: return json({ ok: false, error: 'unknown action' }, 400);
         }
-        await putDev(env, dev); await audit(env, b.action, dev.deviceId, { name: dev.name, value: (b.action === 'setNote' ? '(note)' : b.action === 'setMessage' ? String((b.value || {}).text || '').slice(0, 60) : b.value) });
+        await putDev(env, dev);
+        await audit(env, b.action, dev.deviceId, {
+          name: dev.name, value: (b.action === 'setNote' ? '(note)' : b.action === 'setMessage' ? String((b.value || {}).text || '').slice(0, 60) : b.value),
+          ...(devField ? { field: devField, before: wasDev, after: snap(dev) } : {}),
+        }, actor);
         return json({ ok: true, dev });
       }
       if (request.method === 'POST' && path === '/api/request') {
-        if (b.action === 'delete') { await env.LEADS.delete('req:' + String(b.id || '')); return json({ ok: true }); }   // clear resolved/denied clutter
+        // AUDIT GAP CLOSED (SPEC-017 slice 4): this delete wrote nothing. "Clearing clutter" and
+        // "making an approval disappear" are the same keystroke, and only one of them was visible.
+        if (b.action === 'delete') {
+          const gone = await env.LEADS.get('req:' + String(b.id || ''), 'json');
+          await env.LEADS.delete('req:' + String(b.id || ''));
+          await audit(env, 'request_delete', (gone && gone.deviceId) || String(b.id || ''), { rin: (gone && gone.requestedRin) || '', before: (gone && gone.status) || '(unknown)', after: '(deleted)' }, actor);
+          return json({ ok: true });
+        }
         const r = await env.LEADS.get('req:' + String(b.id || ''), 'json'); if (!r) return json({ ok: false, error: 'no request' }, 404);
+        const wasStatus = r.status || 'pending';
         if (b.action === 'approve') {
           const dev = await getDev(env, r.deviceId);
           if (dev && !dev.boundRins.includes(r.requestedRin)) {
@@ -231,7 +256,7 @@ export async function adminRoutes(request, env, url, path, admin) {
           r.status = 'approved';
         } else r.status = 'denied';
         r.resolvedAt = new Date().toISOString(); await env.LEADS.put('req:' + r.id, JSON.stringify(r));
-        await audit(env, 'request_' + (b.action || ''), r.deviceId, { rin: r.requestedRin });
+        await audit(env, 'request_' + (b.action || ''), r.deviceId, { rin: r.requestedRin, before: wasStatus, after: r.status }, actor);
         return json({ ok: true });
       }
       if (request.method === 'GET' && path === '/api/trash') {   // deleted accounts recoverable for 30 days
@@ -240,7 +265,7 @@ export async function adminRoutes(request, env, url, path, admin) {
       }
       if (request.method === 'POST' && path === '/api/trash') {
         const id = String(b.deviceId || '');
-        if (b.action === 'purge') { await env.LEADS.delete('trash:' + id); await audit(env, 'trash_purge', id, {}); return json({ ok: true }); }
+        if (b.action === 'purge') { await env.LEADS.delete('trash:' + id); await audit(env, 'trash_purge', id, { before: '(in trash)', after: '(purged)' }, actor); return json({ ok: true }); }
         if (b.action === 'restore') {
           const t = await env.LEADS.get('trash:' + id, 'json');
           if (!t || !t.dev) return json({ ok: false, error: 'not in trash (expired or purged)' }, 404);
@@ -256,16 +281,15 @@ export async function adminRoutes(request, env, url, path, admin) {
           for (const r of (t.reqs || [])) await env.LEADS.put('req:' + r.id, JSON.stringify(r));
           for (const g of (t.bugs || [])) await env.LEADS.put('bug:' + g.id, JSON.stringify(g));
           await env.LEADS.delete('trash:' + id);
-          await audit(env, 'trash_restore', id, { name: t.dev.name, lostRins });
+          await audit(env, 'trash_restore', id, { name: t.dev.name, lostRins, before: '(in trash)', after: '(restored)' }, actor);
           return json({ ok: true, restored: true, lostRins });
         }
         return json({ ok: false, error: 'unknown action' }, 400);
       }
-      if (request.method === 'POST' && path === '/api/bug') {
-        if (b.action === 'delete') { await env.LEADS.delete('bug:' + String(b.id || '')); return json({ ok: true }); }
-        const g = await env.LEADS.get('bug:' + String(b.id || ''), 'json'); if (!g) return json({ ok: false, error: 'no bug' }, 404);
-        g.status = b.action === 'resolve' ? 'resolved' : 'open'; await env.LEADS.put('bug:' + g.id, JSON.stringify(g)); return json({ ok: true });
-      }
+      // AUDIT GAP CLOSED (SPEC-017 slice 4): POST /api/bug lived here and wrote NOTHING — resolving
+      // and, worse, deleting a user's report left no record that anyone had touched it. It now lives
+      // in routes/portal.js, which owns the path, audits all four actions (resolve · reopen · delete
+      // · note) and answers with or without a D1 binding, so nothing depends on this being reachable.
       return json({ ok: false, error: 'not found' }, 404);
     }
 
