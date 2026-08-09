@@ -110,6 +110,53 @@ POST /api/migrate                          → { users, clients, devices, confli
 Every mutating call writes an audit entry carrying the **actor**. Until slice 4 gives real admin
 identity, the actor is `"token"` — recorded honestly rather than left blank.
 
+## API contract — slices 2 and 3
+
+Same rules: admin token, `{ok:true,…}`/`{ok:false,error}`, and neither the backend nor the frontend
+may change these unilaterally.
+
+```
+GET  /api/jobs?state=&user=&rin=&stuck=&page=   → { jobs:[…], total }
+GET  /api/job?id=                               → { job, chunks:[…] }
+POST /api/job     { id, action }                actions: abandon | purge
+       job    { jobId, user, rin, source, dateField, dir, from, to, state, done, failed,
+                total, rows, probes, version, createdAt, updatedAt }
+       chunk  { idx, chunkId, from, to, subF, subT, label, count, warn, state }
+
+GET  /api/plans                                 → { plans:[…] }
+POST /api/plan    { id, name, quota, features, price, active }   upsert
+POST /api/plan/delete { id }                    refused while any user references it
+```
+
+`stuck=1` filters to jobs in `running`/`merging` whose `updated_at` is older than 30 minutes — the
+support question "is anything wedged right now" needs one click, not a mental date comparison.
+
+## Slice 3 — what "activation" actually changes
+
+Three behaviours move from decorative to binding:
+
+1. **Features come from the plan.** `/session` fills `features` from the user's plan, with a per-user
+   override winning. The extension already receives `features` on every check-in and reads it
+   NOWHERE — slice 3 is the first consumer. `auto-reject` gates the rejection tab.
+2. **Expiry binds.** `valid_until` in the past → `/session` returns `allowed:false, reason:'expired'`
+   and `/plan/start` refuses. A distinct reason, not a generic lock, so the drawer can say "your
+   plan expired" instead of "you are locked" — those need different actions from the user.
+3. **Quota moves to the person.** `/register` and RIN approval count clients across ALL of that
+   user's devices instead of per device. This is the change that closes the double-quota hole, and
+   it is a REAL behaviour change: a user who currently holds more clients than their plan allows
+   keeps them (never confiscate silently) but cannot add more until under the cap. That grandfather
+   rule is deliberate — retroactively removing a client would break exports mid-quarter.
+
+Default plans seeded by the migration, editable in the portal:
+
+| id | quota | features |
+|---|---|---|
+| `free` | 1 | — |
+| `standard` | 5 | `auto-reject` |
+| `pro` | 25 | `auto-reject`, `po-analytics` |
+
+Pricing is not modelled beyond a free-text `price` — billing is out of scope until it hurts.
+
 ## Sections (slice 1)
 
 **Dashboard** — the answer to "what is happening". Live runs with progress, today's totals, alerts
