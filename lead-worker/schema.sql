@@ -89,8 +89,9 @@ CREATE TABLE IF NOT EXISTS users (
   name        TEXT,
   company     TEXT,
   phone       TEXT,
-  plan        TEXT DEFAULT 'free',
+  plan        TEXT DEFAULT 'free',    -- a plans.id, or the reserved 'custom' (numbers live on the row)
   quota       INTEGER DEFAULT 1,
+  device_quota INTEGER,               -- SPEC-019 per-account override; NULL = inherit the plan
   valid_until TEXT,
   status      TEXT DEFAULT 'active',    -- active | locked | killed
   superadmin  INTEGER DEFAULT 0,
@@ -129,22 +130,52 @@ CREATE TABLE IF NOT EXISTS devices (
 CREATE INDEX IF NOT EXISTS devices_user ON devices (user_email);
 
 CREATE TABLE IF NOT EXISTS plans (
-  id       TEXT PRIMARY KEY,
-  name     TEXT,
-  quota    INTEGER,
-  features TEXT,
-  price    TEXT,
-  active   INTEGER DEFAULT 1
+  id           TEXT PRIMARY KEY,
+  name         TEXT,
+  quota        INTEGER,               -- clients (TRNs) the plan allows
+  device_quota INTEGER DEFAULT 1,     -- SPEC-019: browsers the plan allows
+  features     TEXT,
+  price        TEXT,
+  active       INTEGER DEFAULT 1
 );
 
 -- Every users row points at a plan by name, and slice 3 resolves features and the plan cap through
 -- it, so the three defaults are part of the schema rather than of the migration: a database without
 -- a 'free' row would silently resolve every user's features to nothing. OR IGNORE, never REPLACE —
 -- the Worker re-runs the identical statements from ensureSchema() and must not undo an admin's edits.
-INSERT OR IGNORE INTO plans (id, name, quota, features, price, active) VALUES
-  ('free',     'Free',     1,  '[]',                                '', 1),
-  ('standard', 'Standard', 5,  '["auto-reject"]',                   '', 1),
-  ('pro',      'Pro',      25, '["auto-reject","po-analytics"]',    '', 1);
+INSERT OR IGNORE INTO plans (id, name, quota, device_quota, features, price, active) VALUES
+  ('free',     'Free',     1,  1,  '[]',                                '', 1),
+  ('standard', 'Standard', 5,  3,  '["auto-reject"]',                   '', 1),
+  ('pro',      'Pro',      25, 10, '["auto-reject","po-analytics"]',    '', 1);
+
+-- ═══ SPEC-019 · the feature catalogue ════════════════════════════════════════════════════════════
+-- Features were a vocabulary hard-coded in the portal UI and nowhere else, so selling anything new
+-- meant editing a list in a source file — the wrong place for a commercial decision to live.
+--
+-- `active = 0` means "cannot be NEWLY granted". It never revokes: everyone already holding the
+-- feature keeps it, because taking a feature away mid-quarter is a support call, not a config
+-- change. Grants are stored as JSON arrays of these ids on plans.features and users.features, which
+-- is why an id is never renamed and why deleting a row is refused while any grant names it.
+CREATE TABLE IF NOT EXISTS features (
+  id          TEXT PRIMARY KEY,       -- slug, written verbatim into every grant
+  name        TEXT,
+  description TEXT,
+  active      INTEGER DEFAULT 1,
+  created_at  TEXT
+);
+
+-- The two that exist today. A catalogue row does not gate anything by itself: 'auto-reject' opens
+-- the Rejection tab because src/ui/flow.js asks for that id by name, so a NEW feature is a sellable
+-- label until someone wires the one line that checks it.
+INSERT OR IGNORE INTO features (id, name, description, active, created_at) VALUES
+  ('auto-reject',  'Auto rejection',    'The Rejection tab and its scan/submit flow', 1, ''),
+  ('po-analytics', 'PO reconciliation', 'The purchase-order matching card',           1, '');
+
+-- NOTE for an EXISTING database: this file is the fresh-install shape. `users.device_quota` and
+-- `plans.device_quota` cannot be added by re-running it (the CREATEs are IF NOT EXISTS and do
+-- nothing). The Worker adds both, guarded by pragma_table_info, in src/users.js ensureSchema() —
+-- which every /api/* portal request calls — and backfills the three shipped plans' device
+-- allowances exactly once, so an upgraded database converges on the shape above by itself.
 
 -- A job belongs to a person, not only to a browser. Backfilled from devices by /api/migrate.
 --

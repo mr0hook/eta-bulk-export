@@ -30,13 +30,16 @@ import {
   hasDb, ensureSchema, migrate, listUsers, getUser, listClients, getClient, listDevices,
   listJobs, listActiveJobs, dashboardStats, listExpiring, setUserField, deleteUser,
   setClientVoided, moveClient, listJobsPage, getJobRow, setJobState, purgeJobChunks,
-  listPlans, getPlan, upsertPlan, deletePlan, countPlanUsers,
+  listPlans, getPlan, upsertPlan, deletePlan, countPlanUsers, resolveEntitlement,
+  listFeatures, getFeature, upsertFeature, deleteFeature, countFeatureGrants, checkFeatureIds,
+  featureId, CUSTOM_PLAN,
 } from '../users.js';
 import { getChunks, getEvents } from '../jobs.js';
 
 const OURS = new Set([
   '/api/dashboard', '/api/users', '/api/user', '/api/clients', '/api/client', '/api/migrate',
   '/api/jobs', '/api/job', '/api/plans', '/api/plan', '/api/plan/delete',
+  '/api/features', '/api/feature', '/api/feature/delete',
 ]);
 
 const STALE_MS = 30 * 60000;      // a run that hasn't checkpointed in half an hour is stuck, not slow
@@ -56,6 +59,11 @@ export async function portalRoutes(request, env, url, path, admin) {
   // GET /api/users back to the KV dashboard rather than 503ing a page that worked yesterday.
   if (!hasDb(env)) return (path === '/api/users' && request.method === 'GET')
     ? null : json({ ok: false, error: 'portal unavailable — no D1 binding' }, 503);
+  // Once per portal request, not per endpoint. Every read shape here now depends on a schema that
+  // grows with the specs — users.device_quota and the features table arrived with SPEC-019 — and a
+  // console that 500s on a page which worked yesterday, because nobody thought to press Migrate
+  // first, is a worse trade than one idempotent DDL batch on an admin-only surface.
+  await ensureSchema(env);
 
   // ── dashboard ───────────────────────────────────────────────────────────────────────────────────
   if (request.method === 'GET' && path === '/api/dashboard') {
@@ -128,8 +136,12 @@ export async function portalRoutes(request, env, url, path, admin) {
     ]);
     const ids = new Set(devices.map((d) => d.device_id));
     const bugs = (await listPrefix(env, 'bug:')).filter((g) => String(g.email || '').toLowerCase() === email || ids.has(g.deviceId));
+    // What this account actually gets AND where each number came from. The portal has to be able to
+    // print "25 clients (from pro)" against "12 clients (custom)": an admin who cannot tell an
+    // inherited number from a negotiated one will eventually edit the plan to fix one account.
+    const ent = await resolveEntitlement(env, email);
     return json({
-      ok: true, user: shapeUser(user),
+      ok: true, user: shapeUser(user), entitlement: shapeEntitlement(ent, devices.length),
       clients: clients.clients.map(shapeClient), devices: devices.map(shapeDevice), jobs: jobs.map(shapeJob),
       bugs: bugs.sort((x, y) => String(y.at).localeCompare(String(x.at))).slice(0, 50),
       // Audit keys carry no index, so filtering happens here: the trail records device ids (legacy
@@ -160,10 +172,24 @@ export async function portalRoutes(request, env, url, path, admin) {
         await setUserField(env, email, 'quota', q); await mirrorKv(env, email, (d) => { d.quota = q; });
         detail.value = q; break;
       }
+      // SPEC-019: how many BROWSERS this person may register. NULL clears the override and hands
+      // them back to their plan — the same reading setFeatures uses for an empty list, so clearing a
+      // field never means "zero" by accident.
+      case 'setDeviceQuota': {
+        const v = numOrNull(b.value);
+        await setUserField(env, email, 'device_quota', v);
+        detail.value = v; break;
+      }
       case 'setPlan': await setUserField(env, email, 'plan', String(b.value || 'free').slice(0, 40)); detail.value = b.value; break;
       case 'setValidUntil': await setUserField(env, email, 'valid_until', String(b.value || '').slice(0, 40)); detail.value = b.value; break;
       case 'setFeatures': {
         const f = toList(b.value);
+        // Only ids that exist AND are active may be newly granted. Before the catalogue, a typo here
+        // produced a feature nobody would ever hold and no error whatsoever. Note what this does NOT
+        // do: it never inspects what the user already holds, so deactivating a feature cannot revoke
+        // an existing grant — that is a support call, not a config change.
+        const bad = await checkFeatureIds(env, f);
+        if (bad.bad.length) return featureRefusal(bad);
         await setUserField(env, email, 'features', JSON.stringify(f)); await mirrorKv(env, email, (d) => { d.features = f; });
         detail.value = f; break;
       }
@@ -303,24 +329,28 @@ export async function portalRoutes(request, env, url, path, admin) {
   }
 
   // ── plans (slice 3) ─────────────────────────────────────────────────────────────────────────────
-  // ensureSchema first: the plans table and its three defaults are what entitlement resolves
-  // against, and an environment where /api/migrate has never run would otherwise show an empty
-  // Plans tab that silently means "nobody has any features".
+  // The plans table and its three defaults are what entitlement resolves against, and an environment
+  // where ensureSchema had never run would otherwise show an empty Plans tab that silently means
+  // "nobody has any features" — hence the schema call at the top of this router.
   if (request.method === 'GET' && path === '/api/plans') {
-    await ensureSchema(env);
     return json({ ok: true, plans: (await listPlans(env)).map(shapePlan) });
   }
 
   if (request.method === 'POST' && path === '/api/plan') {
-    await ensureSchema(env);
     const id = String(b.id || '').trim().toLowerCase().slice(0, 40);
     if (!id) return json({ ok: false, error: 'plan id required' }, 400);
+    // 'custom' already means "this account's numbers are written on the account". A plan with the
+    // same id would give one word two meanings and make an account's allowance depend on which
+    // meaning the resolver reached first.
+    if (id === CUSTOM_PLAN) return json({ ok: false, error: "'custom' is a reserved account type, not a plan — set an account's plan to custom to give it negotiated numbers" }, 400);
     const features = toList(b.features).slice(0, 40);
+    const bad = await checkFeatureIds(env, features);
+    if (bad.bad.length) return featureRefusal(bad);
     await upsertPlan(env, {
-      id, name: b.name || id, quota: b.quota, features, price: b.price,
+      id, name: b.name || id, quota: b.quota, deviceQuota: numOrNull(b.deviceQuota), features, price: b.price,
       active: b.active === undefined ? true : !!b.active,       // omitted means active: a new plan nobody can be put on is not a plan
     });
-    await audit(env, 'plan:upsert', id, { quota: b.quota | 0, features }, 'token');
+    await audit(env, 'plan:upsert', id, { quota: b.quota | 0, deviceQuota: b.deviceQuota, features }, 'token');
     return json({ ok: true, plan: shapePlan(await getPlan(env, id)) });
   }
 
@@ -338,9 +368,48 @@ export async function portalRoutes(request, env, url, path, admin) {
     return json({ ok: true, deleted: true });
   }
 
+  // ── feature catalogue (SPEC-019) ────────────────────────────────────────────────────────────────
+  // Features stop being a vocabulary hard-coded in the portal UI and become rows an admin owns.
+  // What a row CANNOT do is gate anything by itself: `auto-reject` opens the Rejection tab because
+  // src/ui/flow.js asks for that id by name. A brand-new feature is a sellable label until somebody
+  // wires the one line that checks it, and the portal says so where features are created.
+  if (request.method === 'GET' && path === '/api/features') {
+    return json({ ok: true, features: (await listFeatures(env)).map(shapeFeature) });
+  }
+
+  if (request.method === 'POST' && path === '/api/feature') {
+    const id = featureId(b.id);
+    if (!id) return json({ ok: false, error: 'feature id required (lowercase slug)' }, 400);
+    const existing = await getFeature(env, id);
+    await upsertFeature(env, {
+      id, name: b.name || id, description: b.description,
+      active: b.active === undefined ? true : !!b.active,       // omitted means active, as for plans
+    });
+    await audit(env, 'feature:upsert', id, { created: !existing, active: b.active !== false }, 'token');
+    return json({ ok: true, feature: shapeFeature(await getFeature(env, id)), created: !existing });
+  }
+
+  if (request.method === 'POST' && path === '/api/feature/delete') {
+    const id = featureId(b.id);
+    if (!id) return json({ ok: false, error: 'feature id required' }, 400);
+    const n = await countFeatureGrants(env, id);
+    // Refused, never cascaded — the same rule as deleting a plan, for a sharper reason: a grant
+    // stores the id as a string, so deleting the row would leave live grants pointing at nothing.
+    // Both counts are named because they need different fixes: a plan is one edit, N users are N.
+    // Deactivating instead is the safe move, and it is what the message should push an admin toward.
+    if (n.plans || n.users) {
+      return json({
+        ok: false, plans: n.plans, users: n.users,
+        error: `'${id}' is still granted by ${n.plans} plan${n.plans === 1 ? '' : 's'} and ${n.users} user${n.users === 1 ? '' : 's'} — remove those grants first, or deactivate it instead to stop new ones without taking it away from anybody`,
+      }, 409);
+    }
+    await deleteFeature(env, id);
+    await audit(env, 'feature:delete', id, {}, 'token');
+    return json({ ok: true, deleted: true });
+  }
+
   // ── migration ───────────────────────────────────────────────────────────────────────────────────
   if (request.method === 'POST' && path === '/api/migrate') {
-    await ensureSchema(env);
     const devices = await withSeen(env, await listPrefix(env, 'dev:'));
     const report = await migrate(env, devices);
     await audit(env, 'migrate', '', { users: report.users, clients: report.clients, devices: report.devices, conflicts: report.conflicts.length }, 'token');
@@ -389,9 +458,30 @@ async function mirrorKv(env, email, apply) {
 const toList = (v) => (Array.isArray(v) ? v.map(String) : String(v || '').split(',')).map((s) => s.trim()).filter(Boolean);
 const parseJson = (v, fallback) => { try { const p = JSON.parse(v); return Array.isArray(p) ? p : fallback; } catch { return fallback; } };
 
+// '' / null / undefined mean "not set" — NOT zero. An allowance field cleared in a form must hand the
+// account back to its plan, not silently cap it at nothing.
+const numOrNull = (v) => (v === '' || v === null || v === undefined ? null : Math.max(0, Math.min(1e6, Math.trunc(Number(v) || 0))));
+
+/**
+ * One refusal for both grant paths (a plan's features and a user's). It names the offending ids —
+ * the whole point of a catalogue is that it can say no, and a "no" that does not say which id was
+ * wrong just moves the guessing to the admin.
+ */
+const featureRefusal = (bad) => json({
+  ok: false, unknown: bad.unknown, inactive: bad.inactive,
+  error: 'cannot grant ' + bad.bad.map((f) => `'${f}'`).join(', ') + ' — '
+    + [
+      bad.unknown.length ? `not in the feature catalogue (${bad.unknown.join(', ')})` : '',
+      bad.inactive.length ? `inactive, so it can no longer be newly granted (${bad.inactive.join(', ')})` : '',
+    ].filter(Boolean).join('; '),
+}, 400);
+
 const shapeUser = (u) => u && ({
   email: u.email, name: u.name || '', company: u.company || '', plan: u.plan || 'free',
-  quota: u.quota | 0, clientCount: u.client_count | 0, deviceCount: u.device_count | 0,
+  // deviceQuota is null when the account inherits its plan's allowance — the portal must be able to
+  // render an empty box rather than a number the admin never typed.
+  quota: u.quota | 0, deviceQuota: u.device_quota == null ? null : u.device_quota | 0,
+  clientCount: u.client_count | 0, deviceCount: u.device_count | 0,
   jobCount: u.job_count | 0, docs: u.docs | 0, status: u.status || 'active',
   validUntil: u.valid_until || '', lastSeen: u.last_seen || '',
   tags: String(u.tags || '').split(',').filter(Boolean),
@@ -429,6 +519,29 @@ const shapeChunk = (c) => ({
 });
 
 const shapePlan = (p) => p && ({
-  id: p.id, name: p.name || p.id, quota: p.quota | 0, features: parseJson(p.features, []),
-  price: p.price || '', active: !!p.active,
+  id: p.id, name: p.name || p.id, quota: p.quota | 0,
+  // NULL resolves to the one-device floor everywhere it is read, so report the resolved number
+  // rather than a blank the admin would have to interpret.
+  deviceQuota: p.device_quota == null ? 1 : p.device_quota | 0,
+  features: parseJson(p.features, []), price: p.price || '', active: !!p.active,
+});
+
+const shapeFeature = (f) => f && ({
+  id: f.id, name: f.name || f.id, description: f.description || '',
+  active: !!f.active, createdAt: f.created_at || '',
+});
+
+/**
+ * The account's resolved allowance next to WHERE each number came from ('plan' | 'custom' |
+ * 'override'), plus how many devices it is actually using — an account already over its cap is
+ * grandfathered, not broken, and the portal needs enough to say that rather than raise an alarm.
+ */
+const shapeEntitlement = (e, deviceCount) => e && ({
+  plan: e.plan, custom: !!e.custom,
+  clients: e.quotaEff | 0, devices: e.deviceQuotaEff | 0, features: e.features,
+  planClients: e.planQuota | 0, planDevices: e.planDeviceQuota | 0,
+  devicesUsed: deviceCount | 0, overDevices: (deviceCount | 0) > (e.deviceQuotaEff | 0),
+  // Keyed like the values above (clients/devices/features), not like the columns underneath —
+  // a consumer should never have to know that the client allowance is called `quota` in SQL.
+  source: { clients: e.source.quota, devices: e.source.devices, features: e.source.features },
 });

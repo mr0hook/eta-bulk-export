@@ -27,7 +27,7 @@ export const PAGE = 50;
 const DDL = [
   `CREATE TABLE IF NOT EXISTS users (
      email TEXT PRIMARY KEY, name TEXT, company TEXT, phone TEXT,
-     plan TEXT DEFAULT 'free', quota INTEGER DEFAULT 1, valid_until TEXT,
+     plan TEXT DEFAULT 'free', quota INTEGER DEFAULT 1, device_quota INTEGER, valid_until TEXT,
      status TEXT DEFAULT 'active', superadmin INTEGER DEFAULT 0, features TEXT,
      note TEXT, tags TEXT, country TEXT, created_at TEXT, updated_at TEXT)`,
   `CREATE INDEX IF NOT EXISTS users_status ON users (status, email)`,
@@ -41,41 +41,97 @@ const DDL = [
      exports INTEGER DEFAULT 0, docs INTEGER DEFAULT 0, pdfs INTEGER DEFAULT 0, created_at TEXT)`,
   `CREATE INDEX IF NOT EXISTS devices_user ON devices (user_email)`,
   `CREATE TABLE IF NOT EXISTS plans (
-     id TEXT PRIMARY KEY, name TEXT, quota INTEGER, features TEXT, price TEXT, active INTEGER DEFAULT 1)`,
+     id TEXT PRIMARY KEY, name TEXT, quota INTEGER, device_quota INTEGER DEFAULT 1,
+     features TEXT, price TEXT, active INTEGER DEFAULT 1)`,
+  // SPEC-019 — the feature catalogue. `auto-reject` and `po-analytics` were a vocabulary hard-coded
+  // in the portal UI and nowhere else, so selling anything new meant editing a list in a file. A row
+  // here is the commercial decision; the extension still has to ASK for the id by name for it to
+  // gate anything (see the honest-limit note in the spec).
+  `CREATE TABLE IF NOT EXISTS features (
+     id TEXT PRIMARY KEY, name TEXT, description TEXT, active INTEGER DEFAULT 1, created_at TEXT)`,
 ];
+
+// 'custom' is a users.plan value, never a plans row: it means "this account's numbers are written on
+// the account itself". Reserved here so POST /api/plan can refuse it — two meanings for one id would
+// make an account's allowance depend on which one the resolver looked at first.
+export const CUSTOM_PLAN = 'custom';
+
+// The floor a device allowance falls back to when nothing says otherwise (plan row missing, plan
+// deactivated, column not yet added). NEVER 0: a plan row that vanished would otherwise lock every
+// browser of every user on it out of registering, silently, with no error naming the cause.
+const DEFAULT_DEVICE_QUOTA = 1;
 
 // SPEC-017 slice 3 — the plans the product actually sells. Seeded from ensureSchema() rather than
 // from migrate(), because plans are not backfilled data: every users row points at one by name, and
 // on an environment where /api/migrate has never run a missing 'free' row would resolve every user's
 // features to nothing. INSERT OR IGNORE, never REPLACE — re-running must not undo an admin's edits.
 const DEFAULT_PLANS = [
-  { id: 'free', name: 'Free', quota: 1, features: [], price: '' },
-  { id: 'standard', name: 'Standard', quota: 5, features: ['auto-reject'], price: '' },
-  { id: 'pro', name: 'Pro', quota: 25, features: ['auto-reject', 'po-analytics'], price: '' },
+  { id: 'free', name: 'Free', quota: 1, deviceQuota: 1, features: [], price: '' },
+  { id: 'standard', name: 'Standard', quota: 5, deviceQuota: 3, features: ['auto-reject'], price: '' },
+  { id: 'pro', name: 'Pro', quota: 25, deviceQuota: 10, features: ['auto-reject', 'po-analytics'], price: '' },
 ];
 
+// SPEC-019 — the two features that exist today, seeded so the catalogue is never empty on an
+// environment nobody has curated yet. INSERT OR IGNORE, like the plans: an admin who renames
+// 'Auto rejection' must not find it renamed back on the next request.
+const DEFAULT_FEATURES = [
+  { id: 'auto-reject', name: 'Auto rejection', description: 'The Rejection tab and its scan/submit flow' },
+  { id: 'po-analytics', name: 'PO reconciliation', description: 'The purchase-order matching card' },
+];
+
+/** Does this table already carry this column? Names are literals from this file, never user input. */
+async function hasColumn(env, table, column) {
+  const r = await env.JOBS.prepare(
+    `SELECT COUNT(*) AS n FROM pragma_table_info('${table}') WHERE name = '${column}'`,
+  ).first();
+  return !!(r && r.n);
+}
+
 /**
- * Create the portal tables if they are absent, seed the default plans, and give `jobs` its
- * user_email column.
+ * Create the portal tables if they are absent, seed the default plans and features, and add the
+ * columns that arrived after the tables did.
  *
- * The column is the awkward one: SQLite has no `ADD COLUMN IF NOT EXISTS`, and a duplicate-column
+ * The columns are the awkward part: SQLite has no `ADD COLUMN IF NOT EXISTS`, and a duplicate-column
  * error thrown mid-migration would abort everything after it. So ask the catalogue rather than
  * relying on the error text (which is not part of D1's contract), and still swallow a throw in case
- * two /api/migrate calls race each other.
+ * two callers race each other.
  */
 export async function ensureSchema(env) {
   if (!hasDb(env)) return false;
   for (const sql of DDL) await env.JOBS.prepare(sql).run();
-  const col = await env.JOBS.prepare(
-    `SELECT COUNT(*) AS n FROM pragma_table_info('jobs') WHERE name = 'user_email'`,
-  ).first();
-  if (!col || !col.n) {
+  if (!(await hasColumn(env, 'jobs', 'user_email'))) {
     try { await env.JOBS.prepare('ALTER TABLE jobs ADD COLUMN user_email TEXT').run(); } catch {}
   }
+  // SPEC-019 device allowance. The ALTER carries NO default on purpose: existing rows land on NULL,
+  // and NULL is what lets the backfill below hand standard and pro their real allowances exactly
+  // once. With `DEFAULT 1` every shipped plan would silently become a one-device plan and the
+  // backfill would have no way to tell "1 because that is the plan" from "1 because SQLite said so".
+  if (!(await hasColumn(env, 'plans', 'device_quota'))) {
+    // Backfill inside the same try as the ALTER: if the column could not be added, the UPDATE cannot
+    // run either, and this function is now called by every portal request — a throw here would take
+    // the whole console down over a schema step that is allowed to lose a race and retry.
+    try {
+      await env.JOBS.prepare('ALTER TABLE plans ADD COLUMN device_quota INTEGER').run();
+      await env.JOBS.batch(DEFAULT_PLANS.map((p) => env.JOBS.prepare(
+        'UPDATE plans SET device_quota = ? WHERE id = ? AND device_quota IS NULL',
+      ).bind(p.deviceQuota, p.id)));
+    } catch {}
+  }
+  // NULL on a user means "inherit the plan", so no backfill here — writing a number would turn every
+  // existing account into one carrying a per-account override nobody chose.
+  if (!(await hasColumn(env, 'users', 'device_quota'))) {
+    try { await env.JOBS.prepare('ALTER TABLE users ADD COLUMN device_quota INTEGER').run(); } catch {}
+  }
   await env.JOBS.prepare('CREATE INDEX IF NOT EXISTS jobs_user_created ON jobs (user_email, created_at DESC)').run();
-  await env.JOBS.batch(DEFAULT_PLANS.map((p) => env.JOBS.prepare(
-    `INSERT OR IGNORE INTO plans (id, name, quota, features, price, active) VALUES (?,?,?,?,?,1)`,
-  ).bind(p.id, p.name, p.quota, JSON.stringify(p.features), p.price)));
+  const at = nowIso();
+  await env.JOBS.batch([
+    ...DEFAULT_PLANS.map((p) => env.JOBS.prepare(
+      `INSERT OR IGNORE INTO plans (id, name, quota, device_quota, features, price, active) VALUES (?,?,?,?,?,?,1)`,
+    ).bind(p.id, p.name, p.quota, p.deviceQuota, JSON.stringify(p.features), p.price)),
+    ...DEFAULT_FEATURES.map((f) => env.JOBS.prepare(
+      `INSERT OR IGNORE INTO features (id, name, description, active, created_at) VALUES (?,?,?,1,?)`,
+    ).bind(f.id, f.name, f.description, at)),
+  ]);
   return true;
 }
 
@@ -307,7 +363,7 @@ export async function migrate(env, devices) {
 // ── reads ─────────────────────────────────────────────────────────────────────────────────────────
 const rows = (r) => (r && r.results) || [];
 
-const USER_COLS = `u.email, u.name, u.company, u.plan, u.quota, u.status, u.valid_until, u.tags,
+const USER_COLS = `u.email, u.name, u.company, u.plan, u.quota, u.device_quota, u.status, u.valid_until, u.tags,
        u.note, u.features, u.superadmin, u.country, u.created_at,
        (SELECT COUNT(*) FROM clients c WHERE c.user_email = u.email AND c.voided = 0) AS client_count,
        (SELECT COUNT(*) FROM devices d WHERE d.user_email = u.email) AS device_count,
@@ -499,30 +555,112 @@ const parseList = (v) => { try { const p = JSON.parse(v); return Array.isArray(p
 export async function listPlans(env) {
   if (!hasDb(env)) return [];
   const r = await env.JOBS.prepare(
-    '/* plans */ SELECT id, name, quota, features, price, active FROM plans ORDER BY quota ASC, id ASC',
+    '/* plans */ SELECT id, name, quota, device_quota, features, price, active FROM plans ORDER BY quota ASC, id ASC',
   ).all();
   return rows(r);
 }
 
 export async function getPlan(env, id) {
   if (!hasDb(env)) return null;
-  const r = await env.JOBS.prepare('/* plan */ SELECT id, name, quota, features, price, active FROM plans WHERE id = ?')
+  const r = await env.JOBS.prepare('/* plan */ SELECT id, name, quota, device_quota, features, price, active FROM plans WHERE id = ?')
     .bind(S(id, 40).toLowerCase()).first();
   return r || null;
 }
 
 export async function upsertPlan(env, p) {
   if (!hasDb(env)) return false;
+  // device_quota is the ONE column an omitted field must not overwrite: every other field is on the
+  // portal form, but an API caller (or an older form) that never mentions device_quota would
+  // otherwise silently cut Pro from ten devices to one. Bind NULL for "not mentioned" and keep what
+  // is already there.
   await env.JOBS.prepare(
-    `INSERT INTO plans (id, name, quota, features, price, active) VALUES (?,?,?,?,?,?)
+    `INSERT INTO plans (id, name, quota, device_quota, features, price, active) VALUES (?,?,?,?,?,?,?)
      ON CONFLICT(id) DO UPDATE SET name = excluded.name, quota = excluded.quota,
+       device_quota = COALESCE(excluded.device_quota, plans.device_quota),
        features = excluded.features, price = excluded.price, active = excluded.active`,
   ).bind(
     S(p.id, 40).toLowerCase(), S(p.name, 60), N(p.quota),
+    p.deviceQuota == null ? null : N(p.deviceQuota),
     JSON.stringify(Array.isArray(p.features) ? p.features.map(String) : []), S(p.price, 60),
     p.active ? 1 : 0,
   ).run();
   return true;
+}
+
+// ── feature catalogue (SPEC-019) ──────────────────────────────────────────────────────────────────
+export async function listFeatures(env) {
+  if (!hasDb(env)) return [];
+  const r = await env.JOBS.prepare(
+    '/* features */ SELECT id, name, description, active, created_at FROM features ORDER BY id ASC',
+  ).all();
+  return rows(r);
+}
+
+export async function getFeature(env, id) {
+  if (!hasDb(env)) return null;
+  const r = await env.JOBS.prepare('/* feature */ SELECT id, name, description, active, created_at FROM features WHERE id = ?')
+    .bind(featureId(id)).first();
+  return r || null;
+}
+
+/** Slug rules for a catalogue id — it is written verbatim into every grant, so keep it boring. */
+export const featureId = (v) => String(v == null ? '' : v).trim().toLowerCase().replace(/[^a-z0-9._-]/g, '').slice(0, 40);
+
+/**
+ * Create or edit a catalogue entry. The id is the primary key and is NEVER rewritten: a grant on a
+ * plan or a user stores the id as a string, so renaming one would revoke the feature everywhere it
+ * had been sold, silently. Renaming a feature means creating the new id and granting it.
+ * created_at survives an edit for the same reason — it is the row's birthday, not a field.
+ */
+export async function upsertFeature(env, f) {
+  if (!hasDb(env)) return false;
+  await env.JOBS.prepare(
+    `INSERT INTO features (id, name, description, active, created_at) VALUES (?,?,?,?,?)
+     ON CONFLICT(id) DO UPDATE SET name = excluded.name, description = excluded.description,
+       active = excluded.active`,
+  ).bind(featureId(f.id), S(f.name, 80), S(f.description, 400), f.active ? 1 : 0, nowIso()).run();
+  return true;
+}
+
+export async function deleteFeature(env, id) {
+  if (!hasDb(env)) return false;
+  await env.JOBS.prepare('DELETE FROM features WHERE id = ?').bind(featureId(id)).run();
+  return true;
+}
+
+/**
+ * How many plans and how many users currently grant this feature. The delete route refuses on any
+ * count: grants are JSON arrays of ids, so deleting the catalogue row would leave a live grant
+ * pointing at nothing and the portal would render a feature nobody can explain.
+ *
+ * LIKE on the JSON text rather than a join, because the grant lists are TEXT columns. The pattern
+ * includes the quotes — '"po"' cannot match inside '"po-analytics"' — so a prefix is not a match.
+ */
+export async function countFeatureGrants(env, id) {
+  if (!hasDb(env)) return { plans: 0, users: 0 };
+  const like = '%"' + featureId(id) + '"%';
+  const r = await env.JOBS.prepare(
+    `/* feature grants */ SELECT (SELECT COUNT(*) FROM plans WHERE features LIKE ?) AS plans,
+            (SELECT COUNT(*) FROM users WHERE features LIKE ?) AS users`,
+  ).bind(like, like).first();
+  return { plans: (r && r.plans) | 0, users: (r && r.users) | 0 };
+}
+
+/**
+ * Split a requested grant list into what the catalogue will allow and what it will not.
+ *
+ * The point of a catalogue is that it can say no: before this, a typo in the features box produced a
+ * feature nobody would ever hold and no error at all. `inactive` is refused separately from
+ * `unknown` because they are different answers to the admin — one is a typo, the other is a feature
+ * that has been retired and can no longer be sold (though everyone already holding it keeps it).
+ */
+export async function checkFeatureIds(env, ids) {
+  const want = [...new Set((ids || []).map(featureId).filter(Boolean))];
+  if (!want.length) return { unknown: [], inactive: [], bad: [] };
+  const cat = new Map((await listFeatures(env)).map((f) => [f.id, f]));
+  const unknown = want.filter((id) => !cat.has(id));
+  const inactive = want.filter((id) => cat.has(id) && !cat.get(id).active);
+  return { unknown, inactive, bad: [...unknown, ...inactive] };
 }
 
 /** How many users would be orphaned by deleting this plan. The delete route refuses on any count. */
@@ -554,22 +692,62 @@ export async function deletePlan(env, id) {
  *              recovered from KV; the plan column is what the label promises. Taking the larger of
  *              the two means moving somebody onto a bigger plan actually raises their cap, while a
  *              bespoke allowance survives a plan rename. Lowering a cap stays an explicit setQuota.
+ *   devicesEff the same rule for browsers (SPEC-019), so assigning a bigger plan is never a
+ *              downgrade by accident either.
+ *   source     where each number came from — 'plan' | 'custom' | 'override'. The portal has to be
+ *              able to show "25 clients (from pro)" against "12 clients (custom)": an admin who has
+ *              to guess which will eventually edit the plan to fix one account and move everybody.
+ *
+ * plan = 'custom' detaches the account from the plans table completely: quota, device_quota and
+ * features are read VERBATIM and the MAX rule does NOT apply. That is the whole point of a custom
+ * account — MAX would make it impossible to negotiate a cap LOWER than a standard plan, which is
+ * the most common reason one is opened.
  */
 export async function resolveEntitlement(env, email) {
   if (!hasDb(env) || !email) return null;
+  // SELECT * rather than a column list: device_quota arrives with SPEC-019 and an environment that
+  // has not run ensureSchema() since would answer "no such column" — this function is on the
+  // /register and /session paths, where a schema lag must degrade, never throw.
   const u = await env.JOBS.prepare(
-    `/* entitlement */ SELECT email, plan, quota, valid_until, features, status FROM users WHERE email = ?`,
+    `/* entitlement */ SELECT * FROM users WHERE email = ?`,
   ).bind(String(email).trim().toLowerCase()).first();
   if (!u) return null;
   const plan = S(u.plan || 'free', 40);
-  const p = await getPlan(env, plan);
   const own = parseList(u.features);
-  const planFeatures = (p && p.active) ? parseList(p.features) : [];
-  const planQuota = (p && p.active) ? N(p.quota) : 0;
-  return {
+  const ownDevices = u.device_quota == null || u.device_quota === '' ? null : N(u.device_quota);
+  const base = {
     email: S(u.email, 254), plan, status: S(u.status || 'active', 16), validUntil: S(u.valid_until, 40),
-    quota: N(u.quota), planQuota, quotaEff: Math.max(N(u.quota), planQuota),
+    superadmin: !!u.superadmin, quota: N(u.quota), deviceQuota: ownDevices,
+  };
+
+  if (plan === CUSTOM_PLAN) {
+    return {
+      ...base, custom: true,
+      planQuota: 0, quotaEff: N(u.quota),
+      planDeviceQuota: 0, deviceQuotaEff: ownDevices == null ? DEFAULT_DEVICE_QUOTA : ownDevices,
+      features: own, override: true,
+      source: { quota: 'custom', devices: 'custom', features: 'custom' },
+    };
+  }
+
+  const p = await getPlan(env, plan);
+  const live = !!(p && p.active);
+  const planFeatures = live ? parseList(p.features) : [];
+  const planQuota = live ? N(p.quota) : 0;
+  // A missing or retired plan row falls back to the one-device floor rather than to 0 — see
+  // DEFAULT_DEVICE_QUOTA. The client quota keeps its existing 0 fallback: there the user column
+  // carries a real number recovered from KV, so nobody ends up at zero because of it.
+  const planDevices = (live && p.device_quota != null) ? N(p.device_quota) : DEFAULT_DEVICE_QUOTA;
+  return {
+    ...base, custom: false,
+    planQuota, quotaEff: Math.max(N(u.quota), planQuota),
+    planDeviceQuota: planDevices, deviceQuotaEff: Math.max(ownDevices == null ? 0 : ownDevices, planDevices),
     features: own.length ? own : planFeatures, override: own.length > 0,
+    source: {
+      quota: N(u.quota) > planQuota ? 'override' : 'plan',
+      devices: (ownDevices != null && ownDevices > planDevices) ? 'override' : 'plan',
+      features: own.length ? 'override' : 'plan',
+    },
   };
 }
 
@@ -577,8 +755,9 @@ export async function resolveEntitlement(env, email) {
 // Whitelisted column names only: the value is bound, but the column is interpolated, so the set of
 // legal columns must be closed here rather than anywhere a caller can reach.
 const USER_FIELD = {
-  status: 'status', quota: 'quota', plan: 'plan', valid_until: 'valid_until',
-  features: 'features', note: 'note', tags: 'tags', superadmin: 'superadmin',
+  status: 'status', quota: 'quota', device_quota: 'device_quota', plan: 'plan',
+  valid_until: 'valid_until', features: 'features', note: 'note', tags: 'tags',
+  superadmin: 'superadmin',
 };
 
 export async function setUserField(env, email, field, value) {

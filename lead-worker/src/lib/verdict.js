@@ -33,7 +33,10 @@ export async function computeVerdict(env, dev, { rin, version, cfg }) {
   // anything does the KV record answer. That last fallback is not cosmetic — a pre-migration install
   // (and the legacy per-device setFeatures in routes/admin.js, which writes KV only) would otherwise
   // silently LOSE a feature an admin had already granted the moment slice 3 shipped.
-  const features = (ent && ent.features.length) ? ent.features : (dev.features || []);
+  // SPEC-019: on a CUSTOM account the row is the whole contract, so an empty list means "none" and
+  // must not fall through to the KV copy — otherwise moving an account off a feature would leave it
+  // still working on every browser that had ever been granted it.
+  const features = (ent && (ent.custom || ent.features.length)) ? ent.features : (dev.features || []);
   const quota = ent ? ent.quotaEff : (dev.quota ?? 1);
   // Expiry binds, and it is its own reason: the drawer must be able to say "your plan expired"
   // rather than "you are locked", because those ask completely different things of the user — one

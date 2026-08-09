@@ -43,6 +43,39 @@ export async function extensionRoutes(request, env, url, path) {
       if (isVersionBlocked(cfg, String(b.version || '').slice(0, 24))) return regFail('version_blocked', 'Please update ETA Bulk Export to the latest version, then register.', 426);
       const prev = await getDev(env, deviceId);
       const now = new Date().toISOString();
+
+      // ── SPEC-019: the device cap, enforced HERE and only here ─────────────────────────────────
+      // SPEC-017 moved the client quota onto the person but left the door it came through open:
+      // nothing capped how many BROWSERS one person registered, and each registration minted its own
+      // record with its own allowance. That is how one live account ended up holding four devices.
+      //
+      // A deviceId already on record is NOT a new device and is never refused. Losing your own
+      // registration because you cleared a cache — or because support asked you to re-register —
+      // would be a worse failure than the hole this closes. A record whose email is blank counts as
+      // returning too: it is a pre-email install re-registering, not somebody's fifth browser.
+      const known = !!prev && (!prev.email || String(prev.email).trim().toLowerCase() === email);
+      // One personHeld() for both caps: `rins` is what the client quota counts (identical to before,
+      // since `dev` IS `prev` whenever a record exists and a fresh record holds no RINs), `devices`
+      // is what this one counts.
+      const held = await personHeld(env, email, prev);
+      let ent = null;
+      try { ent = await resolveEntitlement(env, email); } catch {}
+      if (!known) {
+        // Devices already on record for this person. `prev` is not one of them: either it does not
+        // exist, or it belongs to a different email and is about to change hands.
+        const onRecord = held.devices - (prev ? 1 : 0);
+        // No D1 row for this person → NO device cap. Same contract features and quota keep: a
+        // pre-migration install, or an environment with no portal at all, must degrade to what KV
+        // says rather than be refused by a number no admin has been given a way to raise.
+        const allowedDevices = ent ? ent.deviceQuotaEff : Infinity;
+        if (onRecord >= allowedDevices) {
+          // Grandfathered exactly as RINs are: everything they already hold keeps working, only the
+          // NEXT one is refused. Nothing is ever unregistered automatically.
+          await errlog(env, request, 'register_fail', { reason: 'device_limit' });
+          return json({ ok: false, error: 'device limit reached', reason: 'device_limit', held: onRecord, allowed: allowedDevices }, 403);
+        }
+      }
+
       const dev = prev || { deviceId, clientKey: randHex(32), boundRins: [], features: [], quota: cfg.defaultQuota ?? 1, locked: false, killed: false, count: 0, firstAt: now };
       dev.regId = String(b.regId || dev.regId || '').slice(0, 120); dev.name = String(b.name).trim().slice(0, 120); dev.email = email;
       dev.phone = String(b.phone || '').trim().slice(0, 40); dev.company = String(b.company || '').trim().slice(0, 160);
@@ -56,9 +89,10 @@ export async function extensionRoutes(request, env, url, path) {
       // user got two quotas out of one licence. The cap is the LARGER of the KV and D1 numbers: the
       // legacy per-device setQuota in routes/admin.js writes KV only and the portal writes D1, so
       // taking the smaller would silently confiscate an allowance an admin has already granted.
-      const held = await personHeld(env, email, dev);
-      let cap = dev.quota ?? 1;                       // ?? so a deliberate quota 0 binds nothing
-      try { const ent = await resolveEntitlement(env, email); if (ent) cap = Math.max(cap, ent.quotaEff); } catch {}
+      // ?? so a deliberate quota 0 binds nothing. A CUSTOM account skips the MAX entirely: its
+      // numbers are negotiated, and MAXing them against a legacy KV allowance would make a cap lower
+      // than a standard plan impossible to agree — which is most of the reason custom accounts exist.
+      let cap = ent ? (ent.custom ? ent.quotaEff : Math.max(dev.quota ?? 1, ent.quotaEff)) : (dev.quota ?? 1);
       // Bind + ATOMICALLY claim the RIN. Claim ONLY when we actually bind (never squat a RIN we're over quota to
       // hold). A losing claim means another account owns it → 409, with no half-bound record left behind.
       if (!dev.boundRins.includes(rin)) {
@@ -88,8 +122,16 @@ export async function extensionRoutes(request, env, url, path) {
       // fills in on the next check-in — the gap would read as "my plan did not apply".
       let feats = dev.features || [], expired = false;
       try {
-        const ent = await resolveEntitlement(env, email);
-        if (ent) { if (ent.features.length) feats = ent.features; cap = Math.max(cap, ent.quotaEff); expired = isExpired(ent.validUntil); }
+        // Re-resolved: the dual-write above may have just CREATED this person's row.
+        const ent2 = await resolveEntitlement(env, email);
+        // A custom account's feature list is authoritative even when empty — "nothing was
+        // negotiated" is an answer, and falling back to the KV copy would hand back a feature the
+        // account was explicitly moved off.
+        if (ent2) {
+          if (ent2.custom || ent2.features.length) feats = ent2.features;
+          cap = ent2.custom ? ent2.quotaEff : Math.max(cap, ent2.quotaEff);
+          expired = isExpired(ent2.validUntil);
+        }
       } catch {}
       // Expiry counts here too. /register reporting allowed:true to someone whose licence lapsed,
       // only for the first /session seconds later to say otherwise, would read as the tool breaking

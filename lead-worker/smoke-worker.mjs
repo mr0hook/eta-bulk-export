@@ -30,7 +30,7 @@ const LEADS = {
 // upsert, the MAX-merged counters, the escalating status), because those are the parts worth
 // testing; getting them wrong here would make a wrong route pass.
 function makeD1() {
-  const jobs = new Map(), chunks = [], events = [], users = new Map(), clients = new Map(), devices = new Map(), plans = new Map();
+  const jobs = new Map(), chunks = [], events = [], users = new Map(), clients = new Map(), devices = new Map(), plans = new Map(), features = new Map();
   const kept = (cur, ex) => (cur !== null && cur !== undefined && cur !== '') ? cur : ex;   // COALESCE(NULLIF(cur,''), ex)
   const owned = (email, m) => [...m.values()].filter((r) => r.user_email === email);
 
@@ -108,11 +108,31 @@ function makeD1() {
     // plans: the seed is INSERT OR IGNORE (an admin's edits survive every ensureSchema), the portal
     // upsert overwrites every column. Two different statements, two different meanings.
     if (sql.includes('INSERT OR IGNORE INTO plans')) {
-      if (!plans.has(a[0])) plans.set(a[0], { id: a[0], name: a[1], quota: a[2], features: a[3], price: a[4], active: 1 });
+      if (!plans.has(a[0])) plans.set(a[0], { id: a[0], name: a[1], quota: a[2], device_quota: a[3], features: a[4], price: a[5], active: 1 });
       return { success: true };
     }
-    if (sql.includes('INSERT INTO plans')) { plans.set(a[0], { id: a[0], name: a[1], quota: a[2], features: a[3], price: a[4], active: a[5] }); return { success: true }; }
+    if (sql.includes('INSERT INTO plans')) {
+      const cur = plans.get(a[0]);
+      // COALESCE(excluded.device_quota, plans.device_quota): an upsert that never mentions the
+      // device allowance must not silently cut it — that semantic IS the test.
+      plans.set(a[0], { id: a[0], name: a[1], quota: a[2], device_quota: a[3] == null ? (cur ? cur.device_quota : null) : a[3], features: a[4], price: a[5], active: a[6] });
+      return { success: true };
+    }
+    if (sql.includes('UPDATE plans SET device_quota')) { const p = plans.get(a[1]); if (p && p.device_quota == null) p.device_quota = a[0]; return { success: true }; }
     if (sql.includes('DELETE FROM plans')) { plans.delete(a[0]); return { success: true }; }
+
+    // SPEC-019 features: same two-statement split as plans. OR IGNORE seeds; the portal upsert
+    // rewrites name/description/active but NEVER the id or created_at.
+    if (sql.includes('INSERT OR IGNORE INTO features')) {
+      if (!features.has(a[0])) features.set(a[0], { id: a[0], name: a[1], description: a[2], active: 1, created_at: a[3] });
+      return { success: true };
+    }
+    if (sql.includes('INSERT INTO features')) {
+      const cur = features.get(a[0]);
+      features.set(a[0], { id: a[0], name: a[1], description: a[2], active: a[3], created_at: cur ? cur.created_at : a[4] });
+      return { success: true };
+    }
+    if (sql.includes('DELETE FROM features')) { features.delete(a[0]); return { success: true }; }
 
     throw new Error('D1 stub: unrecognised statement → ' + sql.slice(0, 70));
   };
@@ -134,13 +154,27 @@ function makeD1() {
   const like = (v, q) => String(v || '').toLowerCase().includes(q);
 
   const read = (sql, a) => {
-    if (sql.includes('pragma_table_info')) return [{ n: 1 }];                          // jobs.user_email exists here
+    // Every column exists here: the stub's rows are plain objects built from the bind list, so the
+    // guarded ALTERs in ensureSchema() (jobs.user_email, plans/users.device_quota) are always
+    // skipped. Their correctness is SQLite's, not this file's — what IS tested is that the seeds
+    // and the reads agree about the columns.
+    if (sql.includes('pragma_table_info')) return [{ n: 1 }];
 
     // ── slice 3: plans + the entitlement resolve ──
     if (sql.includes('/* plans */')) return [...plans.values()].sort((x, y) => (x.quota | 0) - (y.quota | 0) || String(x.id).localeCompare(String(y.id)));
     if (sql.includes('/* plan */')) { const p = plans.get(a[0]); return p ? [p] : []; }
     if (sql.includes('/* plan users */')) return [{ n: [...users.values()].filter((u) => (u.plan || 'free') === a[0]).length }];
     if (sql.includes('/* entitlement */')) { const u = users.get(a[0]); return u ? [u] : []; }
+
+    // ── SPEC-019: the feature catalogue ──
+    if (sql.includes('/* features */')) return [...features.values()].sort((x, y) => String(x.id).localeCompare(String(y.id)));
+    if (sql.includes('/* feature */')) { const f = features.get(a[0]); return f ? [f] : []; }
+    // The LIKE counts, reimplemented as the same substring test the SQL performs — the quotes are
+    // what stop '"po"' matching inside '"po-analytics"', so the stub must include them too.
+    if (sql.includes('/* feature grants */')) {
+      const hit = (rows_, pat) => rows_.filter((r) => String(r.features || '').includes(pat.slice(1, -1))).length;
+      return [{ plans: hit([...plans.values()], a[0]), users: hit([...users.values()], a[1]) }];
+    }
 
     // ── slice 2: the jobs page. `stuck` is state ∈ (running, merging) AND updated_at older than the
     // bound cut-off — reimplemented rather than stubbed true, because that predicate IS the test.
@@ -211,7 +245,7 @@ function makeD1() {
     first: async () => read(sql, args || [])[0] || null,
     all: async () => ({ results: read(sql, args || []) }),
   });
-  return { prepare: (sql) => mk(sql, null), batch: async (stmts) => { for (const s of stmts) await s.run(); return []; }, _jobs: jobs, _chunks: chunks, _events: events, _users: users, _clients: clients, _devices: devices, _plans: plans };
+  return { prepare: (sql) => mk(sql, null), batch: async (stmts) => { for (const s of stmts) await s.run(); return []; }, _jobs: jobs, _chunks: chunks, _events: events, _users: users, _clients: clients, _devices: devices, _plans: plans, _features: features };
 }
 const JOBS = makeD1();
 const env = { LEADS, JOBS, ADMIN_TOKEN: 'testtok' };   // no LOCKS → KV fallbacks
@@ -685,6 +719,11 @@ try {
   const qBody = (deviceId, rin) => ({ method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ name: 'Two Devices', email: 'two.devices@example.com', consent: true, registrationNumber: rin, deviceId, version: '0.5.0' }) });
   const q1 = await (await call('/register', qBody('dev-q1', '810000001'))).json();
+  // SPEC-019 arrived after this test and caps devices too: on the free plan the second browser would
+  // now be refused at the door and never reach the CLIENT quota rule these assertions are about.
+  // Raise the device allowance first so the second device registers and the quota rule is what
+  // decides — the device cap gets its own assertions further down (T-181..T-184).
+  await admin('/api/user', { email: 'two.devices@example.com', action: 'setDeviceQuota', value: 3 });
   const q2 = await (await call('/register', qBody('dev-q2', '810000002'))).json();
   check('a SECOND browser on the same email does not get a second quota',
     q1.ok && q1.boundRins.includes('810000001')
@@ -722,6 +761,138 @@ try {
   const sKvOnly = await dwSession();
   check('a device whose person has no D1 row keeps the features on its KV record',
     sKvOnly.ok && sKvOnly.allowed && sKvOnly.features.join() === 'legacy-grant');
+
+  // ── SPEC-019: the feature catalogue and the device cap ────────────────────────────────────────
+  // Two holes, one spec. Features were a vocabulary hard-coded in the portal UI (so a typo produced
+  // a grant nobody would ever hold, silently); devices were uncapped (so each browser minted its own
+  // allowance — which is how one live account came to hold four).
+  const featuresJ = () => admin('/api/features').then((r) => r.json());
+  const feat = (fs, id) => fs.features.find((f) => f.id === id);
+
+  const cat1 = await featuresJ();
+  await admin('/api/feature', { id: 'auto-reject', name: 'Auto rejection (renamed)', description: 'edited by an admin', active: true });
+  const cat2 = await featuresJ();                                  // every portal call re-runs ensureSchema()
+  check('T-176 the catalogue seeds idempotently and re-seeding never undoes an admin edit',
+    cat1.ok && cat1.features.length === 2 && !!feat(cat1, 'auto-reject') && !!feat(cat1, 'po-analytics')
+    && cat2.features.length === 2 && feat(cat2, 'auto-reject').name === 'Auto rejection (renamed)'
+    && feat(cat2, 'auto-reject').createdAt === feat(cat1, 'auto-reject').createdAt);   // the id's birthday survives an edit
+
+  // A device of its own for the catalogue assertions: dual.write's D1 person is deleted above.
+  const catReg = await (await call('/register', { method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name: 'Cat Alogue', email: 'cat@example.com', consent: true, registrationNumber: '820000001', deviceId: 'dev-cat', version: '0.5.0' }) })).json();
+  const catSession = () => signed('/session', { rin: '820000001', version: '0.5.0' }, catReg.clientKey, 'dev-cat').then((r) => r.json());
+
+  const typo = await admin('/api/user', { email: 'cat@example.com', action: 'setFeatures', value: 'po-analytcs' });
+  const typoJ = await typo.json();
+  check('T-177 setFeatures refuses an id absent from the catalogue, naming it',
+    typo.status === 400 && typoJ.unknown.join() === 'po-analytcs' && /po-analytcs/.test(typoJ.error)
+    && !JOBS._users.get('cat@example.com').features.includes('po-analytcs'));   // and nothing was written
+
+  const planTypo = await admin('/api/plan', { id: 'trial2', quota: 2, features: ['auto-reject', 'nope'] });
+  check('T-177 a plan cannot grant an id the catalogue does not have either',
+    planTypo.status === 400 && !JOBS._plans.has('trial2'));
+
+  // Grant it while active, THEN retire it. Deactivating must stop new grants without touching one.
+  await admin('/api/user', { email: 'cat@example.com', action: 'setFeatures', value: 'po-analytics' });
+  await admin('/api/feature', { id: 'po-analytics', name: 'PO reconciliation', description: 'retired', active: false });
+  const inact = await admin('/api/user', { email: 'other@example.com', action: 'setFeatures', value: 'po-analytics' });
+  const inactJ = await inact.json();
+  check('T-178 setFeatures refuses an id that exists but is inactive, and says why',
+    inact.status === 400 && inactJ.inactive.join() === 'po-analytics' && /inactive/.test(inactJ.error));
+
+  const catSess = await catSession();
+  check('T-179 deactivating a feature leaves an existing grant working (grandfathered, never revoked)',
+    catSess.ok && catSess.allowed && catSess.features.join() === 'po-analytics'
+    && (await featuresJ()).features.find((f) => f.id === 'po-analytics').active === false);
+  await admin('/api/feature', { id: 'po-analytics', name: 'PO reconciliation', description: 'The purchase-order matching card', active: true });
+
+  const delFeat = await admin('/api/feature/delete', { id: 'auto-reject' });
+  const delFeatJ = await delFeat.json();
+  check('T-180 deleting a feature is refused while plans and users still grant it, naming both counts',
+    delFeat.status === 409 && delFeatJ.plans === 2 && delFeatJ.users === 0
+    && /2 plans/.test(delFeatJ.error) && JOBS._features.has('auto-reject'));
+  const delUnused = await (await admin('/api/feature', { id: 'ledger-sync', name: 'Ledger sync' })).json();
+  const delUnusedGone = await (await admin('/api/feature/delete', { id: 'ledger-sync' })).json();
+  check('a feature nobody grants can be deleted, and is created active by default',
+    delUnused.ok && delUnused.created === true && delUnused.feature.active === true
+    && delUnusedGone.ok && !JOBS._features.has('ledger-sync'));
+
+  // ── the device cap ──
+  const capBody = (deviceId, rin) => ({ method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name: 'Cap Test', email: 'devcap@example.com', consent: true, registrationNumber: rin, deviceId, version: '0.5.0' }) });
+  const c1 = await (await call('/register', capBody('dev-c1', '830000001'))).json();
+  const c2res = await call('/register', capBody('dev-c2', '830000002'));
+  const c2 = await c2res.json();
+  check('T-181 /register refuses device N+1 with reason=device_limit and the two counts',
+    c1.ok && c2res.status === 403 && c2.ok === false && c2.error === 'device limit reached'
+    && c2.reason === 'device_limit' && c2.held === 1 && c2.allowed === 1     // free plan: one device
+    && !store.has('dev:dev-c2'));                                           // and nothing half-created
+
+  const c1again = await (await call('/register', capBody('dev-c1', '830000001'))).json();
+  check('T-182 a returning deviceId is never refused — clearing a cache must not cost a registration',
+    c1again.ok && c1again.boundRins.includes('830000001'));
+
+  // Raise the allowance, fill it, then drop it below what they hold.
+  await admin('/api/user', { email: 'devcap@example.com', action: 'setDeviceQuota', value: 3 });
+  const c2ok = await (await call('/register', capBody('dev-c2', '830000002'))).json();
+  const c3ok = await (await call('/register', capBody('dev-c3', '830000003'))).json();
+  await admin('/api/user', { email: 'devcap@example.com', action: 'setDeviceQuota', value: 1 });
+  const c4res = await call('/register', capBody('dev-c4', '830000004'));
+  const c4 = await c4res.json();
+  const stillThere = ['dev-c1', 'dev-c2', 'dev-c3'].every((d) => store.has('dev:' + d));
+  const allReturn = await Promise.all([
+    call('/register', capBody('dev-c1', '830000001')).then((r) => r.json()),
+    call('/register', capBody('dev-c2', '830000002')).then((r) => r.json()),
+    call('/register', capBody('dev-c3', '830000003')).then((r) => r.json()),
+  ]);
+  check('T-183 an over-cap user keeps every device and simply cannot add another',
+    c2ok.ok && c3ok.ok && c4res.status === 403 && c4.reason === 'device_limit'
+    && c4.held === 3 && c4.allowed === 1 && stillThere && allReturn.every((r) => r.ok));
+
+  // MAX(user override, plan) — assigning a bigger plan must never be a downgrade by accident.
+  await admin('/api/user', { email: 'devcap@example.com', action: 'setPlan', value: 'pro' });
+  const entPro = (await (await admin('/api/user?email=devcap@example.com')).json()).entitlement;
+  await admin('/api/user', { email: 'devcap@example.com', action: 'setDeviceQuota', value: 12 });
+  const entOver = (await (await admin('/api/user?email=devcap@example.com')).json()).entitlement;
+  const c4ok = await (await call('/register', capBody('dev-c4', '830000004'))).json();
+  check('T-184 the effective device allowance is MAX(user override, plan), and it says which won',
+    entPro.devices === 10 && entPro.source.devices === 'plan'          // override 1 loses to pro's 10
+    && entOver.devices === 12 && entOver.source.devices === 'override'
+    && entPro.clients === 25 && entPro.source.clients === 'plan'
+    && c4ok.ok && c4ok.boundRins.includes('830000004'));
+
+  // ── custom accounts ──
+  // A negotiated account detaches from the plans table entirely. The MAX rule must NOT apply, or a
+  // cap LOWER than a standard plan — the main reason a custom account is opened — is impossible.
+  await admin('/api/user', { email: 'cat@example.com', action: 'setPlan', value: 'custom' });
+  await admin('/api/user', { email: 'cat@example.com', action: 'setQuota', value: 2 });
+  await admin('/api/user', { email: 'cat@example.com', action: 'setDeviceQuota', value: 2 });
+  await admin('/api/user', { email: 'cat@example.com', action: 'setFeatures', value: 'auto-reject' });
+  const entCustom = (await (await admin('/api/user?email=cat@example.com')).json()).entitlement;
+  const custSess = await catSession();
+  check('T-187 a custom account is read VERBATIM, including a cap far LOWER than any named plan',
+    entCustom.custom === true && entCustom.clients === 2 && entCustom.devices === 2
+    && entCustom.source.clients === 'custom' && entCustom.source.devices === 'custom'
+    && entCustom.source.features === 'custom' && entCustom.features.join() === 'auto-reject'
+    && custSess.quota === 2 && custSess.features.join() === 'auto-reject');   // not MAX(2, pro's 25)
+
+  await admin('/api/plan', { id: 'pro', name: 'Pro', quota: 500, deviceQuota: 99, features: ['auto-reject', 'po-analytics'], price: '' });
+  const entAfterPlanEdit = (await (await admin('/api/user?email=cat@example.com')).json()).entitlement;
+  const proAfter = (await (await admin('/api/plans')).json()).plans.find((p) => p.id === 'pro');
+  check('T-186 a custom account ignores plan edits entirely',
+    proAfter.quota === 500 && proAfter.deviceQuota === 99
+    && entAfterPlanEdit.clients === 2 && entAfterPlanEdit.devices === 2);
+  // …while an account ON that plan follows it, which is what makes the isolation meaningful.
+  const entOnPlan = (await (await admin('/api/user?email=devcap@example.com')).json()).entitlement;
+  check('an account on the edited plan does follow it', entOnPlan.devices === 99 && entOnPlan.clients === 500);
+
+  const planOmits = await (await admin('/api/plan', { id: 'pro', name: 'Pro', quota: 500, features: ['auto-reject'] })).json();
+  check('a plan upsert that never mentions the device allowance keeps it rather than cutting it to 1',
+    planOmits.ok && planOmits.plan.deviceQuota === 99);
+
+  const reserved = await admin('/api/plan', { id: 'custom', name: 'Custom', quota: 9 });
+  check('T-188 POST /api/plan refuses the reserved id "custom"',
+    reserved.status === 400 && /reserved/.test((await reserved.json()).error) && !JOBS._plans.has('custom'));
 
   // ── top-level catch ──
   const origGet = LEADS.get; LEADS.get = async () => { throw new Error('kv exploded'); };

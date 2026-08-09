@@ -439,6 +439,33 @@ tr.wedged > td:first-child{box-shadow:inset 3px 0 0 var(--bad)}
 .planed{border:1px solid var(--accent);border-radius:var(--r);padding:var(--s4);
   background:var(--panel2);margin-bottom:var(--s4)}
 
+/* ── Provenance: every allowance says where it came from ──────────────────── */
+/* SPEC-019. A number with no provenance is a number an admin has to guess about.
+   Muted = inherited from a plan. Accent = written on this account (an override,
+   or a negotiated custom figure). Dashed = the server sent no `source` and this
+   is the portal's own reading of the documented rule — said out loud, not hidden. */
+.prov{display:inline-block;font:500 9.5px/1.6 var(--font-mono);text-transform:uppercase;letter-spacing:.07em;
+  padding:0 6px;border-radius:var(--r-sm);border:1px solid var(--line);background:var(--panel2);
+  color:var(--muted);white-space:nowrap;vertical-align:middle}
+.prov.own{border-color:color-mix(in srgb,var(--accent) 42%,transparent);background:var(--accent-soft);color:var(--accent)}
+.prov.derived{border-style:dashed}
+.allow{display:flex;align-items:baseline;gap:6px;flex-wrap:wrap}
+.allow .n2{font:600 12.5px var(--font-mono);font-variant-numeric:tabular-nums;white-space:nowrap}
+.allow .n2.full{color:var(--warn)} .allow .n2.over{color:var(--bad)}
+.grand{font:500 10.5px var(--font-mono);color:var(--warn);letter-spacing:.04em;margin-top:3px}
+
+/* Catalogue rows. `dead` = deactivated but still granted somewhere — greyed, not
+   hidden, because grandfathering means it is still doing work. */
+.feat.dead{border-left-color:var(--faint);opacity:.78}
+.feat.wired{border-left-color:var(--moss)}
+.feat .fd{margin-top:5px;font-size:12.5px;line-height:1.5;color:var(--text2)}
+.wirebar{display:flex;gap:var(--s3);align-items:flex-start;padding:11px var(--s4);border-radius:var(--r);
+  border:1px solid var(--warnln);background:var(--warnbg);font-size:13px;line-height:1.55;margin-bottom:var(--s4)}
+.wirebar .cl{font:500 10px/1.7 var(--font-mono);text-transform:uppercase;letter-spacing:.09em;color:var(--warn);flex:none;min-width:62px}
+.wirebar b{color:var(--text)}
+.custed{border:1px solid color-mix(in srgb,var(--accent) 45%,transparent);border-radius:var(--r);
+  padding:var(--s4);background:var(--accent-soft);margin-top:var(--s3)}
+
 /* ── Responsive: laptop first, then narrow ────────────────────────────────── */
 @media(max-width:1180px){
   :root{--rail:64px}
@@ -542,6 +569,8 @@ var S = {
   jobs:[], jtotal:0, jpage:1, jstate:'', juser:'', jrin:'', jstuck:0, jobsErr:'',
   job:null, jobId:'', jobErr:'',
   plans:[], plansErr:'', plansDone:false, planEdit:null, planRefused:null,
+  feats:[], featsErr:'', featsDone:false, featEdit:null, featRefused:null,
+  custEdit:null,
   reqs:[], bugs:[], voids:[], audit:[], errs:[], trash:[], snaps:[],
   insights:null, health:null, cfg:{}, stats:null,
   rfilter:'all', bfilter:'all',
@@ -649,6 +678,7 @@ var ICON = {
   bugs:'<path d="M9 6.2a3 3 0 016 0"/><rect x="7.2" y="8" width="9.6" height="10.4" rx="4.8"/><path d="M4 11.2h3.2M16.8 11.2H20M4 16.4h3.2M16.8 16.4H20M12 8v10.4"/>',
   jobs:'<rect x="2.9" y="4" width="18.2" height="6" rx="1.7"/><rect x="2.9" y="14" width="18.2" height="6" rx="1.7"/><path d="M6.3 7h.02M6.3 17h.02"/><path d="M10.5 7h6.8M10.5 17h6.8"/>',
   activation:'<path d="M12 2.9l7.3 2.9v5.5c0 4.5-3 7.9-7.3 9.6-4.3-1.7-7.3-5.1-7.3-9.6V5.8z"/><path d="M8.9 12.1l2.1 2.2 4.1-4.4"/>',
+  features:'<path d="M4 7.5l7.3-4.2a1.4 1.4 0 011.4 0L20 7.5v9l-7.3 4.2a1.4 1.4 0 01-1.4 0L4 16.5z"/><path d="M4 7.5l8 4.6 8-4.6"/><path d="M12 12.1V21"/>',
   activity:'<path d="M2.8 12.4h4.1L9.4 6l4 13.2 2.4-6.8h5.4"/>',
   tools:'<circle cx="12" cy="12" r="3.2"/><path d="M12 3v2.3M12 18.7V21M21 12h-2.3M5.3 12H3M18.4 5.6L16.8 7.2M7.2 16.8L5.6 18.4M18.4 18.4l-1.6-1.6M7.2 7.2L5.6 5.6"/>'
 };
@@ -669,7 +699,8 @@ var SECTIONS = [
     {id:'activity',  label:'Activity',  icon:'activity',  title:'Activity',   sub:'Admin action log and extension-facing errors'}
   ]},
   {group:'System', items:[
-    {id:'activation', label:'Activation', icon:'activation', title:'Activation', sub:'Plans, features and expiry — what a licence actually grants'},
+    {id:'activation', label:'Activation', icon:'activation', title:'Activation', sub:'Plans, allowances and expiry — what a licence actually grants'},
+    {id:'features',  label:'Features',  icon:'features',  title:'Feature catalogue', sub:'The vocabulary every plan and account is allowed to grant'},
     {id:'tools',     label:'Tools',     icon:'tools',     title:'Tools',      sub:'Configuration, migration, backup, trash'}
   ]}
 ];
@@ -810,7 +841,16 @@ function loadPlans(){
   return api('/api/plans').then(function(j){
     if(!guard(j)) return;
     if(j.ok){ S.plans=j.plans||[]; S.plansErr=''; } else { S.plans=[]; S.plansErr=j.error||'unavailable'; }
-    S.plansDone=true; repaint('activation'); repaint('user');
+    S.plansDone=true; repaint('activation'); repaint('features'); repaint('user');
+  });
+}
+/* GET /api/features — SPEC-019. The catalogue replaces the hard-coded pair; until it
+   answers the portal falls back to the two seeded ids and says that it is doing so. */
+function loadFeatures(){
+  return api('/api/features').then(function(j){
+    if(!guard(j)) return;
+    if(j.ok){ S.feats=j.features||[]; S.featsErr=''; } else { S.feats=[]; S.featsErr=j.error||'unavailable'; }
+    S.featsDone=true; repaint('features'); repaint('activation'); repaint('user');
   });
 }
 function loadStats(){ return api('/api/stats').then(function(j){ if(!guard(j)) return; if(j.ok){ S.stats=j.stats; S.cfg=j.cfg||{}; setConn('on'); repaint('tools'); } }); }
@@ -827,7 +867,7 @@ function loadHealth(){ return api('/api/health').then(function(j){ if(j.ok){ S.h
 function loadAll(){
   setConn('run');
   Promise.all([loadDashboard(), loadStats(), loadReqs(), loadBugs()]).then(stamp);
-  loadUsers(); loadClients(); loadJobs(); loadPlans();
+  loadUsers(); loadClients(); loadJobs(); loadPlans(); loadFeatures();
   loadVoids(); loadAudit(); loadErrs(); loadTrash(); loadSnaps(); loadInsights(); loadHealth();
   if(S.section==='user'&&S.userEmail) loadUser(S.userEmail);
   if(S.section==='client'&&S.clientRin) loadClient(S.clientRin);
@@ -844,6 +884,7 @@ function logout(){
   S.dash=null; S.users=[]; S.clients=[]; S.user=null; S.client=null;
   S.jobs=[]; S.job=null; S.jobId=''; S.jpage=1; S.jstate=''; S.juser=''; S.jrin=''; S.jstuck=0;
   S.plans=[]; S.plansDone=false; S.planEdit=null; S.planRefused=null;
+  S.feats=[]; S.featsDone=false; S.featEdit=null; S.featRefused=null; S.custEdit=null;
   $('shell').hidden=true; $('login').hidden=false; $('token').value=''; $('err').textContent='';
   setConn(''); $('stamp').textContent='';
 }
@@ -893,15 +934,42 @@ function dayRange(a,b){
 }
 
 /* ── feature vocabulary ───────────────────────────────────────────────────── */
-/* Fixed for now, per SPEC-017 slice 3. Typing feature names into a free-text box
-   is how a plan silently stops granting anything, so the editors below toggle
-   from this list instead. Flags found in the data that are NOT in this list are
-   still rendered — flagged as unknown rather than hidden. */
-var FEATURES = [
-  {id:'auto-reject',  what:'Unlocks the rejection tab in the extension. Slice 3 is its first consumer — the drawer receives <span class="mono">features</span> today and reads it nowhere.'},
-  {id:'po-analytics', what:'Purchase-order analytics. Carried on the plan so it can be sold; nothing gates on it until a consumer exists.'}
+/* SPEC-019: features are DATA now. The catalogue arrives from GET /api/features and
+   every editor toggles from it, because typing a feature name into a free-text box is
+   how a plan silently stops granting anything. Flags found in the data that are NOT in
+   the catalogue are still rendered — flagged as unknown rather than hidden.
+
+   WIRED is the honest half and does not come from the server, because the server
+   cannot know it: a catalogue row is a label until a line in the EXTENSION asks for
+   the id by name. These two ids are asked for. Nothing else is. */
+var WIRED = {
+  'auto-reject':  'Wired. <span class="mono">src/ui/flow.js</span> asks for this id by name — granting it shows the Rejection tab and its scan/submit flow.',
+  'po-analytics': 'Wired. Gates the purchase-order reconciliation card.'
+};
+function isWired(id){ return Object.prototype.hasOwnProperty.call(WIRED,String(id)); }
+/* The two rows ensureSchema() seeds. Used only until /api/features answers, so the
+   plan editor is never a blank box on a portal whose backend half is not deployed. */
+var SEED_FEATURES = [
+  {id:'auto-reject',  name:'Auto rejection',    description:'The Rejection tab and its scan/submit flow', active:1},
+  {id:'po-analytics', name:'PO reconciliation', description:'The purchase-order matching card',           active:1}
 ];
-function featureKnown(id){ for(var i=0;i<FEATURES.length;i++) if(FEATURES[i].id===id) return FEATURES[i]; return null; }
+function catalogueFallback(){ return !(S.feats && S.feats.length); }
+function catalogue(){
+  if(S.feats && S.feats.length) return S.feats;
+  return (S.featsDone && !S.featsErr) ? [] : SEED_FEATURES;
+}
+function featureKnown(id){ var c=catalogue(); for(var i=0;i<c.length;i++) if(String(c[i].id)===String(id)) return c[i]; return null; }
+function featureActive(id){ var m=featureKnown(id); return !!(m && Number(m.active)); }
+function featureLabel(id){ var m=featureKnown(id); return (m && m.name) ? m.name : String(id); }
+/* Which plans grant an id, and how many loaded accounts carry it in an override.
+   The same two numbers the server names when it refuses a delete — shown before the
+   admin clicks, so the refusal is a confirmation rather than a surprise. */
+function featureUse(id){
+  var plans=(S.plans||[]).filter(function(p){ return (featList(p.features)||[]).indexOf(id)>=0; }).map(function(p){ return String(p.id); });
+  var users=0;
+  (S.users||[]).forEach(function(u){ var o=featList(u.features); if(o && o.indexOf(id)>=0) users++; });
+  return {plans:plans, users:users};
+}
 /* null  = no per-user override, the plan decides.
    []    = a deliberate empty override — the plan is ignored and nothing is granted. */
 function featList(v){
@@ -918,22 +986,107 @@ function planById(id){
   for(var i=0;i<(S.plans||[]).length;i++) if(String(S.plans[i].id)===String(id)) return S.plans[i];
   return null;
 }
+/* `custom` is a reserved plan id, not a plan: it detaches the account from the plan
+   table entirely. No plan row exists for it and none is ever consulted. */
+function isCustom(u){ return String((u&&u.plan)||'')==='custom'; }
 /* The one computation the whole Activation slice turns on: what does this user
    actually get, and WHICH of the two sources put it there. */
 function featureView(u){
   u=u||{};
   var ovr = featList(u.features);
-  var pl  = planById(u.plan);
+  var cust = isCustom(u);
+  var pl  = cust ? null : planById(u.plan);
   var plf = pl ? (featList(pl.features)||[]) : null;   /* null = plan unknown */
-  return { ovr:ovr, plan:pl, planFeats:plf, eff:(ovr!=null ? ovr : (plf||[])) };
+  return { ovr:ovr, plan:pl, planFeats:plf, custom:cust, eff:(ovr!=null ? ovr : (plf||[])) };
 }
 function featureIds(v){
   var seen={}, out=[];
-  FEATURES.forEach(function(x){ seen[x.id]=1; out.push(x.id); });
+  catalogue().forEach(function(x){ seen[x.id]=1; out.push(String(x.id)); });
   [].concat(v.eff||[], v.ovr||[], v.planFeats||[]).forEach(function(id){
     id=String(id); if(!seen[id]){ seen[id]=1; out.push(id); }
   });
   return out;
+}
+
+/* ── allowances and their provenance ──────────────────────────────────────── */
+/* SPEC-019 asks the portal to show, for every account, both what it gets AND where
+   that came from — `25 clients (from pro)` versus `12 clients (custom)`. The contract
+   pins the idea (a `source` per value) rather than the field names, so read every
+   plausible carrier and, when nothing arrives, derive the answer from the documented
+   rule and SAY that it was derived. A dashed tag is honest; a confident wrong one
+   is the thing this whole feature exists to prevent. */
+function srcField(u,key){
+  if(!u) return null;
+  var bag = u.sources || u.source;
+  if(bag && typeof bag==='object' && bag[key]!=null && bag[key]!=='') return String(bag[key]);
+  var d = f(u, key+'Source', key+'_source');
+  return d==null ? null : String(d);
+}
+function numOr(v){ if(v==null||v===''||isNaN(Number(v))) return null; return Number(v); }
+/* kind: 'quota' (clients) | 'device' (browsers). Returns
+   {value, own, planValue, src, derived} where src is 'custom' | 'override' | a plan id. */
+function allowance(u,kind){
+  u=u||{};
+  var own  = kind==='device' ? numOr(f(u,'deviceQuota','device_quota')) : numOr(u.quota);
+  var pl   = isCustom(u) ? null : planById(u.plan);
+  var plv  = pl ? (kind==='device' ? numOr(f(pl,'deviceQuota','device_quota')) : numOr(pl.quota)) : null;
+  var told = srcField(u, kind==='device' ? 'deviceQuota' : 'quota');
+  var eff  = numOr(f(u, kind==='device' ? 'effectiveDeviceQuota' : 'effectiveQuota'));
+  var src, derived=!told;
+  if(isCustom(u)){
+    /* The override is the ONLY source here: MAX(user,plan) is deliberately NOT applied,
+       or a cap negotiated LOWER than a standard plan would be impossible to write. */
+    if(eff==null) eff=own;
+    src = told || 'custom';
+  } else if(own!=null && plv!=null){
+    if(eff==null) eff = Math.max(own,plv);
+    src = told || (eff>plv ? 'override' : String(u.plan||''));
+  } else if(own!=null){
+    if(eff==null) eff=own;
+    src = told || 'override';
+  } else {
+    if(eff==null) eff=plv;
+    src = told || (plv!=null ? String(u.plan||'') : null);
+  }
+  return {value:eff, own:own, planValue:plv, src:src, derived:derived};
+}
+/* The tag itself. `from pro` (inherited) · `custom` (negotiated) · `override`
+   (written on top of a plan). Dashed when the portal worked it out rather than
+   being told, so nobody reads a guess as a fact. */
+function provTag(a){
+  if(!a || !a.src) return '<span class="prov derived" title="No plan on record and nothing written on the account — this number has no traceable source.">source unknown</span>';
+  var own = a.src==='custom' || a.src==='override' || a.src==='user';
+  var txt = a.src==='custom' ? 'custom' : (a.src==='override'||a.src==='user') ? 'override' : ('from '+a.src.replace(/^plan:/,''));
+  var tip = a.src==='custom'
+      ? 'Negotiated on this account. No plan is consulted, and no edit to any plan can change it.'
+    : own
+      ? 'Written on this account and larger than the plan, so it wins. Effective = MAX(account, plan)'+(a.planValue!=null?' — plan gives '+a.planValue+'.':'.')
+      : 'Inherited from plan '+a.src.replace(/^plan:/,'')+'. Editing that plan changes this number'+(a.own!=null?'; the account also carries '+a.own+', which is not larger so it does not win.':'.');
+  if(a.derived) tip += ' — Derived by the portal from the documented rule; the server sent no source for this value.';
+  return '<span class="prov'+(own?' own':'')+(a.derived?' derived':'')+'" title="'+esc(tip)+'">'+esc(txt)+'</span>';
+}
+/* "4 / 25 clients (from pro)" — used by the table, the detail page and the strip, so
+   the same number never reads two different ways in two places. */
+function allowLine(used,a,noun,opts){
+  opts=opts||{};
+  var cap=a.value, u2=Number(used||0);
+  var cls = cap!=null && u2>cap ? ' over' : cap!=null && u2>=cap ? ' full' : '';
+  var over = cap!=null && u2>cap;
+  return '<div class="allow"><span class="n2'+cls+'">'+n(u2)+' / '+(cap==null?'∞':n(cap))+'</span>'
+    + (opts.noun?'<span class="usub">'+esc(noun)+'</span>':'')
+    + provTag(a) + '</div>'
+    + (cap!=null&&!opts.nobar ? '<div class="bar sm meter'+cls+'" style="margin-top:5px;max-width:82px"><i style="width:'+pct(u2,cap)+'%"></i></div>' : '')
+    + (over&&!opts.noflag ? '<div class="grand">over allowance &mdash; grandfathered</div>' : '');
+}
+/* Accounts holding more than they are allowed. They are not broken: every existing
+   record keeps working and only the NEXT one is refused. The list exists so an admin
+   sees them, not so an admin panics about them. */
+function overCap(list,kind){
+  return (list||S.users||[]).filter(function(u){
+    var a=allowance(u,kind); if(a.value==null) return false;
+    var held = kind==='device' ? Number(f(u,'deviceCount','device_count')||0) : Number(u.clientCount||0);
+    return held>a.value;
+  });
 }
 function expiryCell(u){
   var raw=u&&u.validUntil;
@@ -1057,16 +1210,14 @@ function userPills(u){
   else { var a=ago(u.lastSeen); if(a!=null&&a>=30) p.push('<span class="pill muted">dormant</span>'); }
   return p.join(' ');
 }
-function quotaCell(u){
-  var used=Number(u.clientCount||0), cap=Number(u.quota||0);
-  var cls = cap && used>cap ? ' over' : cap && used>=cap ? ' full' : '';
-  return '<div class="num" style="font-size:12.5px">'+used+' / '+(cap||'∞')+'</div>'
-    + (cap?'<div class="bar sm meter'+cls+'" style="margin-top:5px;width:64px"><i style="width:'+pct(used,cap)+'%"></i></div>':'');
-}
+function quotaCell(u){ return allowLine(u.clientCount, allowance(u,'quota'), 'clients'); }
+/* SPEC-019's second half. Devices were unlimited; the column now reads against an
+   allowance and says where the allowance came from, exactly as clients do. */
+function deviceCell(u){ return allowLine(f(u,'deviceCount','device_count'), allowance(u,'device'), 'devices'); }
 function planOptions(sel){
   var seen={}; S.users.forEach(function(u){ if(u.plan) seen[u.plan]=1; });
   (S.plans||[]).forEach(function(p){ if(p.id) seen[p.id]=1; });
-  ['free','standard','pro'].forEach(function(p){ if(!(p in seen)) seen[p]=1; });
+  ['free','standard','pro','custom'].forEach(function(p){ if(!(p in seen)) seen[p]=1; });
   return '<option value="">All plans</option>'+Object.keys(seen).sort().map(function(p){
     return '<option value="'+esc(p)+'"'+(sel===p?' selected':'')+'>'+esc(p)+'</option>'; }).join('');
 }
@@ -1115,12 +1266,10 @@ RENDER.users = function(){
         + '<div class="usub mono">'+e+'</div>'
         + ((u.tags&&u.tags.length)?'<div style="margin-top:4px">'+(typeof u.tags==='string'?u.tags.split(','):u.tags).map(function(t){ return '<span class="tag">'+esc(String(t).trim())+'</span>'; }).join('')+'</div>':'')
       + '</td>'
-      + '<td><span class="pill accent">'+esc(u.plan||'free')+'</span>'
-        + (planById(u.plan)&&planById(u.plan).quota!=null&&Number(planById(u.plan).quota)!==Number(u.quota)
-            ? '<div class="usub" title="Plan quota is '+esc(String(planById(u.plan).quota))+'">quota overridden</div>' : '')
+      + '<td><span class="pill '+(isCustom(u)?'accent" title="Negotiated account — detached from the plan table':'accent')+'">'+esc(u.plan||'free')+'</span>'
         + '<div style="margin-top:4px">'+expiryCell(u)+'</div></td>'
       + '<td>'+quotaCell(u)+'</td>'
-      + '<td class="num">'+n(u.deviceCount)+'</td>'
+      + '<td>'+deviceCell(u)+'</td>'
       + '<td class="num">'+n(u.jobCount)+'</td>'
       + '<td class="num">'+n(u.docs)+'</td>'
       + '<td>'+userPills(u)+'</td>'
@@ -1144,12 +1293,30 @@ RENDER.users = function(){
       + '<button class="btn tiny ghost" data-go2="activation">Open Activation</button></div></span></div>'
     : '';
 
-  return head + expBar
+  /* Over-cap accounts are grandfathered, not broken — every device and every client
+     they already hold keeps working, and only the next one is refused. Said in those
+     words on purpose: an admin who reads this as an outage starts unregistering
+     browsers, which is the one thing SPEC-019 promises never happens by itself. */
+  var oc=overCap(rows,'device'), ocq=overCap(rows,'quota');
+  var capBar = (oc.length||ocq.length)
+    ? '<div class="callout info" style="margin-bottom:16px"><span class="cl">grandfathered</span><span class="cb">'
+      + (oc.length?'<b>'+oc.length+'</b> account'+(oc.length===1?'':'s')+' hold'+(oc.length===1?'s':'')+' more devices than the allowance':'')
+      + (oc.length&&ocq.length?' &middot; ':'')
+      + (ocq.length?'<b>'+ocq.length+'</b> hold'+(ocq.length===1?'s':'')+' more clients than the quota':'')
+      + '. Nothing is broken and nothing was unregistered: every record they already have keeps working, and '
+      + '<span class="mono">/register</span> simply refuses the next one with <span class="mono">reason:&#39;device_limit&#39;</span>. '
+      + 'Raise the allowance if that refusal is wrong.'
+      + '<div style="margin-top:9px">'+oc.concat(ocq).slice(0,6).map(function(u){
+          return '<button class="btn tiny ghost" data-uopen2="'+esc(u.email||'')+'">'+esc(u.name||u.email||'—')+'</button> '; }).join('')
+      + '</div></span></div>'
+    : '';
+
+  return head + expBar + capBar
     + '<div class="tablewrap"><table class="wide"><thead><tr>'
     + '<th style="width:34px"><input type="checkbox" id="chkAll" class="chk" title="Select all on this page"></th>'
     + sortHead('name','User',S.usort)
     + sortHead('validUntil','Plan / expiry',S.usort)
-    + '<th>Clients / quota</th><th>Devices</th><th>Jobs</th>'
+    + '<th>Clients / allowance</th><th>Devices / allowance</th><th>Jobs</th>'
     + sortHead('docs','Documents',S.usort)
     + '<th>Status</th>' + sortHead('lastSeen','Last seen',S.usort) + '<th></th>'
     + '</tr></thead><tbody>'+body+'</tbody></table></div>'
@@ -1177,6 +1344,7 @@ WIRE.users = function(){
     S.usort = S.usort.key===k ? {key:k,dir:-S.usort.dir} : {key:k,dir:k==='name'?1:-1}; paint(); }; });
   q('#views tr.click', function(tr){ tr.onclick=function(e){ if(e.target.closest('button,a,input')) return; openUser(tr.getAttribute('data-open')); }; });
   q('#views [data-open2]', function(b){ b.onclick=function(e){ e.stopPropagation(); openUser(b.getAttribute('data-open2')); }; });
+  q('#views [data-uopen2]', function(b){ b.onclick=function(e){ e.stopPropagation(); openUser(b.getAttribute('data-uopen2')); }; });
   q('#views .rowchk', function(c){ c.onclick=function(e){ e.stopPropagation();
     if(c.checked) S.usel[c.getAttribute('data-e')]=1; else delete S.usel[c.getAttribute('data-e')]; paint(); }; });
   if($('chkAll')) $('chkAll').onclick=function(){
@@ -1227,11 +1395,14 @@ RENDER.user = function(){
       + '<button class="btn danger" id="udel">Delete</button>'
     + '</div></div>';
 
+  var aq=allowance(u,'quota'), ad=allowance(u,'device');
+  var heldC=(u.clientCount!=null?u.clientCount:cs.length), heldD=(f(u,'deviceCount','device_count')!=null?Number(f(u,'deviceCount','device_count')):ds.length);
   var totals = '<div class="strip">'
-    + [{k:'Clients',v:(u.clientCount!=null?u.clientCount:cs.length)},{k:'Devices',v:(u.deviceCount!=null?u.deviceCount:ds.length)},
+    + [{k:'Clients',v:heldC},{k:'Devices',v:heldD},
        {k:'Jobs',v:(u.jobCount!=null?u.jobCount:js.length)},{k:'Documents',v:u.docs,c:'info'},
        {k:'Open bugs',v:bs.filter(function(b){return b.status==='open';}).length,c:'bad'},
-       {k:'Quota',v:(u.clientCount!=null?u.clientCount:cs.length)+' / '+(u.quota||'∞'),c:'moss'}]
+       {k:'Client allowance',v:heldC+' / '+(aq.value==null?'∞':aq.value),c:(aq.value!=null&&heldC>aq.value?'bad':'moss')},
+       {k:'Device allowance',v:heldD+' / '+(ad.value==null?'∞':ad.value),c:(ad.value!=null&&heldD>ad.value?'bad':'moss')}]
       .map(function(t){ return '<div class="tile'+(t.c?' '+t.c:'')+'"><div class="v">'+(typeof t.v==='string'?esc(t.v):n(t.v))+'</div><div class="k">'+esc(t.k)+'</div></div>'; }).join('')
     + '</div>';
 
@@ -1244,14 +1415,19 @@ RENDER.user = function(){
     + '<span class="k">Last seen</span><span class="v">'+cairo(u.lastSeen)+' <span class="usub">'+esc(rel(u.lastSeen)||'never')+'</span></span>'
     + '</div></div>';
 
-  var entitlement = '<div class="panel"><div class="eyebrow">Entitlement</div><div class="kv">'
-    + '<span class="k">Plan</span><span class="v"><span class="pill accent">'+esc(u.plan||'free')+'</span>'
-      + (v.plan ? ' <span class="usub">'+esc(v.plan.name||'')+' &middot; quota '+esc(String(v.plan.quota==null?'∞':v.plan.quota))+(v.plan.price?' &middot; '+esc(v.plan.price):'')+'</span>' : '')
-      + ' <button class="btn tiny" data-ue="setPlan">change</button></span>'
-    + '<span class="k">Client quota</span><span class="v"><span class="num">'+esc(u.quota==null?'—':u.quota)+'</span>'
-      + (v.plan && v.plan.quota!=null && Number(v.plan.quota)!==Number(u.quota)
-          ? ' <span class="pill warn">differs from plan ('+esc(String(v.plan.quota))+')</span>' : '')
-      + ' <button class="btn tiny" data-ue="setQuota">set</button></span>'
+  var entitlement = '<div class="panel"><div class="eyebrow">Entitlement</div>'
+    + planPicker(u,v)
+    + (v.custom ? customEditor(u,v) : '')
+    + '<div class="kv" style="margin-top:14px">'
+    + '<span class="k">Client allowance</span><span class="v">'+allowLine(heldC,aq,'clients',{nobar:true})
+      + (v.custom ? '' : ' <button class="btn tiny" data-ue="setQuota">set</button>')
+      + (!v.custom && aq.own!=null && aq.planValue!=null && aq.own<aq.planValue
+          ? '<div class="usub">This account also carries <b>'+esc(String(aq.own))+'</b>, which loses to the plan: a named plan is never a downgrade by accident. To negotiate a cap BELOW a plan, move the account to <b>custom</b>.</div>' : '')
+      + '</span>'
+    + '<span class="k">Device allowance</span><span class="v">'+allowLine(heldD,ad,'devices',{nobar:true})
+      + (v.custom ? '' : ' <button class="btn tiny" data-ue="setDeviceQuota">set</button>')
+      + '<div class="usub">Enforced in <span class="mono">/register</span> and only there. A browser already on record is never a new device and is never refused.</div>'
+      + '</span>'
     + '<span class="k">Valid until</span><span class="v">'+expiryCell(u)
       + '<div style="margin-top:5px"><button class="btn tiny" data-ue="setValidUntil">set</button></div></span>'
     + '<span class="k">Tags</span><span class="v">'+(tags.length?tags.map(function(t){ return '<span class="tag">'+esc(t)+'</span>'; }).join(''):'<span class="muted">none</span>')+' <button class="btn tiny" data-ue="setTags">edit</button></span>'
