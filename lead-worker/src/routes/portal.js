@@ -32,7 +32,7 @@ import {
   setClientVoided, moveClient, listJobsPage, getJobRow, setJobState, purgeJobChunks,
   listPlans, getPlan, upsertPlan, deletePlan, countPlanUsers,
 } from '../users.js';
-import { getChunks } from '../jobs.js';
+import { getChunks, getEvents } from '../jobs.js';
 
 const OURS = new Set([
   '/api/dashboard', '/api/users', '/api/user', '/api/clients', '/api/client', '/api/migrate',
@@ -268,7 +268,15 @@ export async function portalRoutes(request, env, url, path, admin) {
     // plan" produce the same empty array but mean opposite things to whoever is reading the screen —
     // one is retention working, the other is a run that failed before it planned anything.
     const purged = chunks.length === 0 && (job.total_chunks | 0) > 0;
-    return json({ ok: true, job: shapeJob(job), chunks: chunks.map(shapeChunk), purged });
+    // SPEC-018 Part B: what the run DID, not only what it is — the status lines the extension
+    // shipped while it ran, oldest first, so the detail page can tail them. Capped at 200 newest by
+    // the writer and purged with the chunks at 'done', so a finished run answers with an empty
+    // array for the same retention reason its plan is gone.
+    const events = await getEvents(env, id);
+    return json({
+      ok: true, job: shapeJob(job), chunks: chunks.map(shapeChunk), purged,
+      events: events.map((e) => ({ at: e.at || '', level: e.level || 'info', kind: e.kind || null, text: e.text || '' })),
+    });
   }
 
   if (request.method === 'POST' && path === '/api/job') {

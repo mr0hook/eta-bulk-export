@@ -10,7 +10,8 @@ import { resolveReferenceNumbers } from './refs.js';
 import * as store from './store.js';
 import * as folder from './folder.js';
 import { createFolderLog } from './folderlog.js';
-import { taxpayerId, taxpayerName, EXT_VERSION, jobCheckpoint } from './registration.js';
+import { createLogShip } from './logship.js';
+import { taxpayerId, taxpayerName, EXT_VERSION, jobCheckpoint, jobLog } from './registration.js';
 import * as fs from './fs.js';
 import * as keepalive from './keepalive.js';
 import { createSessionKeeper } from './session.js';
@@ -41,8 +42,13 @@ export function createOrchestrator(hooks = {}) {
   // SPEC-011: every user-visible line already funnels through onStatus, so mirroring the run log to
   // the folder needs exactly one interception point. It must never be able to break a run, hence the
   // swallow — a logger that aborts the export it documents is worse than no logger.
+  // SPEC-018 Part B adds the second consumer at the SAME point: the batched shipper to the portal.
+  // Order matters — the folder log is the authoritative record and is written first; the shipper is
+  // a convenience copy and is fire-and-forget. Neither can reach rawStatus's arguments to change
+  // them, and neither can stop the drawer from being told what happened.
   let fLog = null;
-  const onStatus = (msg, meta) => { try { fLog?.push(msg, meta); } catch {} rawStatus(msg, meta); };
+  const ship = createLogShip({ send: (body) => jobLog(body), ...(hooks.logShip || {}) });
+  const onStatus = (msg, meta) => { try { fLog?.push(msg, meta); } catch {} try { ship.push(msg, meta); } catch {} rawStatus(msg, meta); };
   // onStatus(msg, meta) — meta { level:'ok'|'err'|'warn'|'wait'|'run'|'info', terminal?, kind? } lets the UI
   // classify without string-sniffing; kind marks high-frequency lines the run log coalesces (rate/page/probe).
   const rate = (w) => onStatus(t('orch.rateWait', { s: Math.round(w / 1000) }), { level: 'wait', kind: 'rate' });
@@ -122,6 +128,9 @@ export function createOrchestrator(hooks = {}) {
       onStatus,
       stopped: () => flags.paused || flags.halted,
     });
+    // SPEC-018: shipping only starts once a job EXISTS. The probing lines above were buffered and
+    // go out with the first flush — losing the beginning of every run would defeat the point.
+    ship.setJob(jobId);
     const totalRows = chunks.reduce((s, c) => s + c.count, 0);
     const biggest = chunks.reduce((m, c) => Math.max(m, c.count), 0);
     const p = {
@@ -158,6 +167,9 @@ export function createOrchestrator(hooks = {}) {
     // never gets written to. rotate() keeps one generation back for last-night/tonight comparisons.
     fLog = createFolderLog(dirHandle, plan.key);
     try { await fLog.rotate(); } catch {}
+    // A resumed plan carries the jobId it was minted with; a plan without one (an older progress
+    // file) ships nothing at all rather than appending this run's lines to a previous job's log.
+    if (plan.jobId) ship.setJob(plan.jobId); else ship.reset();
     running = true; keepalive.start(); session.start();
     const SRC = SOURCES[plan.source] || SOURCES.invoices;
     const sp = statusPlan(plan.statuses, SRC);
@@ -339,6 +351,10 @@ export function createOrchestrator(hooks = {}) {
       // pause reason a user reads the next morning — only reach disk because of this flush.
       try { await fLog?.flush(); } catch {}
       fLog = null;
+      // Deliberately NOT awaited. Every terminal line already flushed on its way through onStatus;
+      // this is a belt-and-braces kick for the non-terminal tail, and making the end of a run wait
+      // on a backend round-trip is exactly the "never slow a run" the contract forbids.
+      try { ship.flush(); } catch {}
     }
   }
 

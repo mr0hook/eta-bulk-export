@@ -159,6 +159,11 @@ export async function session() {
 export function planStart(body) { return signedPost('/plan/start', body); }
 export function planStep(body) { return signedPost('/plan/step', body); }
 export function jobCheckpoint(body) { return signedPost('/job/checkpoint', body); }
+// SPEC-018 Part B — a batch of run-log lines for a job. Status lines only (counts and progress,
+// never document content), batched and coalesced by logship.js before they get here. Best-effort:
+// the caller drops the batch on anything other than ok, and signedPost already resolves rather than
+// rejecting on a network failure.
+export function jobLog(body) { return signedPost('/job/log', body); }
 export function jobResumable() { return signedPost('/job/resumable', {}); }
 export function jobPlan(jobId) { return signedPost('/job/plan', { jobId: String(jobId || '') }); }
 

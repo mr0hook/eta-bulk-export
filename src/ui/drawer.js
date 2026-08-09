@@ -7,7 +7,7 @@ import { idbGet, ensurePermission, writeBlob } from '../core/fs.js';
 import { mergeFolder } from '../core/merge.js';
 import { repairFolder } from '../core/repair.js';
 import { removableColumns, XLSX_MIME } from '../export/xlsx.js';
-import { session, register, gateEnabled, taxpayerId, requestRin, reportBug, LEAD_URL, EXT_VERSION } from '../core/registration.js';
+import { session, register, gateEnabled, taxpayerId, requestRin, reportBug, LEAD_URL, EXT_VERSION, jobResumable, jobPlan, jobCheckpoint } from '../core/registration.js';
 import { createRunLog } from '../core/runlog.js';
 import { createEtaTracker } from '../core/eta.js';
 import { FONT_BLOBS } from './fonts.js';
@@ -23,6 +23,12 @@ import { loadWindows, makeResolver } from '../reject/window.js';
 import { fetchReceivedDetails } from '../reject/received.js';
 import { parsePoWorkbook, projectInvoice, analyzePo } from '../reject/po.js';
 import { renderPoAnalytics, renderPoTemplate, poAnalyticsName } from '../reject/po_xlsx.js';
+// SPEC-018 — the Download flow's model. Pure (no DOM): the mapping, the defaults and the end-of-run
+// sequence live in flow.js so they can be asserted without a shadow root (test/flow.test.mjs).
+import {
+  defaultRange, defaultAdvanced, normalizeAdvanced, loadAdvanced, saveAdvanced, advancedChanges,
+  buildSel, sourceOfKind, kindOf, rejectionAllowed, resumeEntry, planFromJob, finishRun, runFinished, runClean,
+} from './flow.js';
 
 const CSS = `
 :host{ all:initial;
@@ -184,6 +190,27 @@ details.cols .chips{ margin-top:9px }
 .rjnum{ width:100%;padding:8px 10px;border-radius:var(--r-sm);background:var(--bg2);color:var(--text);border:1px solid var(--line);font:500 12px var(--font-mono) }
 .rjnote{ margin-top:10px;padding:8px 11px;border-radius:var(--r-sm);font:600 11px var(--font-ui);background:var(--info-bg);color:var(--info-tx) }
 .rjnote.warn{ background:var(--warn-bg);color:var(--warn-tx) }
+/* ── SPEC-018 · the Download flow ──────────────────────────────────────────────────────────────
+   One primary action, then a folder, then one question. Everything below is the chrome for those
+   three steps; the old three-card form's controls live on inside <details class="adv">. */
+.hero{ width:100%;font:700 15px var(--font-ui);padding:15px 14px }
+.hint-line{ margin-top:9px;font:500 11.5px var(--font-ui);color:var(--muted);line-height:1.45 }
+/* Resume entry: a whole row, not a link — an interrupted export is the most important thing on the
+   screen for the person who has one, and invisible to everyone else. */
+.resume{ display:flex;flex-direction:column;gap:3px;width:100%;margin-top:10px;text-align:start;cursor:pointer;
+  padding:11px 13px;border-radius:var(--r);border:1px solid var(--gold-bd);background:var(--gold-chip);color:var(--text) }
+.resume:hover{ filter:brightness(1.08) } .resume[disabled]{ opacity:.45;cursor:not-allowed }
+.resume .rz-t{ font:600 13px var(--font-ui) } .resume .rz-s{ font:500 11px var(--font-mono);color:var(--muted) }
+.seg.kinds{ display:flex;width:100% } .seg.kinds button{ flex:1;padding:8px 6px }
+details.adv summary{ display:flex;align-items:baseline;gap:7px }
+details.adv .advbody{ margin-top:11px;padding-top:11px;border-top:1px solid var(--line2) }
+.offer{ margin-top:12px;padding:11px 13px;border-radius:var(--r);background:var(--warn-bg);color:var(--warn-tx);
+  font:600 11.5px var(--font-ui);line-height:1.45;display:flex;flex-direction:column;gap:9px;align-items:flex-start }
+.lockline{ margin-top:10px;font:500 11px var(--font-ui);color:var(--dim);line-height:1.4 }
+/* Arabic has no letter case and its letterforms join: uppercasing is a no-op and letter-spacing
+   breaks the joins into loose glyphs. Both are neutralised for every micro-label when RTL. */
+.drawer[dir=rtl] label.l, .drawer[dir=rtl] .stat .k, .drawer[dir=rtl] .tk .k, .drawer[dir=rtl] .proc .pl,
+.drawer[dir=rtl] .ckline, .drawer[dir=rtl] details.cols summary{ text-transform:none; letter-spacing:normal }
 `;
 
 // Brand mark: the omarsoliman.dev star (two squares, one rotated 45°) — assets/mark.svg from the
@@ -232,7 +259,6 @@ export function mountUI() {
   const st = document.createElement('style'); st.textContent = CSS; root.appendChild(st);
   installFonts();
 
-  const YEARS = ['2020', '2021', '2022', '2023', '2024', '2025', '2026'];
   root.innerHTML += `
     <button class="pill" id="pill">${SEAL} ETA Bulk</button>
     <div class="scrim" id="scrim"></div>
@@ -242,14 +268,17 @@ export function mountUI() {
           <div class="brand"><div class="seal">${SEAL}</div><div><div class="wm">ETA&nbsp;Bulk</div><div class="tag">by omarsoliman.dev</div></div></div>
           <div style="display:flex;align-items:center;gap:8px"><span class="chip" id="tok"><span class="dot"></span><span class="num">—</span></span><button class="x" id="langBtn" data-i18n-title="ui.langTitle" title="العربية / English" aria-label="Language" style="font-size:13px;font-weight:700">ع</button><button class="x" id="themeBtn" data-i18n-title="ui.themeTitle" title="Light / dark theme" aria-label="Toggle theme" style="font-size:15px">🌙</button><button class="x" id="close" aria-label="Close">×</button></div>
         </div>
+        <!-- SPEC-018: the Receipts tab is gone — Sales/Purchases/Receipts is one question inside the
+             export flow, not two places to reach the same job. What is left is Export vs Rejection,
+             and Rejection is gated on the /session feature list. -->
         <div class="src" id="srcrow">
-          <div class="seg" role="tablist" aria-label="Source">
-            <button role="tab" aria-selected="true" data-tab="invoices" data-i18n="ui.invoices">Invoices</button>
-            <button role="tab" aria-selected="false" data-tab="receipts" data-i18n="ui.receipts">Receipts</button>
+          <div class="seg" role="tablist" aria-label="Section" id="tabs">
+            <button role="tab" aria-selected="true" data-tab="export" data-i18n="flow.export">Export</button>
             <button role="tab" aria-selected="false" data-tab="rejection" data-i18n="ui.rejection">Rejection</button>
           </div>
           <div class="cap" id="cap">Documents · cap <b>10,000</b>/search</div>
         </div>
+        <div class="lockline" id="rejlock" hidden data-i18n="flow.rejLocked"></div>
       </header>
       <div class="ann" id="umsg" hidden></div>
       <div class="ann" id="ann" hidden></div>
@@ -276,47 +305,73 @@ export function mountUI() {
         </div>
         <div id="main">
         <div id="view-export">
+        <!-- Step 1 · one primary action. Reaching "data is downloading" used to cost about a dozen
+             decisions; every one of them now has a default that reproduces the configured run. -->
+        <div id="step-home">
         <section class="card">
-          <div class="sh"><span class="n">1</span><h3 data-i18n="ui.configure">Configure</h3></div>
-          <div class="row">
-            <div><label class="l" data-i18n="ui.from">From</label><input type="date" class="ctl" id="from" value="2025-01-01"></div>
-            <div><label class="l" data-i18n="ui.to">To</label><input type="date" class="ctl" id="to" value="2025-12-31"></div>
+          <button class="btn primary hero" id="download" data-i18n="flow.download">⭳ Download</button>
+          <button class="resume" id="resumeEntry" hidden><span class="rz-t" id="rz-what"></span><span class="rz-s num" id="rz-sub"></span></button>
+          <div class="hint-line" id="dlhint" data-i18n="flow.downloadHint">Pick a folder, choose what to export, and go.</div>
+        </section>
+        <section class="card">
+          <div class="sh"><h3 data-i18n="ui.tools">Tools</h3><span class="hint" data-i18n="ui.toolsHint">post-run</span></div>
+          <!-- Merge stays a standalone action: a folder the user did not just export into still has
+               to be mergeable. Repair is NOT here — it appears only when merge reports a file it
+               could not read (see #repairOffer). -->
+          <div class="tools"><button class="btn" id="merge" data-i18n="ui.merge">⧉ Merge folder</button><button class="btn" id="sync" data-i18n="ui.sync" data-i18n-title="ui.syncTitle" title="Re-exports from 3 days before the last run's end through today, into the same folder.">⟳ Sync new since last run</button></div>
+          <button class="btn sm" id="bug" style="width:100%;margin-top:8px" data-i18n="ui.bug">🐞 Report a bug</button>
+          <button class="btn sm" id="reqrin" style="width:100%;margin-top:8px" hidden data-i18n="ui.reqrin">＋ Request access for another account</button>
+        </section>
+        </div>
+        <!-- Step 2 · one question. Sales/Purchases/Receipts replaces the source toggle AND the
+             direction select; the range defaults to this calendar year; everything else is behind
+             Advanced, collapsed, remembered, and defaulted to today's behaviour exactly. -->
+        <div id="step-what" hidden>
+        <section class="card">
+          <div class="sh"><span class="n">1</span><h3 data-i18n="flow.whatTitle">What to export</h3></div>
+          <div class="seg kinds" role="tablist" aria-label="What to export" id="kinds">
+            <button role="tab" aria-selected="true" data-kind="sales" data-i18n="flow.sales">Sales</button>
+            <button role="tab" aria-selected="false" data-kind="purchases" data-i18n="flow.purchases">Purchases</button>
+            <button role="tab" aria-selected="false" data-kind="receipts" data-i18n="flow.receipts">Receipts</button>
           </div>
-          <div class="row" style="margin-top:11px">
-            <div><label class="l" data-i18n="ui.direction">Direction</label><select id="dir"></select></div>
-            <div><label class="l" data-i18n="ui.filterBy">Filter by</label><select id="field"></select></div>
+          <div class="row" style="margin-top:13px">
+            <div><label class="l" data-i18n="ui.from">From</label><input type="date" class="ctl" id="from"></div>
+            <div><label class="l" data-i18n="ui.to">To</label><input type="date" class="ctl" id="to"></div>
           </div>
-          <div class="row" style="margin-top:11px">
-            <div><label class="l" data-i18n="ui.quickYear">Quick year</label><select id="year"><option value="" data-i18n="ui.rangeAbove">range above</option>${YEARS.map((y) => `<option value="${y}">${y}</option>`).join('')}</select></div>
-            <div><label class="l" data-i18n="ui.lineItems">Line items</label><label class="togg" style="margin-top:4px"><input type="checkbox" id="details" checked> <span data-i18n="ui.details">Details</span></label></div>
-          </div>
-          <label class="togg" style="margin-top:12px"><input type="checkbox" id="pdf"> <span data-i18n="ui.pdfToggle">Official ETA PDF per document</span> <span style="color:var(--dim);font:600 10px var(--font-mono);margin-inline-start:3px" data-i18n="ui.pdfHint">→ pdfs/ · slower</span></label>
-          <div style="margin-top:12px"><label class="l" data-i18n="ui.status">Status</label><div class="chips" id="statuses">${ALL_STATUSES.map((s) => `<label class="sc"><input type="checkbox" id="st_${s}" checked>${s}</label>`).join('')}</div></div>
-          <details class="cols"><summary><span data-i18n="ui.columns">Columns</span> <span id="colhint">· all</span></summary><div class="chips" id="cols"></div></details>
+          <details class="cols adv" id="adv">
+            <summary><span data-i18n="flow.advanced">Advanced</span> <span id="advhint">· defaults</span></summary>
+            <div class="advbody">
+              <div class="hint-line" style="margin-top:0" data-i18n="flow.advNote">Untouched, these export exactly what a fully configured run would.</div>
+              <div class="row" style="margin-top:11px">
+                <div><label class="l" data-i18n="ui.filterBy">Filter by</label><select id="field"></select></div>
+                <div><label class="l" data-i18n="ui.pdfHint">→ pdfs/ · slower</label><label class="togg" style="margin-top:4px"><input type="checkbox" id="pdf"> <span data-i18n="ui.pdfToggle">Official ETA PDF per document</span></label></div>
+              </div>
+              <div style="margin-top:12px"><label class="l" data-i18n="ui.status">Status</label><div class="chips" id="statuses">${ALL_STATUSES.map((s) => `<label class="sc"><input type="checkbox" id="st_${s}" checked>${s}</label>`).join('')}</div></div>
+              <div style="margin-top:12px"><label class="l"><span data-i18n="ui.columns">Columns</span> <span id="colhint">· all</span></label><div class="chips" id="cols"></div></div>
+            </div>
+          </details>
           <div class="folder"><span>${FOLDER_ICO}</span><span class="p" id="folder">No output folder</span><button class="btn sm" id="pick" data-i18n="ui.pick">Pick</button></div>
+          <div class="runbar" style="margin-top:12px"><button class="btn sm" id="back" data-i18n="flow.back">‹ Back</button><button class="btn primary" id="start" data-i18n="flow.start">▶ Start</button></div>
         </section>
+        </div>
+        <!-- Step 3 · running. -->
+        <div id="step-run" hidden>
         <section class="card">
-          <div class="sh"><span class="n">2</span><h3 data-i18n="ui.plan">Plan</h3><span class="hint" data-i18n="ui.planHint">year-first adaptive</span></div>
-          <button class="btn" id="build" style="width:100%" data-i18n="ui.build">⟐ Build chunk plan</button>
-          <button class="btn" id="sync" style="width:100%;margin-top:8px" data-i18n="ui.sync" data-i18n-title="ui.syncTitle" title="Re-exports from 3 days before the last run's end through today, into the same folder. Run Merge afterwards — duplicates are removed automatically.">⟳ Sync new since last run</button>
+          <div class="sh"><span class="n">2</span><h3 data-i18n="ui.run">Run</h3><span class="hint" id="runwhat"></span><button class="btn sm" id="logcopy" data-i18n="ui.logCopy" data-i18n-title="ui.logCopyTitle" title="Copy the full run log" style="margin-inline-start:auto;padding:4px 8px;font-size:11px">⧉ Log</button><button class="btn sm" id="logclear" data-i18n-title="ui.logClearTitle" title="Clear the run log" style="padding:4px 8px;font-size:11px">✕</button></div>
           <div class="stats"><div class="stat"><div class="k" data-i18n="ui.stChunks">Chunks</div><div class="v num" id="s-chunks">—</div></div><div class="stat"><div class="k" data-i18n="ui.stRows">Rows</div><div class="v num" id="s-rows">—</div></div><div class="stat"><div class="k" data-i18n="ui.stBiggest">Biggest</div><div class="v num" id="s-big">—</div></div><div class="stat"><div class="k" data-i18n="ui.stEta">Est. time</div><div class="v num" id="s-eta">—</div></div></div>
-        </section>
-        <section class="card">
-          <div class="sh"><span class="n">3</span><h3 data-i18n="ui.run">Run</h3><span class="hint" data-i18n="ui.runHint">background-safe</span><button class="btn sm" id="logcopy" data-i18n="ui.logCopy" data-i18n-title="ui.logCopyTitle" title="Copy the full run log" style="margin-inline-start:8px;padding:4px 8px;font-size:11px">⧉ Log</button><button class="btn sm" id="logclear" data-i18n-title="ui.logClearTitle" title="Clear the run log" style="padding:4px 8px;font-size:11px">✕</button></div>
-          <div class="runbar"><button class="btn primary" id="start" disabled data-i18n="ui.start">▶ Approve &amp; Start</button><button class="btn sm" id="pause" disabled data-i18n="ui.pause">Pause</button><button class="btn sm" id="resume" data-i18n="ui.resume">Resume</button></div>
           <div class="tracker"><div class="tk ok"><div class="v num" id="t-done">0</div><div class="k" data-i18n="ui.tDone">Done</div></div><div class="tk err"><div class="v num" id="t-fail">0</div><div class="k" data-i18n="ui.tFail">Failed</div></div><div class="tk left"><div class="v num" id="t-left">0</div><div class="k" data-i18n="ui.tLeft">Left</div></div></div>
           <div class="proc"><span class="pv"><span id="procN" class="num">0</span> / <span id="procT" class="num">&mdash;</span></span><span class="pl" id="procLabel">invoices fetched</span></div>
           <div class="track"><i id="bar"></i></div>
           <div class="ckline"><span id="ckLabel">current chunk —</span><span class="cknow" id="ckCur"></span></div>
           <div class="ckbar"><i id="chunkbar"></i></div>
           <div class="log" id="log">Idle.</div>
+          <div class="runbar" style="margin-top:11px"><button class="btn sm" id="pause" disabled data-i18n="ui.pause">Pause</button><button class="btn sm" id="resume" data-i18n="ui.resume">Resume</button><button class="btn sm" id="done" data-i18n="flow.doneBtn">✓ Done</button></div>
         </section>
-        <section class="card">
-          <div class="sh"><span class="n">4</span><h3 data-i18n="ui.tools">Tools</h3><span class="hint" data-i18n="ui.toolsHint">post-run</span></div>
-          <div class="tools"><button class="btn" id="merge" data-i18n="ui.merge">⧉ Merge folder</button><button class="btn" id="repair" data-i18n="ui.repair">⛭ Repair files</button></div>
-          <button class="btn sm" id="bug" style="width:100%;margin-top:8px" data-i18n="ui.bug">🐞 Report a bug</button>
-          <button class="btn sm" id="reqrin" style="width:100%;margin-top:8px" hidden data-i18n="ui.reqrin">＋ Request access for another account</button>
-        </section>
+        </div>
+        <!-- Repair is not in the flow. repair.js fixes illegal XML characters in files written by
+             OTHER tools; the only evidence such a file exists is merge saying it could not read one,
+             so the offer is attached to that message and lives nowhere else. -->
+        <div class="offer" id="repairOffer" hidden><span id="repairMsg"></span><button class="btn sm" id="repair" data-i18n="ui.repair">⛭ Repair files</button></div>
         </div>
         <div id="view-rejection" hidden>
         <section class="card">
@@ -380,7 +435,12 @@ export function mountUI() {
   const q = (sel) => root.querySelector(sel);
   let currentPlan = null, source = 'invoices', busy = false, licensed = true;   // licensed=true default → standalone (no bridge) is ungated
   let rjItems = [], rjCtrl = null;   // auto-reject review items + abort controller for a scan/submit/analyze in flight
-  let tab = 'invoices';              // visible view: invoices | receipts | rejection (source stays export-only)
+  let tab = 'export';                // visible section: export | rejection (rejection is feature-gated)
+  // SPEC-018 flow state. `kind` is what the user picked (sales|purchases|receipts) and `source` is
+  // derived from it — the two are never set independently. `step` is which of the three screens is up.
+  let kind = 'sales', step = 'home';
+  let resumeJob = null;              // the one entry /job/resumable offered, or null
+  let finishing = false;             // inside the post-run merge → checkpoint sequence
   let poState = { pos: [], warnings: [], fileName: '', analysis: null };   // uploaded PO sheet + last analysis
   let lastSession = null;        // last /session verdict (drives the request-RIN prefill)
   // Live time-left: measured in WORK units (invoices fully processed, PDFs doubling), not discovered
@@ -436,6 +496,9 @@ export function mountUI() {
         setFt(cls, m.replace(/^[▶✅■⏸]\s*/, ''));
         if (clean) $('s-eta').textContent = '0m';
         if (meta.terminal) setBusy(false);
+        // SPEC-018: the fetch loop finishing is not the run finishing — the job is not done until the
+        // output exists. Merge follows automatically; only then does the 'done' checkpoint go out.
+        if (runFinished(meta)) autoFinish(meta);
         return;
       }
       const terminal = (m[0] === '\u2705' || m[0] === '\u23F8' || m[0] === '\u25A0' || /expired|Halted/.test(m));
@@ -451,16 +514,7 @@ export function mountUI() {
       $('procN').textContent = fmt(fetched); if (total) $('procT').textContent = fmt(total);
       $('bar').style.width = total ? Math.min(100, fetched / total * 100) + '%' : '0';
     },
-    onPlan: (p) => {
-      currentPlan = p;
-      $('s-chunks').textContent = fmt(p.chunks.length); $('s-rows').textContent = fmt(p.totalRows);
-      $('s-big').textContent = fmt(p.biggest); $('s-eta').textContent = fmtMin(estMinutes(p));
-      const done = (p.doneIds || []).length; $('t-done').textContent = fmt(done); $('t-left').textContent = fmt(p.chunks.length - done);
-      const doneRows = p.chunks.filter((c) => (p.doneIds || []).includes(c.id)).reduce((s, c) => s + Math.min(c.count, p.cap), 0);
-      $('procN').textContent = fmt(doneRows); $('procT').textContent = fmt(p.totalRows);
-      $('bar').style.width = p.totalRows ? (doneRows / p.totalRows * 100) + '%' : '0';
-      $('start').disabled = !licensed;
-    },
+    onPlan: renderPlan,
     onToken: (tk) => { const c = $('tok'); c.className = 'chip ' + (tk.ok ? 'ok' : 'err'); c.querySelector('.num').textContent = tk.label.replace(/^(Token|الجلسة):\s*/, ''); },
     onChunk: (ck) => {
       lastChunk = ck.phase === 'idle' ? null : ck;
@@ -476,12 +530,34 @@ export function mountUI() {
     guard: async () => { if (!gateEnabled()) return true; const s = await session(); return s.registered && s.allowed; },
   });
 
-  function setBusy(b) { busy = b;
-    if (b) { eta.reset(); lastChunk = null; logRun = 'active'; saveLogSoon(true); }   // fresh rate baseline; mark mid-flight so a crash restores the log
+  function setBusy(b) {
+    // The run handler's own `finally { setBusy(false) }` fires while the automatic merge is still
+    // going — the merge is kicked off from a status hook, not awaited by it. Releasing the controls
+    // there would let a second run start on top of the merge. autoFinish releases them itself.
+    if (!b && finishing) return;
+    busy = b;
+    // The post-run merge is part of the same run: it must not re-open the log lifecycle the
+    // orchestrator's terminal line just closed, or a completed export would look resumable.
+    if (b) { eta.reset(); lastChunk = null; if (!finishing) { logRun = 'active'; saveLogSoon(true); } }   // fresh rate baseline; mark mid-flight so a crash restores the log
     else if (logRun === 'active') { logRun = 'none'; saveLogSoon(true); }             // activity ended without a terminal status (plan built, resume loaded) → nothing to resume
-    $('build').disabled = b || !licensed; $('sync').disabled = b || !licensed; $('start').disabled = b || !currentPlan || !licensed; $('pause').disabled = !b; $('resume').disabled = b; $('pick').disabled = b; $('merge').disabled = b; $('repair').disabled = b;
+    $('download').disabled = b || !licensed; $('sync').disabled = b || !licensed; $('start').disabled = b || !licensed;
+    $('resumeEntry').disabled = b; $('back').disabled = b;
+    $('pause').disabled = !b; $('resume').disabled = b; $('pick').disabled = b; $('merge').disabled = b; $('repair').disabled = b;
     $('rj-scan').disabled = b || !licensed; rjFoot();
     $('po-pick').disabled = b; $('po-template').disabled = b; poFoot(); }
+
+  // Plan → the run screen's numbers. Named (rather than inline in the hook) because a resume built
+  // from /job/plan renders the same panel without going through onPlan.
+  function renderPlan(p) {
+    currentPlan = p;
+    $('s-chunks').textContent = fmt(p.chunks.length); $('s-rows').textContent = fmt(p.totalRows);
+    $('s-big').textContent = fmt(p.biggest); $('s-eta').textContent = fmtMin(estMinutes(p));
+    const done = (p.doneIds || []).length; $('t-done').textContent = fmt(done); $('t-left').textContent = fmt(p.chunks.length - done);
+    const doneRows = p.chunks.filter((c) => (p.doneIds || []).includes(c.id)).reduce((s, c) => s + Math.min(c.count, p.cap), 0);
+    $('procN').textContent = fmt(doneRows); $('procT').textContent = fmt(p.totalRows);
+    $('bar').style.width = p.totalRows ? (doneRows / p.totalRows * 100) + '%' : '0';
+    $('start').disabled = busy || !licensed;
+  }
 
   // Registration gate — engages only once LEAD_URL is wired (gateEnabled). Locks to one taxpayer per device:
   // registered → ungated; a different client-taxpayer must register again (a new lead for that entity).
@@ -502,7 +578,8 @@ export function mountUI() {
     el.append(x);
   };
   async function refreshLicense() {
-    if (!gateEnabled()) { licensed = true; $('gate').hidden = true; showMain(true); renderAnnouncement(null); renderMessage(null); if (!busy) { $('build').disabled = false; $('sync').disabled = false; $('start').disabled = !currentPlan; $('rj-scan').disabled = false; poFoot(); } return; }   // ungated branch must mirror the gated one for the rejection controls too
+    // Ungated (no bridge wired) is the standalone build: nothing to ask, so every feature is on.
+    if (!gateEnabled()) { licensed = true; $('gate').hidden = true; showMain(true); renderAnnouncement(null); renderMessage(null); applyFeatures(null); if (!busy) { $('download').disabled = false; $('sync').disabled = false; $('start').disabled = false; $('rj-scan').disabled = false; poFoot(); } return; }   // ungated branch must mirror the gated one for the rejection controls too
     const s = await session();
     lastSession = s;
     renderAnnouncement(s.announcement);
@@ -511,6 +588,7 @@ export function mountUI() {
     $('gate').hidden = licensed;
     $('reqrin').hidden = !licensed;   // inside #main, so effectively: gated + registered + allowed
     showMain(licensed);   // full-screen registration page takes over the drawer while locked
+    applyFeatures(s.features);   // SPEC-018: the drawer's first consumer of the verdict's feature list
     if (!licensed) {
       const showForm = !s.registered;
       $('gate-form').hidden = !showForm;
@@ -529,36 +607,83 @@ export function mountUI() {
         $('blk-reqmsg').textContent = '';
       }
     }
-    if (!busy) { $('build').disabled = !licensed; $('start').disabled = !currentPlan || !licensed; $('rj-scan').disabled = !licensed; poFoot(); }
+    if (!busy) { $('download').disabled = !licensed; $('start').disabled = !licensed; $('rj-scan').disabled = !licensed; poFoot(); }
+    refreshResume();   // an interrupted export is only offered to an account that could actually continue it
   }
 
-  function applySourceUI() {
+  // ── SPEC-018 · features ──────────────────────────────────────────────────────────────────────
+  // The rejection tab is gated on features.includes('auto-reject'). Absent → hidden, with one line
+  // saying why, and a single remaining tab is no longer a tab bar.
+  function applyFeatures(features) {
+    const on = !gateEnabled() || rejectionAllowed(features);
+    const btn = q('#tabs [data-tab=rejection]');
+    if (btn) btn.hidden = !on;
+    $('tabs').hidden = !on;
+    $('rejlock').hidden = on || !licensed;   // while the gate screen is up there is nothing to explain yet
+    if (!on && tab === 'rejection') selectTab('export');
+  }
+
+  // ── SPEC-018 · resume ────────────────────────────────────────────────────────────────────────
+  // Fed by /job/resumable. The user should not have to remember that an export was interrupted, and
+  // should never start a second run over the same range because the first one was invisible.
+  function renderResume() {
+    const el = $('resumeEntry');
+    el.hidden = !resumeJob;
+    if (!resumeJob) return;
+    const span = resumeJob.from ? ` · ${resumeJob.from} → ${resumeJob.to}` : '';
+    $('rz-what').textContent = t('flow.resume') + ' · ' + t('flow.' + resumeJob.kind) + span;
+    $('rz-sub').textContent = t('flow.resumeSub', { done: fmt(resumeJob.done), n: fmt(resumeJob.total) });
+  }
+  async function refreshResume() {
+    if (!gateEnabled() || !licensed) { resumeJob = null; renderResume(); return; }
+    let res = null;
+    try { res = await jobResumable(); } catch {}   // never blocks the drawer: no answer = no entry
+    resumeJob = resumeEntry(res);
+    renderResume();
+  }
+
+  // Re-render the source-dependent controls (Advanced's date field + column chips, the cap line, the
+  // fetched-N label) and re-apply the Advanced values. `adv` defaults to what the form currently
+  // holds, which is what makes a language toggle non-destructive.
+  function applySourceUI(adv) {
     const src = orch.SOURCES[source];
-    // preserve current selections across re-renders (language toggle re-runs this) — restore when still valid
-    const keepDir = $('dir').value, keepField = $('field').value;
-    const keepOff = new Set([...root.querySelectorAll('#cols input[data-col]')].filter((b) => !b.checked).map((b) => b.dataset.col));
-    $('dir').innerHTML = src.dirs.map(([v], i) => `<option value="${v}"${i === 0 ? ' selected' : ''}>${t('src.' + v)}</option>`).join('');
-    $('field').innerHTML = src.dateFields.map(([v], i) => `<option value="${v}"${i === 0 ? ' selected' : ''}>${t('src.' + v)}</option>`).join('');
-    if (keepDir && src.dirs.some(([v]) => v === keepDir)) $('dir').value = keepDir;
-    if (keepField && src.dateFields.some(([v]) => v === keepField)) $('field').value = keepField;
+    const a = normalizeAdvanced(kind, adv || readAdvanced());
+    $('field').innerHTML = src.dateFields.map(([v]) => `<option value="${v}">${t('src.' + v)}</option>`).join('');
+    $('field').value = a.field;
+    const cols = $('cols');
+    if (cols) cols.innerHTML = removableColumns(source).map((c) => `<label class="sc" title="${c.key}"><input type="checkbox" data-col="${c.key}"${a.excludeColumns.includes(c.key) ? '' : ' checked'}>${c.header}</label>`).join('');
+    ALL_STATUSES.forEach((s) => { const b = $('st_' + s); if (b) b.checked = a.statuses.includes(s); });
+    $('pdf').checked = a.downloadPdf;
     renderCap();   // cap line is tab-aware (Rejection shows its own scan cap), owned by renderCap
     const pl = $('procLabel'); if (pl) pl.textContent = t(source === 'receipts' ? 'ui.fetchedRec' : 'ui.fetchedInv');
-    const cols = $('cols');
-    if (cols) { cols.innerHTML = removableColumns(source).map((c) => `<label class="sc" title="${c.key}"><input type="checkbox" data-col="${c.key}"${keepOff.has(c.key) ? '' : ' checked'}>${c.header}</label>`).join(''); updateColHint(); }
+    updateColHint();
   }
   const updateColHint = () => {
     const boxes = [...root.querySelectorAll('#cols input[data-col]')]; const off = boxes.filter((b) => !b.checked).length;
     const h = $('colhint'); if (h) h.textContent = off ? t('ui.colsKept', { kept: boxes.length - off, total: boxes.length }) : t('ui.colsAll');
+    const n = advancedChanges(kind, readAdvanced());
+    const ah = $('advhint'); if (ah) ah.textContent = n ? t('flow.advChanged', { n }) : t('flow.advDefaults');
   };
-  const gather = () => {
-    const from = $('from').value, to = $('to').value;
-    const fY = (from || '').slice(0, 4), tY = (to || '').slice(0, 4);
-    const year = (fY && tY) ? (fY === tY ? fY : fY + '-' + tY) : (from || to || '2025').slice(0, 4);
-    const excludeColumns = [...root.querySelectorAll('#cols input[data-col]')].filter((b) => !b.checked).map((b) => b.dataset.col);
-    return { source, year, dir: $('dir').value, field: $('field').value, from, to, statuses: ALL_STATUSES.filter((s) => $('st_' + s).checked), downloadDetails: $('details').checked, downloadPdf: $('pdf').checked, excludeColumns };
-  };
-  $('year').onchange = () => { const y = $('year').value; if (!y) return; $('from').value = y === '2020' ? '2020-11-15' : y + '-01-01'; $('to').value = y + '-12-31'; };
-  $('cols').addEventListener('change', updateColHint);
+  // What Advanced currently says. Falls back to the kind's default for anything not rendered yet —
+  // a missing control must never read as "excluded".
+  const readAdvanced = () => normalizeAdvanced(kind, {
+    field: $('field').value || defaultAdvanced(kind).field,
+    statuses: ALL_STATUSES.filter((s) => { const b = $('st_' + s); return !b || b.checked; }),
+    excludeColumns: [...root.querySelectorAll('#cols input[data-col]')].filter((b) => !b.checked).map((b) => b.dataset.col),
+    downloadPdf: $('pdf').checked,
+  });
+  // Switching what you export switches which columns and date fields exist, so Advanced is
+  // remembered per kind rather than globally.
+  function setKind(next) {
+    if (!['sales', 'purchases', 'receipts'].includes(next)) return;
+    if (next !== kind) saveAdvanced(kind, readAdvanced());
+    kind = next; source = sourceOfKind(kind);
+    root.querySelectorAll('#kinds [role=tab]').forEach((x) => x.setAttribute('aria-selected', String(x.dataset.kind === kind)));
+    applySourceUI(loadAdvanced(kind));
+    $('runwhat').textContent = t('flow.' + kind);
+  }
+  $('adv').addEventListener('change', () => { saveAdvanced(kind, readAdvanced()); updateColHint(); });
+  root.querySelectorAll('#kinds [role=tab]').forEach((b) => b.onclick = () => { if (!busy) setKind(b.dataset.kind); });
 
   // open/close — return focus to the pill on close (a11y: focus must not be left on a now-hidden control)
   const openDrawer = (o) => { $('drawer').classList.toggle('on', o); $('scrim').classList.toggle('on', o); if (o) { $('close').focus(); refreshLicense(); } else { $('pill').focus(); } };
@@ -584,37 +709,86 @@ export function mountUI() {
     else if (!e.shiftKey && active === last) { e.preventDefault(); first.focus(); }
   });
 
-  // Tab machine. `tab` is the visible view (invoices | receipts | rejection); `source` stays the
-  // EXPORT source only — 'rejection' is a view, never a SOURCES key (applySourceUI would throw),
-  // and visiting it must not invalidate a built export plan. setSource keeps the plan-invalidation
-  // rule for real source switches; selectTab owns aria + view visibility + the cap line.
-  function setSource(src) {
-    if (source === src) return;
-    source = src; applySourceUI();
-    currentPlan = null; $('start').disabled = true;
-    for (const id of ['s-chunks', 's-rows', 's-big', 's-eta']) $(id).textContent = '—';
-  }
+  // Section machine. `tab` is export | rejection; the export section has its own three steps.
   function renderCap() {
     $('cap').innerHTML = tab === 'rejection' ? t('ui.capRejection') : t(source === 'receipts' ? 'ui.capReceipts' : 'ui.capDocs');
   }
   function selectTab(next) {
     tab = next;
-    root.querySelectorAll('.seg [role=tab]').forEach((x) => x.setAttribute('aria-selected', String(x.dataset.tab === next)));
+    root.querySelectorAll('#tabs [role=tab]').forEach((x) => x.setAttribute('aria-selected', String(x.dataset.tab === next)));
     const rej = next === 'rejection';
     $('view-export').hidden = rej; $('view-rejection').hidden = !rej;
-    if (!rej) setSource(next);   // export tabs keep source === tab; rejection leaves source (and the plan) alone
     renderCap();
   }
-  root.querySelectorAll('.seg [role=tab]').forEach((b) => b.onclick = () => {
+  root.querySelectorAll('#tabs [role=tab]').forEach((b) => b.onclick = () => {
     if (busy || tab === b.dataset.tab) return;   // don't switch tabs mid-run or onto the same tab
     selectTab(b.dataset.tab);
-    setFt('', b.dataset.tab === 'rejection' ? t('ft.rejTab') : t('ft.sourceChanged', { src: t(source === 'receipts' ? 'ui.receipts' : 'ui.invoices') }));
+    setFt('', b.dataset.tab === 'rejection' ? t('ft.rejTab') : t('flow.downloadHint'));
   });
+  // Download → folder → what to export → running. Steps are screens, not cards: only one is up.
+  function setStep(next) {
+    step = next;
+    $('step-home').hidden = next !== 'home';
+    $('step-what').hidden = next !== 'what';
+    $('step-run').hidden = next !== 'run';
+    if (next !== 'run') $('repairOffer').hidden = true;   // the offer belongs to the message that raised it
+  }
+  const offerRepair = (on) => { $('repairOffer').hidden = !on; if (on) $('repairMsg').textContent = t('flow.repairOffer'); };
 
   // actions
   $('pick').onclick = async () => { try { const n = await orch.pickFolder(); $('folder').textContent = n; } catch {} };
-  $('build').onclick = async () => { setBusy(true); currentPlan = null; $('start').disabled = true; try { await orch.plan(gather()); } catch (e) { logLine(t('ft.planFailed', { msg: e?.message || e }), { level: 'err' }); setFt('err', t('ft.planFailedShort')); } setBusy(false); };
-  $('start').onclick = async () => { if (!currentPlan) return; await refreshLicense(); if (!licensed) { $('gate').hidden = false; $('rg-name').focus(); return; } setBusy(true); try { await orch.start(currentPlan); } finally { setBusy(false); } };
+  // Step 1 → 2: the folder picker IS the second step. A folder remembered from last time is reused
+  // (and is still changeable on the next screen) rather than re-prompted for.
+  $('download').onclick = async () => {
+    if (busy) return;
+    await refreshLicense(); if (!licensed) { $('gate').hidden = false; $('rg-name').focus(); return; }
+    let d = null; try { d = await orch.ensureDir(); } catch {}   // folder-pick cancel is not an error
+    if (!d) { setFt('', t('orch.pickFolder')); return; }
+    $('folder').textContent = d.name;
+    const r = defaultRange(todayYmd());   // 1 Jan of the current year → today
+    $('from').value = r.from; $('to').value = r.to;
+    setKind(kind);                        // re-applies this kind's remembered Advanced
+    setStep('what');
+  };
+  $('back').onclick = () => { if (!busy) setStep('home'); };
+  $('done').onclick = () => { if (!busy) { setStep('home'); refreshResume(); } };
+  // Step 2 → 3. Plan and start are one action now: "Build chunk plan" was a step the user had no
+  // way to act on, and the plan is authorised by the server either way.
+  $('start').onclick = async () => {
+    if (busy) return;
+    await refreshLicense(); if (!licensed) { $('gate').hidden = false; $('rg-name').focus(); return; }
+    const adv = readAdvanced();
+    saveAdvanced(kind, adv);
+    const sel = buildSel(kind, { from: $('from').value, to: $('to').value }, adv);
+    currentPlan = null;
+    setStep('run'); setBusy(true);
+    try {
+      const p = await orch.plan(sel);
+      if (p) await orch.start(p);
+    } catch (e) { logLine(t('ft.planFailed', { msg: e?.message || e }), { level: 'err' }); setFt('err', t('ft.planFailedShort')); }
+    finally { setBusy(false); }
+  };
+  // The interrupted-run entry. The server holds the PLAN (its chunks are only purged at 'done'); the
+  // folder holds the PROGRESS — and the column/PDF choices the server never stored — so the folder's
+  // own plan wins whenever it describes the same run.
+  $('resumeEntry').onclick = async () => {
+    if (busy || !resumeJob) return;
+    await refreshLicense(); if (!licensed) { $('gate').hidden = false; return; }
+    let d = null; try { d = await orch.ensureDir(); } catch {}
+    if (!d) { setFt('', t('orch.pickResume')); return; }
+    $('folder').textContent = d.name;
+    setStep('run'); setBusy(true);
+    try {
+      let p = planFromJob(await jobPlan(resumeJob.id));
+      if (!p) { logLine(t('flow.resumeGone'), { level: 'err' }); setFt('err', t('flow.resumeGone')); return; }
+      let local = null; try { local = await orch.resume(); } catch {}
+      if (local && local.key === p.key) p = { ...local, jobId: p.jobId };
+      setKind(kindOf(p.source, p.dir));
+      renderPlan(p);
+      await orch.start(p);
+    } catch (e) { logLine(t('ft.resumeFailed', { msg: e?.message || e }), { level: 'err' }); setFt('err', t('ft.resumeFailed', { msg: e?.message || e })); }
+    finally { setBusy(false); }
+  };
   $('sync').onclick = async () => {
     if (busy) return;
     await refreshLicense(); if (!licensed) { $('gate').hidden = false; return; }
@@ -624,13 +798,17 @@ export function mountUI() {
     try {
       const sel = deriveSyncSel(await readProgress(d), todayYmd());
       if (!sel) { setFt('', t('sync.noPrev')); return; }
-      // reflect the derived selection into the form so the user sees exactly what will run
-      selectTab(sel.source);   // also pulls the user back to the export view if they were on Rejection
-      $('from').value = sel.from; $('to').value = sel.to; $('year').value = '';
-      $('dir').value = sel.dir; $('field').value = sel.field; $('pdf').checked = !!sel.downloadPdf;
+      // The derived selection is run VERBATIM — it carries the previous run's own filters, which is
+      // the point of a sync. The form is only updated so the user can see what is running; a stored
+      // direction no tab maps to ('all') keeps its value in sel and is merely labelled here.
+      selectTab('export');
+      setKind(kindOf(sel.source, sel.dir));
+      $('from').value = sel.from; $('to').value = sel.to;
+      $('field').value = sel.field; $('pdf').checked = !!sel.downloadPdf;
       ALL_STATUSES.forEach((s) => { const c = $('st_' + s); if (c) c.checked = (sel.statuses || ALL_STATUSES).includes(s); });
       root.querySelectorAll('#cols input[data-col]').forEach((b) => { b.checked = !(sel.excludeColumns || []).includes(b.dataset.col); });
       updateColHint();
+      setStep('run');
       logLine(t('sync.header', { from: sel.from, to: sel.to }), { level: 'run' });
       const p = await orch.plan(sel);
       if (p) await orch.start(p);
@@ -657,16 +835,64 @@ export function mountUI() {
     $('blk-reqmsg').textContent = r.ok ? (r.already ? t('gate.reqAlready') : r.pending ? t('msg.rinPending') : t('gate.reqSent')) : t('msg.rinFail', { err: r.error || 'error' });
   };
   $('pause').onclick = () => { rjCtrl?.abort(); orch.pause(); setFt('wait', t('ft.pausingShort')); logLine(t('ft.pausing'), { level: 'wait' }); };   // Pause also aborts an auto-reject scan/submit in flight
-  $('resume').onclick = async () => { setBusy(true); try { const p = await orch.resume(); if (p) { currentPlan = p; $('start').disabled = false; } } catch (e) { logLine(t('ft.resumeFailed', { msg: e?.message || e }), { level: 'err' }); } finally { setBusy(false); } };
-  $('merge').onclick = async () => {
+  // In-run Resume: load the folder's plan and continue immediately. There is no separate Start on
+  // the run screen — "resume" that then waits for a second click is not resuming.
+  $('resume').onclick = async () => {
+    if (busy) return;
     setBusy(true);
-    try { const d = await orch.ensureDir({ allowUnverified: true }); if (d) { $('folder').textContent = d.name; await mergeFolder(window.ExcelJS, d, { onStatus: (m) => { logLine(m); setFt('run', m); } }); } }
-    catch (e) { logLine(t('ft.mergeFailed', { msg: e?.message || e }), { level: 'err' }); setFt('err', t('ft.mergeFailedShort')); }
+    try { const p = await orch.resume(); if (p) { currentPlan = p; await orch.start(p); } }
+    catch (e) { logLine(t('ft.resumeFailed', { msg: e?.message || e }), { level: 'err' }); }
+    finally { setBusy(false); }
+  };
+  // One merge path, whether it is the automatic end of a run or the standalone button: both must
+  // notice unreadable files and both must be able to raise the repair offer.
+  async function runMergeInto(dir, onMsg) {
+    await mergeFolder(window.ExcelJS, dir, { onStatus: (m) => { onMsg(m); logLine(m); setFt('run', m); } });
+  }
+  $('merge').onclick = async () => {
+    if (busy) return;
+    setBusy(true);
+    offerRepair(false);
+    try {
+      const d = await orch.ensureDir({ allowUnverified: true });
+      if (d) {
+        $('folder').textContent = d.name;
+        const res = await finishRun({ merge: (onMsg) => runMergeInto(d, onMsg) });   // no checkpoint: this folder is not necessarily this run
+        if (res.error) throw res.error;
+        offerRepair(res.repair);
+      }
+    } catch (e) { logLine(t('ft.mergeFailed', { msg: e?.message || e }), { level: 'err' }); setFt('err', t('ft.mergeFailedShort')); }
     setBusy(false);
   };
-  $('repair').onclick = async () => {
+  // Merge is the last phase of a run: the job is not done until the output exists. Only a clean
+  // fetch checkpoints 'done' — that is what purges the plan server-side, and a partial run still
+  // needs its plan.
+  async function autoFinish(meta) {
+    const p = currentPlan;
+    if (!p || finishing) return;
+    finishing = true;
     setBusy(true);
-    try { const d = await orch.ensureDir(); if (d) { $('folder').textContent = d.name; await repairFolder(d, { onStatus: (m) => { logLine(m); setFt('run', m); } }); } }
+    offerRepair(false);
+    try {
+      const d = await orch.ensureDir({ allowUnverified: true });
+      if (!d) { setFt('warn', t('orch.pickFolder')); return; }
+      logLine(t('flow.merging'), { level: 'run' }); setFt('run', t('flow.merging'));
+      const res = await finishRun({
+        merge: (onMsg) => runMergeInto(d, onMsg),
+        checkpoint: (runClean(meta) && p.jobId)
+          ? () => jobCheckpoint({ jobId: p.jobId, state: 'done', done: (p.doneIds || []).length, failed: (p.failedIds || []).length })
+          : null,
+      });
+      if (res.error) { logLine(t('ft.mergeFailed', { msg: res.error?.message || res.error }), { level: 'err' }); setFt('err', t('ft.mergeFailedShort')); }
+      else { logLine(t('flow.runComplete'), { level: 'ok' }); setFt('ok', t('flow.runComplete')); }
+      offerRepair(res.repair);
+    } catch (e) { logLine(t('ft.mergeFailed', { msg: e?.message || e }), { level: 'err' }); setFt('err', t('ft.mergeFailedShort')); }
+    finally { finishing = false; setBusy(false); refreshResume(); }
+  }
+  $('repair').onclick = async () => {
+    if (busy) return;
+    setBusy(true);
+    try { const d = await orch.ensureDir(); if (d) { $('folder').textContent = d.name; await repairFolder(d, { onStatus: (m) => { logLine(m); setFt('run', m); } }); offerRepair(false); } }
     catch (e) { logLine(t('ft.repairFailed', { msg: e?.message || e }), { level: 'err' }); setFt('err', t('ft.repairFailedShort')); }
     setBusy(false);
   };
@@ -987,7 +1213,10 @@ export function mountUI() {
     { const pl = $('privacy-link'); if (pl) pl.href = String(LEAD_URL).replace(/\/$/, '') + '/privacy'; }    // consent innerHTML recreates the link — re-point it
     if (!orch.folderName()) $('folder').textContent = t('ui.noFolder');
     $('langBtn').textContent = L === 'ar' ? 'EN' : 'ع';
-    applySourceUI();   // dir/field option labels, cap line (renderCap), proc label, column chips (selection-preserving)
+    applySourceUI();   // date-field option labels, cap line (renderCap), proc label, column chips (selection-preserving)
+    $('runwhat').textContent = t('flow.' + kind);
+    renderResume();    // the entry's label is assembled, not annotated
+    if (!$('repairOffer').hidden) $('repairMsg').textContent = t('flow.repairOffer');
     rjRender(); poRender();   // rejection views bake t() at render — re-render so a language toggle isn't half-translated (row state lives on the items)
     renderLog();
   }
@@ -996,8 +1225,14 @@ export function mountUI() {
   const applyTheme = (th) => { host.setAttribute('data-theme', th); $('themeBtn').textContent = th === 'light' ? '☀' : '🌙'; };
   applyTheme(lsGet('theme') === 'light' ? 'light' : 'dark');
   $('themeBtn').onclick = () => { const th = host.getAttribute('data-theme') === 'light' ? 'dark' : 'light'; lsSet('theme', th); applyTheme(th); };
+  // SPEC-018 initial state: Sales, this calendar year, Advanced as last left it, step 1.
+  setKind(kind);
+  { const r0 = defaultRange(todayYmd()); $('from').value = r0.from; $('to').value = r0.to; }
+  setStep('home');
+  selectTab('export');
+  applyFeatures((lsGet('reg_verdict') || {}).features);   // last known verdict, so the tab doesn't flicker; refreshLicense re-runs it
   applyLang();   // initial render in the persisted language (also runs applySourceUI + renderLog + privacy href)
-  setFt('', t('ft.initial'));
+  setFt('', t('flow.downloadHint'));
   refreshLicense();   // registration gate — engages only once LEAD_URL is wired in registration.js
   orch.onToken?.(orch.tokenStatus());
   // NOTE: no local named `t` in mountUI scope — it would shadow the imported i18n t() (TDZ at mount).

@@ -53,6 +53,27 @@ CREATE TABLE IF NOT EXISTS job_chunks (
   PRIMARY KEY (job_id, idx)
 );
 
+-- ═══ SPEC-018 Part B · the run log ═══════════════════════════════════════════════════════════════
+-- Status lines shipped by the extension while a run is in flight — the same strings the drawer
+-- displays and the bug reporter already sends. Counts and progress; NEVER document content.
+--
+-- Capped at 200 rows per job (newest kept) by jobs.js appendEvents, and purged with the job's chunks
+-- when it reaches 'done'. Same retention rule as the plan: the history of WHAT ran survives, the
+-- minute-by-minute detail does not. seq is the client's arrival order, which is what makes "the
+-- newest 200" a well-defined set when several flushes land in the same second.
+--
+-- The Worker also creates this table lazily (jobs.js ensureEvents), so an environment deployed
+-- before this file was re-applied starts logging on its next flush rather than 500ing.
+CREATE TABLE IF NOT EXISTS job_events (
+  job_id  TEXT NOT NULL,
+  seq     INTEGER NOT NULL,
+  at      TEXT,
+  level   TEXT,
+  kind    TEXT,
+  text    TEXT,
+  PRIMARY KEY (job_id, seq)
+);
+
 -- ═══ SPEC-017 · admin portal v2 ══════════════════════════════════════════════════════════════════
 -- The defect these tables exist to close: a KV `dev:` record IS the user — it carries name, email,
 -- company, quota and boundRins, keyed by BROWSER. The same accountant on a laptop and an office PC

@@ -30,7 +30,7 @@ const LEADS = {
 // upsert, the MAX-merged counters, the escalating status), because those are the parts worth
 // testing; getting them wrong here would make a wrong route pass.
 function makeD1() {
-  const jobs = new Map(), chunks = [], users = new Map(), clients = new Map(), devices = new Map(), plans = new Map();
+  const jobs = new Map(), chunks = [], events = [], users = new Map(), clients = new Map(), devices = new Map(), plans = new Map();
   const kept = (cur, ex) => (cur !== null && cur !== undefined && cur !== '') ? cur : ex;   // COALESCE(NULLIF(cur,''), ex)
   const owned = (email, m) => [...m.values()].filter((r) => r.user_email === email);
 
@@ -44,6 +44,13 @@ function makeD1() {
     // the device-scoped delete below shares its opening clause.
     if (sql.includes('/* admin */ DELETE FROM job_chunks')) { for (let i = chunks.length - 1; i >= 0; i--) if (chunks[i].job_id === a[0]) chunks.splice(i, 1); return { success: true }; }
     if (sql.includes('DELETE FROM job_chunks')) { const j = jobs.get(a[1]); if (j && j.device_id === a[2]) { for (let i = chunks.length - 1; i >= 0; i--) if (chunks[i].job_id === a[0]) chunks.splice(i, 1); } return { success: true }; }
+    // SPEC-018 — the shipped run log. seq is assigned by jobs.js from the current MAX, so the stub
+    // stores it verbatim and reimplements the two deletes that bound the table: the cap trim
+    // (seq <= newest-200) and the device-scoped purge that rides along with the chunks at 'done'.
+    if (sql.includes('INSERT OR REPLACE INTO job_events')) { events.push({ job_id: a[0], seq: a[1], at: a[2], level: a[3], kind: a[4], text: a[5] }); return { success: true }; }
+    if (sql.includes('/* purge events */')) { const j = jobs.get(a[1]); if (j && j.device_id === a[2]) for (let i = events.length - 1; i >= 0; i--) if (events[i].job_id === a[0]) events.splice(i, 1); return { success: true }; }
+    if (sql.includes('DELETE FROM job_events')) { for (let i = events.length - 1; i >= 0; i--) if (events[i].job_id === a[0] && events[i].seq <= a[1]) events.splice(i, 1); return { success: true }; }
+
     if (sql.includes('UPDATE jobs SET user_email')) { for (const j of jobs.values()) if (j.device_id === a[1] && !j.user_email) j.user_email = a[0]; return { success: true }; }
     if (sql.includes('UPDATE jobs SET state = ?')) { const j = jobs.get(a[2]); if (j) { j.state = a[0]; j.updated_at = a[1]; } return { success: true }; }
 
@@ -187,6 +194,9 @@ function makeD1() {
     }
     if (sql.includes('SELECT * FROM jobs WHERE id')) { const j = jobs.get(a[0]); return (j && j.device_id === a[1]) ? [j] : []; }
     if (sql.includes('SELECT * FROM job_chunks')) return chunks.filter((c) => c.job_id === a[0]).sort((x, y) => x.idx - y.idx);
+    // NB order: both statements read FROM job_events, and the MAX(seq) probe must be matched first.
+    if (sql.includes('COALESCE(MAX(seq)')) return [{ m: events.filter((e) => e.job_id === a[0]).reduce((m, e) => Math.max(m, e.seq), 0) }];
+    if (sql.includes('FROM job_events')) return events.filter((e) => e.job_id === a[0]).sort((x, y) => x.seq - y.seq).slice(0, a[1]);
     if (sql.includes('FROM jobs') && sql.includes('state IN')) {
       return [...jobs.values()]
         .filter((j) => j.device_id === a[0] && ['planned', 'running', 'merging', 'paused', 'incomplete', 'halted'].includes(j.state))
@@ -201,7 +211,7 @@ function makeD1() {
     first: async () => read(sql, args || [])[0] || null,
     all: async () => ({ results: read(sql, args || []) }),
   });
-  return { prepare: (sql) => mk(sql, null), batch: async (stmts) => { for (const s of stmts) await s.run(); return []; }, _jobs: jobs, _chunks: chunks, _users: users, _clients: clients, _devices: devices, _plans: plans };
+  return { prepare: (sql) => mk(sql, null), batch: async (stmts) => { for (const s of stmts) await s.run(); return []; }, _jobs: jobs, _chunks: chunks, _events: events, _users: users, _clients: clients, _devices: devices, _plans: plans };
 }
 const JOBS = makeD1();
 const env = { LEADS, JOBS, ADMIN_TOKEN: 'testtok' };   // no LOCKS → KV fallbacks
@@ -359,10 +369,68 @@ try {
   const otherPlan = await (await signed('/job/plan', { jobId: s0.jobId }, reg.clientKey, 'dev-1')).json();
   check("another device cannot read this job's plan", otherPlan.ok !== true);
 
+  // ── SPEC-018 Part B: the run log ships to the portal ──────────────────────────────────────────
+  // Status lines only — counts and progress, the strings the drawer already displays. The client
+  // (src/core/logship.js) batches and coalesces before it gets here; these assertions are the
+  // server's half of that contract: who may write, what is kept, and when it goes away.
+  const mkLines = (n, from = 0, kind = null) => Array.from({ length: n }, (_, i) => ({
+    at: new Date(Date.UTC(2026, 0, 1, 0, 0, from + i)).toISOString(),
+    level: 'run', kind, text: 'chunk ' + (from + i + 1) + '/412 fetching 200/1000',
+  }));
+  const eventsOf = async (id) => (await (await admin('/api/job?id=' + id)).json()).events;
+
+  const unsignedLog = await call('/job/log', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jobId: s0.jobId, lines: mkLines(1) }) });
+  check('T-171 /job/log is signed — an unsigned batch is refused', unsignedLog.status === 401);
+
+  const logA = await (await signed('/job/log', { jobId: s0.jobId, lines: mkLines(3) }, PK, PD)).json();
+  const evA = await eventsOf(s0.jobId);
+  check('T-171 a flushed batch is stored in order and surfaces on /api/job',
+    logA.ok && logA.stored === 3 && evA.length === 3
+    && evA[0].text === 'chunk 1/412 fetching 200/1000' && evA[2].text === 'chunk 3/412 fetching 200/1000'
+    && evA[0].level === 'run' && evA[0].at.startsWith('2026-01-01T'));
+
+  const logB = await (await signed('/job/log', { jobId: s0.jobId, lines: mkLines(2, 3) }, PK, PD)).json();
+  const evB = await eventsOf(s0.jobId);
+  check('T-171 a second flush appends after the first rather than restarting the sequence',
+    logB.ok && evB.length === 5 && evB[3].text === 'chunk 4/412 fetching 200/1000' && evB[4].text === 'chunk 5/412 fetching 200/1000');
+
+  // T-172 is the CLIENT's rule (test/logship.test.mjs owns it). What the server must guarantee is
+  // that it stores a coalesced batch verbatim — one line per kind — and does not re-expand it.
+  const coalesced = [
+    { at: '2026-01-01T00:10:00.000Z', level: 'wait', kind: 'rate', text: 'rate limited — waiting 30s' },
+    { at: '2026-01-01T00:10:01.000Z', level: 'run', kind: 'page', text: 'chunk 9/412 fetching 900/1000' },
+    { at: '2026-01-01T00:10:02.000Z', level: 'warn', kind: null, text: '2 documents dropped in chunk 9' },
+  ];
+  await signed('/job/log', { jobId: s0.jobId, lines: coalesced }, PK, PD);
+  const evC = await eventsOf(s0.jobId);
+  check('T-172 a coalesced batch is stored one line per kind, kinds preserved',
+    evC.length === 8 && evC[5].kind === 'rate' && evC[6].kind === 'page' && evC[7].kind === null
+    && evC.filter((e) => e.kind === 'rate').length === 1);
+
+  const otherLog = await signed('/job/log', { jobId: s0.jobId, lines: mkLines(1, 99) }, reg.clientKey, 'dev-1');
+  check('T-174 another device cannot write into this job\'s log, and is told so cleanly (never a 500)',
+    otherLog.status === 404 && (await eventsOf(s0.jobId)).length === 8);
+  const noJobLog = await signed('/job/log', { jobId: 'deadbeefdeadbeef', lines: mkLines(1) }, PK, PD);
+  check('T-174 a batch for an unknown job is a clean 404 the client can drop', noJobLog.status === 404);
+
+  // T-173 — a run emits thousands; the last 200 are what a support conversation needs. Sent as
+  // three flushes so the cap is exercised across batches, not only within one oversized one.
+  for (let i = 0; i < 3; i++) await signed('/job/log', { jobId: s0.jobId, lines: mkLines(100, 1000 + i * 100) }, PK, PD);
+  const evCap = await eventsOf(s0.jobId);
+  check('T-173 job_events is capped at 200 per job, keeping the NEWEST',
+    evCap.length === 200 && JOBS._events.filter((e) => e.job_id === s0.jobId).length === 200
+    && evCap[199].text === 'chunk 1300/412 fetching 200/1000'
+    && evCap[0].text === 'chunk 1101/412 fetching 200/1000');
+  const overCap = await (await signed('/job/log', { jobId: s0.jobId, lines: mkLines(500, 2000) }, PK, PD)).json();
+  check('T-173 a single oversized batch is trimmed to the cap rather than blowing past it',
+    overCap.stored === 200 && (await eventsOf(s0.jobId)).length === 200);
+
   await signed('/job/checkpoint', { jobId: s0.jobId, state: 'done', done: 2, failed: 0 }, PK, PD);
   check('a finished job drops its chunks but keeps its history row',
     JOBS._chunks.filter((c) => c.job_id === s0.jobId).length === 0
     && JOBS._jobs.get(s0.jobId).state === 'done' && JOBS._jobs.get(s0.jobId).total_chunks === 2);
+  check('T-175 the shipped log is purged with the chunks when the job reaches done',
+    JOBS._events.filter((e) => e.job_id === s0.jobId).length === 0 && (await eventsOf(s0.jobId)).length === 0);
 
   const res2 = await (await signed('/job/resumable', {}, PK, PD)).json();
   check('a finished job is no longer offered as resumable', res2.ok && res2.jobs.length === 0);

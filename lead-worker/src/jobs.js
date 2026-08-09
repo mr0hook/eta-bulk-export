@@ -97,7 +97,9 @@ export async function checkpoint(env, id, deviceId, p) {
   await env.JOBS.prepare(
     `UPDATE jobs SET state=?, done_count=?, failed_count=?, updated_at=? WHERE id=? AND device_id=?`,
   ).bind(state, p.done | 0, p.failed | 0, now, id, deviceId).run();
-  if (state === 'done') await purgeChunks(env, id, deviceId);
+  // SPEC-018: the shipped run log follows the chunks exactly — same trigger, same retention rule.
+  // Both are working detail about one taxpayer's activity; neither is the history of what ran.
+  if (state === 'done') { await purgeChunks(env, id, deviceId); await purgeEvents(env, id, deviceId); }
   return true;
 }
 
@@ -108,5 +110,81 @@ export async function purgeChunks(env, id, deviceId) {
   await env.JOBS.prepare(
     `DELETE FROM job_chunks WHERE job_id = ? AND EXISTS (SELECT 1 FROM jobs WHERE id = ? AND device_id = ?)`,
   ).bind(id, id, deviceId).run();
+  return true;
+}
+
+// ── SPEC-018 Part B · the shipped run log ─────────────────────────────────────────────────────────
+// Status lines only: counts and progress, the same strings the drawer shows and /bug already
+// carries. Nothing here stores document content, and nothing here is authoritative — the log the
+// user's own folder holds (SPEC-011) is, which is why every path below degrades quietly instead of
+// failing a request.
+
+export const EVENTS_CAP = 200;   // per job, newest kept. A run emits thousands; support needs the tail.
+
+// Created lazily as well as in schema.sql: this shipped after the D1 was provisioned, and a Worker
+// deployed before the file was re-applied must start logging on its next flush rather than 500.
+// Cached per isolate — the CREATE is idempotent but it is still a round-trip per call otherwise.
+let eventsReady = false;
+async function ensureEvents(env) {
+  if (eventsReady) return;
+  await env.JOBS.prepare(
+    `CREATE TABLE IF NOT EXISTS job_events (
+       job_id TEXT NOT NULL, seq INTEGER NOT NULL, at TEXT, level TEXT, kind TEXT, text TEXT,
+       PRIMARY KEY (job_id, seq))`,
+  ).run();
+  eventsReady = true;
+}
+
+const clip = (v, n) => String(v == null ? '' : v).slice(0, n);
+
+/**
+ * Append a flush from the extension and trim the job back to the newest `cap` lines.
+ *
+ * seq is assigned server-side from the current MAX rather than taken from the client: it is what
+ * makes "the newest 200" well defined when two flushes land in the same second, and a client-chosen
+ * sequence could overwrite earlier lines by reusing a number.
+ *
+ * The inserts and the trim go out as ONE batch (a single D1 transaction) so a job can never be seen
+ * holding more than the cap, and a failed append leaves the previous tail intact rather than a
+ * half-written one.
+ */
+export async function appendEvents(env, id, lines, cap = EVENTS_CAP) {
+  if (!hasJobs(env) || !Array.isArray(lines) || !lines.length) return 0;
+  await ensureEvents(env);
+  const row = await env.JOBS.prepare('SELECT COALESCE(MAX(seq), 0) AS m FROM job_events WHERE job_id = ?').bind(id).first();
+  let seq = (row && row.m) | 0;
+  // A batch larger than the cap would be trimmed to its own tail anyway — do it before the writes.
+  const use = lines.slice(-cap);
+  const ins = env.JOBS.prepare('INSERT OR REPLACE INTO job_events (job_id, seq, at, level, kind, text) VALUES (?,?,?,?,?,?)');
+  const stmts = use.map((e) => ins.bind(
+    id, ++seq, clip(e && e.at, 32), clip(e && e.level, 8),
+    (e && e.kind) ? clip(e.kind, 16) : null, clip(e && e.text, 300),
+  ));
+  stmts.push(env.JOBS.prepare('DELETE FROM job_events WHERE job_id = ? AND seq <= ?').bind(id, seq - cap));
+  await env.JOBS.batch(stmts);
+  return use.length;
+}
+
+/** The tail of a job's shipped log, oldest first — read by the portal's job detail. */
+export async function getEvents(env, id, limit = EVENTS_CAP) {
+  if (!hasJobs(env)) return [];
+  // Swallowed on purpose: an environment whose D1 predates job_events must still render the job
+  // page. An empty tail is a missing convenience; a 500 is a missing page.
+  try {
+    const r = await env.JOBS.prepare(
+      'SELECT at, level, kind, text FROM job_events WHERE job_id = ? ORDER BY seq ASC LIMIT ?',
+    ).bind(id, limit).all();
+    return (r && r.results) || [];
+  } catch { return []; }
+}
+
+/** Drop a job's shipped log. Device-scoped via the jobs row, exactly as purgeChunks is. */
+export async function purgeEvents(env, id, deviceId) {
+  if (!hasJobs(env)) return false;
+  try {
+    await env.JOBS.prepare(
+      `/* purge events */ DELETE FROM job_events WHERE job_id = ? AND EXISTS (SELECT 1 FROM jobs WHERE id = ? AND device_id = ?)`,
+    ).bind(id, id, deviceId).run();
+  } catch { return false; }
   return true;
 }

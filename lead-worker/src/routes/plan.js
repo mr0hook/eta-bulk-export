@@ -14,7 +14,7 @@ import { computeVerdict } from '../lib/verdict.js';
 import { errlog } from '../lib/audit.js';
 import { cursorKey, seal, unseal } from '../cursor.js';
 import { startPlan, advance } from '../planner.js';
-import { createJob, getJob, getChunks, finishPlan, checkpoint, listResumable, hasJobs } from '../jobs.js';
+import { createJob, getJob, getChunks, finishPlan, checkpoint, listResumable, hasJobs, appendEvents, EVENTS_CAP } from '../jobs.js';
 import { stampJobs } from '../users.js';
 
 // Mirrors SOURCES in the extension (src/api/sources.js). Held server-side so a client cannot raise
@@ -135,6 +135,23 @@ export async function planRoutes(request, env, url, path) {
     if (!job) return json({ ok: false, error: 'no such job' }, 404);
     await checkpoint(env, id, dev.deviceId, { state: String(b.state || 'running'), done: b.done, failed: b.failed });
     return json({ ok: true });
+  }
+
+  // ── run log (SPEC-018 Part B) ─────────────────────────────────────────────────────────────────
+  // A batch of status lines from a run in flight: counts and progress, the same strings the drawer
+  // shows and /bug already carries. Device-scoped through the jobs row — getJob() is what stops one
+  // device writing into another's log, exactly as it does for /job/checkpoint and /job/plan.
+  //
+  // Best-effort on BOTH ends. The client drops a batch it cannot deliver, so the only thing this
+  // route owes it is a clean answer: an unknown job is a 404 the client discards, never a 500 it
+  // retries into. Storage is bounded by the 200-line cap in appendEvents whatever a client sends.
+  if (path === '/job/log') {
+    const id = String(b.jobId || '');
+    const job = await getJob(env, id, dev.deviceId);
+    if (!job) return json({ ok: false, error: 'no such job' }, 404);
+    const lines = Array.isArray(b.lines) ? b.lines.filter((l) => l && typeof l === 'object').slice(-EVENTS_CAP) : [];
+    const stored = await appendEvents(env, id, lines);
+    return json({ ok: true, stored });
   }
 
   return json({ ok: false, error: 'not found' }, 404);
