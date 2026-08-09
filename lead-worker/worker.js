@@ -42,6 +42,7 @@ import { listPrefix, withSeen } from './src/lib/kv.js';
 import { errlog } from './src/lib/audit.js';
 import { makeAdminCheck } from './src/lib/auth.js';
 import { extensionRoutes } from './src/routes/extension.js';
+import { planRoutes } from './src/routes/plan.js';
 import { adminRoutes } from './src/routes/admin.js';
 
 export { Locks } from './src/locks.js';
@@ -84,6 +85,8 @@ async function handle(request, env) {
 
     const ext = await extensionRoutes(request, env, url, path);
     if (ext) return ext;
+    const plan = await planRoutes(request, env, url, path);
+    if (plan) return plan;
     const adm = await adminRoutes(request, env, url, path, admin);
     if (adm) return adm;
 

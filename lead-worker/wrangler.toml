@@ -91,11 +91,11 @@ kv_namespaces = [
   # wrangler's auto-derived binding name (eta_bulk_jobs) is the database name, not a good identifier.
   # Schema: npx wrangler d1 execute eta-bulk-jobs --file=schema.sql --remote --env staging
   #
-  # PRODUCTION HAS NO JOBS BINDING ON PURPOSE. It needs its own database, exactly as it has its own
-  # KV namespace — sharing one would put live job records and test runs in the same tables:
-  #     npx wrangler d1 create eta-bulk-jobs-prod
-  # Until then the planner routes must treat a missing env.JOBS as "unavailable" and say so, the
-  # same way every LOCKS caller falls back rather than throwing.
+  # Production has its OWN database (eta-bulk-jobs-prod, wired below) for the same reason it has its
+  # own KV namespace: one shared database would put live job records and staging test runs in the
+  # same tables. The planner routes still treat a missing env.JOBS as "unavailable" rather than
+  # throwing, the same way every LOCKS caller falls back — a deploy to an environment without the
+  # binding should degrade, not 500.
   [[env.staging.d1_databases]]
   binding = "JOBS"
   database_name = "eta-bulk-jobs"
@@ -125,6 +125,13 @@ kv_namespaces = [
   [[env.production.migrations]]
   tag = "v1"
   new_sqlite_classes = ["Locks"]
+
+  # Separate database from staging — same schema, different data.
+  # Schema: npx wrangler d1 execute eta-bulk-jobs-prod --file=schema.sql --remote --env production
+  [[env.production.d1_databases]]
+  binding = "JOBS"
+  database_name = "eta-bulk-jobs-prod"
+  database_id = "e8e138c0-1bd2-463b-902c-dcb9c98354f4"
 
   [env.production.triggers]
   crons = ["0 2 * * *"]

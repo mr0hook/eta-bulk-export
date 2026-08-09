@@ -23,7 +23,33 @@ const LEADS = {
   async delete(k) { store.delete(k); },
   async list({ prefix }) { return { keys: [...store.keys()].filter((n) => n.startsWith(prefix)).sort().map((name) => ({ name })), list_complete: true, cursor: null }; },
 };
-const env = { LEADS, ADMIN_TOKEN: 'testtok' };   // no LOCKS → KV fallbacks
+// Minimal D1 stub for the planner routes. Deliberately NOT a SQL engine — it recognises the six
+// statements jobs.js issues and nothing else, so an unrecognised query throws loudly rather than
+// silently returning empty and making a broken route look like it passed.
+function makeD1() {
+  const jobs = new Map(), chunks = [];
+  const exec = (sql, a) => {
+    if (sql.includes('INSERT INTO jobs')) { jobs.set(a[0], { id: a[0], device_id: a[1], rin: a[2], source: a[3], date_field: a[4], dir: a[5], from_iso: a[6], to_iso: a[7], statuses: a[8], state: 'planning', version: a[9], created_at: a[10], updated_at: a[11], total_chunks: 0, total_rows: 0, done_count: 0, failed_count: 0, probes: 0 }); return { success: true }; }
+    if (sql.includes('INSERT OR REPLACE INTO job_chunks')) { chunks.push({ job_id: a[0], idx: a[1], chunk_id: a[2], from_iso: a[3], to_iso: a[4], sub_f: a[5], sub_t: a[6], label: a[7], count: a[8], warn: a[9], state: 'pending' }); return { success: true }; }
+    if (sql.includes("SET state='planned'")) { const j = jobs.get(a[4]); if (j) Object.assign(j, { state: 'planned', total_chunks: a[0], total_rows: a[1], probes: a[2], updated_at: a[3] }); return { success: true }; }
+    if (sql.includes('SET state=?, done_count=?')) { const j = jobs.get(a[4]); if (j && j.device_id === a[5]) Object.assign(j, { state: a[0], done_count: a[1], failed_count: a[2], updated_at: a[3] }); return { success: true }; }
+    throw new Error('D1 stub: unrecognised statement → ' + sql.slice(0, 70));
+  };
+  const read = (sql, a) => {
+    if (sql.includes('SELECT * FROM jobs WHERE id')) { const j = jobs.get(a[0]); return (j && j.device_id === a[1]) ? [j] : []; }
+    if (sql.includes('SELECT * FROM job_chunks')) return chunks.filter((c) => c.job_id === a[0]).sort((x, y) => x.idx - y.idx);
+    throw new Error('D1 stub: unrecognised query → ' + sql.slice(0, 70));
+  };
+  const mk = (sql, args) => ({
+    bind: (...a) => mk(sql, a),
+    run: async () => exec(sql, args || []),
+    first: async () => read(sql, args || [])[0] || null,
+    all: async () => ({ results: read(sql, args || []) }),
+  });
+  return { prepare: (sql) => mk(sql, null), batch: async (stmts) => { for (const s of stmts) await s.run(); return []; }, _jobs: jobs, _chunks: chunks };
+}
+const JOBS = makeD1();
+const env = { LEADS, JOBS, ADMIN_TOKEN: 'testtok' };   // no LOCKS → KV fallbacks
 globalThis.fetch = async () => { throw new Error('network disabled'); };   // Disify email check → fail-open
 
 const enc = new TextEncoder();
@@ -109,9 +135,73 @@ try {
   const snapsJ = await (await admin('/api/snaps')).json();
   check('/api/snaps returns it', snapsJ.ok && snapsJ.snaps.length === 1 && snapsJ.snaps[0].day === day);
 
+  // ── SPEC-016: the planner conversation ──
+  // A synthetic portal: anything wider than ~200 days is over the 10,000 invoice cap, anything
+  // narrower is comfortably under. One split, two chunks, three steps.
+  const probeFor = (f, t) => (Date.parse(t) - Date.parse(f) > 200 * 86400000 ? 20000 : 100);
+
+  // A device of its own: dev-1 has been deleted and restored by the trash tests above, and the
+  // restore deliberately drops a RIN another account re-claimed. Reusing it here would make these
+  // assertions depend on damage inflicted by an unrelated test.
+  const pReg = await (await call('/register', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ regId: 'rp', name: 'Planner Dev', email: 'planner@gmail.com', registrationNumber: '900000001', deviceId: 'dev-plan', consent: true, version: '9.9.9' }),
+  })).json();
+  check('planner device registered with its own RIN', pReg.ok && pReg.boundRins.includes('900000001'));
+  const PK = pReg.clientKey, PD = 'dev-plan', PRIN = '900000001';
+  const startBody = { source: 'invoices', field: 'Issue', from: '2025-01-01', to: '2025-12-31', rin: PRIN, version: '9.9.9' };
+
+  const unsignedStart = await call('/plan/start', { method: 'POST', body: JSON.stringify({ source: 'invoices' }), headers: { 'content-type': 'application/json' } });
+  check('plan/start unsigned → 401', unsignedStart.status === 401);
+
+  // These use the device's OWN rin: entitlement is checked before input validation, so a wrong rin
+  // would return 403 and this would be asserting the wrong thing.
+  const badRange = await signed('/plan/start', { ...startBody, from: '2025-12-31', to: '2025-01-01' }, PK, PD);
+  check('plan/start rejects an inverted date range', badRange.status === 400);
+
+  const badSource = await signed('/plan/start', { ...startBody, source: 'nope' }, PK, PD);
+  check('plan/start rejects an unknown source', badSource.status === 400);
+
+  const badField = await signed('/plan/start', { ...startBody, field: 'NotAField' }, PK, PD);
+  check('plan/start rejects a date field the source does not have', badField.status === 400);
+
+  const start = await signed('/plan/start', startBody, PK, PD);
+  const s0 = await start.json();
+  check('plan/start mints a job and the first probe', start.status === 200 && s0.ok && !!s0.jobId && s0.instruction && s0.instruction.kind === 'probe' && !!s0.cursor);
+
+  // Drive the conversation to completion.
+  let cursor = s0.cursor, instr = s0.instruction, plan = null, steps = 0;
+  while (instr && steps < 50) {
+    const obs = instr.kind === 'detectMaxSub' ? { maxSub: null } : { count: probeFor(instr.fromISO || instr.subF, instr.toISO || instr.subT) };
+    const r = await (await signed('/plan/step', { jobId: s0.jobId, cursor, observation: obs }, PK, PD)).json();
+    steps++;
+    if (r.done) { plan = r; break; }
+    cursor = r.cursor; instr = r.instruction;
+  }
+  check('plan/step completes and returns chunks', !!plan && plan.done && plan.chunks.length === 2, plan ? 'chunks=' + plan.chunks.length : 'never finished');
+  check('planned chunks are stored in D1, in order', JOBS._chunks.length === 2 && JOBS._chunks[0].idx === 0 && JOBS._chunks[1].idx === 1);
+  const jobRow = JOBS._jobs.get(s0.jobId);
+  check('job row reaches planned with its totals', jobRow && jobRow.state === 'planned' && jobRow.total_chunks === 2 && jobRow.total_rows === 200);
+
+  const tampered = await signed('/plan/step', { jobId: s0.jobId, cursor: String(s0.cursor).slice(0, -4) + 'AAAA', observation: { count: 1 } }, PK, PD);
+  check('a tampered cursor is refused, not treated as empty state', tampered.status === 400);
+
+  const noJob = await signed('/plan/step', { jobId: 'deadbeefdeadbeef', cursor: s0.cursor, observation: { count: 1 } }, PK, PD);
+  check('an unknown job id is refused', noJob.status === 404);
+
+  const cp = await signed('/job/checkpoint', { jobId: s0.jobId, state: 'running', done: 1, failed: 0 }, PK, PD);
+  check('checkpoint records progress', cp.status === 200 && jobRow.done_count === 1 && jobRow.state === 'running');
+
+  // The gate: a locked device must not be able to mint a job at all.
+  await admin('/api/user', { deviceId: PD, action: 'lock' });
+  const lockedStart = await signed('/plan/start', startBody, PK, PD);
+  const lj = await lockedStart.json();
+  check('a locked device cannot mint a job', lockedStart.status === 403 && lj.reason === 'locked');
+  await admin('/api/user', { deviceId: PD, action: 'unlock' });
+
   // ── top-level catch ──
   const origGet = LEADS.get; LEADS.get = async () => { throw new Error('kv exploded'); };
-  const boom = await signed('/session', { rin: '123456789' }, reg.clientKey, 'dev-1');
+  const boom = await signed('/session', { rin: '123456789' }, PK, PD);
   LEADS.get = origGet;
   check('unhandled throw → JSON 500', boom.status === 500 && (await boom.json()).error === 'server error');
 } finally { /* nothing to clean up — the source under test is imported as-is */ }

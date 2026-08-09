@@ -7,6 +7,7 @@ import { json, EMAIL_RE, cleanRin, randHex, isVersionBlocked } from '../lib/util
 import { getDev, putDev, getCfg, isVoided, rinClaim, listPrefix, deviceRate } from '../lib/kv.js';
 import { verifyEmail, verifySigned } from '../lib/auth.js';
 import { errlog } from '../lib/audit.js';
+import { computeVerdict } from '../lib/verdict.js';
 
 export async function extensionRoutes(request, env, url, path) {
     // ── register (unsigned) ──────────────────────────────────────────────────
@@ -98,24 +99,9 @@ export async function extensionRoutes(request, env, url, path) {
         pdfs: Math.max(capN(st && st.pdfs), prevSeen.pdfs || 0),
         lastExportAt: String((st && st.lastExportAt) || prevSeen.lastExportAt || '').slice(0, 40),
       }));
-      const sa = !!dev.superadmin;                                     // superadmin → works on ANY account
-      const globalKill = !!cfg.globalKill;                            // reversible service-wide emergency stop
-      const killed = !!dev.killed || globalKill;                       // emergency stop still applies to everyone
-      const locked = !!dev.locked && !sa;                             // superadmin bypasses its own lock
-      let allowed = true, reason = '';
-      if (killed) { allowed = false; reason = dev.killed ? 'killed' : 'global_stop'; }   // distinguish a per-device kill from a reversible global pause
-      else if (locked) { allowed = false; reason = 'locked'; }
-      else if (isVersionBlocked(cfg, version)) { allowed = false; reason = 'update_required'; }   // version kill switch — applies to everyone, superadmins included
-      else if (!sa) {                                                  // superadmin skips void + allow-list entirely
-        if (rin) {
-          if (await isVoided(env, rin)) { allowed = false; reason = 'rin_voided'; }
-          else if (!(dev.boundRins || []).includes(rin)) { allowed = false; reason = 'rin_not_allowed'; }
-        } else {                                                       // no specific RIN supplied → require at least one bound, non-voided RIN
-          let usable = false;
-          for (const r of (dev.boundRins || [])) { if (!(await isVoided(env, r))) { usable = true; break; } }
-          if (!usable) { allowed = false; reason = 'no_usable_rin'; }
-        }
-      }
+      // Verdict comes from the shared rules — /plan/start enforces the identical function, so a
+      // device this endpoint reports as blocked cannot mint a job. See lib/verdict.js.
+      const { allowed, locked, killed, globalKill, reason, superadmin: sa } = await computeVerdict(env, dev, { rin, version, cfg });
       // Optional broadcast banner: the admin sets cfg.announcement { text, level, until? }; every allowed
       // extension surfaces it (a soft channel that isn't the kill-switch sledgehammer). Expired/empty → omit.
       let announcement = null;
