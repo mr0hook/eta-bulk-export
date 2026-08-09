@@ -101,8 +101,12 @@ kv_namespaces = [
   database_name = "eta-bulk-jobs"
   database_id = "aecaceea-e253-4a85-8ceb-0b77bef35dfa"
 
-  # No cron on staging: the daily snapshot would write snap: records nobody reads. Test scheduled()
+  # No cron on staging: the daily snapshot would write snap: records nobody reads. This MUST be an
+  # explicit empty list — omitting the block does not mean "no triggers", it inherits the top-level
+  # schedule, and the first staging deploy duly reported `schedule: 0 2 * * *`. Test scheduled()
   # with `wrangler dev --test-scheduled` instead.
+  [env.staging.triggers]
+  crons = []
 
   [env.staging.observability]
   enabled = true
