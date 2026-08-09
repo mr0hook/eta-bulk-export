@@ -65,7 +65,7 @@ export async function listResumable(env, deviceId, limit = 5) {
     `SELECT id, source, date_field, dir, from_iso, to_iso, state, total_chunks, total_rows,
             done_count, failed_count, updated_at
        FROM jobs
-      WHERE device_id = ? AND state IN ('planned','running','paused','incomplete','halted')
+      WHERE device_id = ? AND state IN ('planned','running','merging','paused','incomplete','halted')
       ORDER BY updated_at DESC
       LIMIT ?`,
   ).bind(deviceId, limit).all();
@@ -93,7 +93,7 @@ export async function getChunks(env, id) {
 export async function checkpoint(env, id, deviceId, p) {
   if (!hasJobs(env)) return false;
   const now = new Date().toISOString();
-  const state = ['running', 'done', 'incomplete', 'halted', 'paused', 'abandoned'].includes(p.state) ? p.state : 'running';
+  const state = ['running', 'merging', 'done', 'incomplete', 'halted', 'paused', 'abandoned'].includes(p.state) ? p.state : 'running';
   await env.JOBS.prepare(
     `UPDATE jobs SET state=?, done_count=?, failed_count=?, updated_at=? WHERE id=? AND device_id=?`,
   ).bind(state, p.done | 0, p.failed | 0, now, id, deviceId).run();

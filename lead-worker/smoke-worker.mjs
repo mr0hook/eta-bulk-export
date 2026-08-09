@@ -41,7 +41,7 @@ function makeD1() {
     if (sql.includes('SELECT * FROM job_chunks')) return chunks.filter((c) => c.job_id === a[0]).sort((x, y) => x.idx - y.idx);
     if (sql.includes('FROM jobs') && sql.includes('state IN')) {
       return [...jobs.values()]
-        .filter((j) => j.device_id === a[0] && ['planned', 'running', 'paused', 'incomplete', 'halted'].includes(j.state))
+        .filter((j) => j.device_id === a[0] && ['planned', 'running', 'merging', 'paused', 'incomplete', 'halted'].includes(j.state))
         .sort((x, y) => String(y.updated_at).localeCompare(String(x.updated_at)))
         .slice(0, a[1]);
     }

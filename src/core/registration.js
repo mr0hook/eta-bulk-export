@@ -153,6 +153,15 @@ export async function session() {
   return { registered: true, allowed: false, boundRins: c.boundRins || [], features: c.features || [], rin, stale: true };   // no server verdict ever obtained → fail closed
 }
 
+// ── SPEC-016: the planner conversation ────────────────────────────────────────────────────────────
+// All signed, all through the same bridge as /session. The extension no longer decides how to slice
+// a date range: it probes the portal and reports counts, the server decides where to cut.
+export function planStart(body) { return signedPost('/plan/start', body); }
+export function planStep(body) { return signedPost('/plan/step', body); }
+export function jobCheckpoint(body) { return signedPost('/job/checkpoint', body); }
+export function jobResumable() { return signedPost('/job/resumable', {}); }
+export function jobPlan(jobId) { return signedPost('/job/plan', { jobId: String(jobId || '') }); }
+
 // rin: explicit RIN to request (e.g. a second company typed by the user); falls back to the logged-in one.
 export function requestRin(rin, note) { return signedPost('/rin-request', { requestedRin: String(rin || '').trim() || taxpayerId(), note: String(note || '') }); }
 // diag: optional diagnostics object assembled by the drawer (recent log lines + run summary — counts only,

@@ -3,14 +3,14 @@
 import { SOURCES, ALL_STATUSES } from '../api/sources.js';
 import { tokenStatus } from './token.js';
 import { buildUrl, apiGet, probeCount, fetchAllRows, fetchDetails, fetchPdf, mapLimit } from '../api/client.js';
-import { buildChunks } from './chunker.js';
+import { planViaServer } from './planclient.js';   // SPEC-016: the server decides where to cut; chunker.js is now test-only
 import { safeName } from './time.js';
 import { renderWorkbook, XLSX_MIME } from '../export/xlsx.js';
 import { resolveReferenceNumbers } from './refs.js';
 import * as store from './store.js';
 import * as folder from './folder.js';
 import { createFolderLog } from './folderlog.js';
-import { taxpayerId, taxpayerName } from './registration.js';
+import { taxpayerId, taxpayerName, EXT_VERSION, jobCheckpoint } from './registration.js';
 import * as fs from './fs.js';
 import * as keepalive from './keepalive.js';
 import { createSessionKeeper } from './session.js';
@@ -37,7 +37,7 @@ const TOKEN_WAIT_POLL_MS = 15 * 1000;          // how often to re-read the token
 const TOKEN_WAIT_MAX_POLLS = 1920;
 
 export function createOrchestrator(hooks = {}) {
-  const { onStatus: rawStatus = () => {}, onProgress = () => {}, onPlan = () => {}, onToken = () => {}, onCount = () => {}, onChunk = () => {}, guard = async () => true, confirmFolder = async () => false } = hooks;
+  const { onStatus: rawStatus = () => {}, onProgress = () => {}, onPlan = () => {}, onToken = () => {}, onCount = () => {}, onChunk = () => {}, guard = async () => true, confirmFolder = async () => false, planner = planViaServer } = hooks;
   // SPEC-011: every user-visible line already funnels through onStatus, so mirroring the run log to
   // the folder needs exactly one interception point. It must never be able to break a run, hence the
   // swallow — a logger that aborts the export it documents is worse than no logger.
@@ -111,11 +111,21 @@ export function createOrchestrator(hooks = {}) {
       try { const j = await apiGet(buildUrl(SRC, issF, issT, sel.dir, sel.field, 1, 1, sp.statusParam, null, null, true), { signal: currentCtrl.signal, onRate: rate }); return (j[SRC.resultKey] || [])[0]?.source?.submissionDate || null; } catch { return null; }
     };
     onStatus(t('orch.probing', { label: SRC.label }), { level: 'run' });
-    const chunks = await buildChunks(SRC, from, to, sel.field, { probe, detectMaxSub, onProgress: (n, m) => onStatus(t('orch.probe', { n, m }), { level: 'run', kind: 'probe' }), stopped: () => flags.paused || flags.halted });
+    // SPEC-016: the extension probes; the SERVER decides where to cut and mints the job. There is no
+    // local fallback by design — without an authorised plan there is nothing to export.
+    const { jobId, chunks } = await planner({
+      source: sel.source || 'invoices', field: sel.field, from, to,
+      dir: sel.dir, statuses: sel.statuses || ALL_STATUSES,
+      rin: taxpayerId(), version: EXT_VERSION,
+    }, {
+      probe, detectMaxSub,
+      onStatus,
+      stopped: () => flags.paused || flags.halted,
+    });
     const totalRows = chunks.reduce((s, c) => s + c.count, 0);
     const biggest = chunks.reduce((m, c) => Math.max(m, c.count), 0);
     const p = {
-      v: 1, key: store.runKey(sel.source, sel.year, sel.dir, sel.field, from, to), source: sel.source, createdAt: new Date().toISOString(),
+      v: 1, jobId, key: store.runKey(sel.source, sel.year, sel.dir, sel.field, from, to), source: sel.source, createdAt: new Date().toISOString(),
       year: sel.year, dir: sel.dir, dateField: sel.field, downloadDetails: sel.downloadDetails !== false, statuses: sel.statuses || ALL_STATUSES,
       from, to, cap: SRC.cap, totalRows, biggest, chunks, doneIds: [], failedIds: [], excludeColumns: sel.excludeColumns || [], downloadPdf: !!sel.downloadPdf,
     };
@@ -123,6 +133,19 @@ export function createOrchestrator(hooks = {}) {
     if (dirHandle && await folderAllowed()) await store.writeProgress(dirHandle, p, 'planned');
     onPlan(p);
     return p;
+  }
+
+  // Local run status → job state. The folder file stays the resume source of truth; the server
+  // checkpoint is best-effort and must never fail a run — a backend blip should not stop an export.
+  // 'done' here means the FETCH finished, which is not the same as the job being done: the output
+  // does not exist until merge has run, so the job sits at 'merging' and stays resumable until then.
+  const JOB_STATE = { planned: 'planned', running: 'running', paused: 'paused', auth_expired: 'paused', halted: 'halted', incomplete: 'incomplete', done: 'merging' };
+  async function mark(p, status) {
+    await store.writeProgress(dirHandle, p, status);
+    if (!p || !p.jobId) return;
+    try {
+      await jobCheckpoint({ jobId: p.jobId, state: JOB_STATE[status] || 'running', done: (p.doneIds || []).length, failed: (p.failedIds || []).length });
+    } catch {}
   }
 
   async function start(plan) {
@@ -167,8 +190,8 @@ export function createOrchestrator(hooks = {}) {
     };
     try {
       for (let i = 0; i < plan.chunks.length; i++) {
-        if (flags.halted) { onStatus(t('orch.halted'), { level: 'err', terminal: true }); await store.writeProgress(dirHandle, plan, 'halted'); return; }
-        if (flags.paused) { onStatus(t('orch.pausedAt', { i: i + 1, n: plan.chunks.length }), { level: 'wait', terminal: true }); await store.writeProgress(dirHandle, plan, 'paused'); return; }
+        if (flags.halted) { onStatus(t('orch.halted'), { level: 'err', terminal: true }); await mark(plan, 'halted'); return; }
+        if (flags.paused) { onStatus(t('orch.pausedAt', { i: i + 1, n: plan.chunks.length }), { level: 'wait', terminal: true }); await mark(plan, 'paused'); return; }
         const c = plan.chunks[i];
         if (done.has(c.id)) { onProgress(done.size, failed.size, plan.chunks.length - done.size); continue; }
         const tk = tokenStatus(); onToken(tk);
@@ -177,18 +200,18 @@ export function createOrchestrator(hooks = {}) {
         // the silent renewal and continue on our own instead of demanding a re-login.
         if (!tk.ok) {
           onStatus(t('orch.tokenLapsed'), { level: 'wait' });   // "lapsed", not "expired" — the drawer styles /expired/ as a terminal error and this state self-heals
-          await store.writeProgress(dirHandle, plan, 'auth_expired');
+          await mark(plan, 'auth_expired');
           const fresh = await waitForFreshToken();
           if (!fresh) {
-            if (flags.halted) { onStatus(t('orch.halted'), { level: 'err', terminal: true }); await store.writeProgress(dirHandle, plan, 'halted'); return; }
+            if (flags.halted) { onStatus(t('orch.halted'), { level: 'err', terminal: true }); await mark(plan, 'halted'); return; }
             onStatus(t('orch.pausedNoToken', { i: i + 1, n: plan.chunks.length }), { level: 'wait', terminal: true });
-            flags.paused = true; await store.writeProgress(dirHandle, plan, 'auth_expired'); return;
+            flags.paused = true; await mark(plan, 'auth_expired'); return;
           }
           onToken(fresh); onStatus(t('orch.tokenRenewed'), { level: 'run' });
-          await store.writeProgress(dirHandle, plan, 'running');
+          await mark(plan, 'running');
         }
         // verify the logged-in taxpayer still matches the registered one — never export another entity's data
-        if (!(await guard())) { onStatus(t('orch.rinMismatch'), { level: 'err', terminal: true }); flags.halted = true; await store.writeProgress(dirHandle, plan, 'halted'); return; }
+        if (!(await guard())) { onStatus(t('orch.rinMismatch'), { level: 'err', terminal: true }); flags.halted = true; await mark(plan, 'halted'); return; }
         currentCtrl = new AbortController();
         let ok = false, lastErr = null, authRetries = 0;
         for (let attempt = 0; attempt < 3 && !ok && !flags.paused && !flags.halted; attempt++) {
@@ -269,23 +292,23 @@ export function createOrchestrator(hooks = {}) {
               // token died mid-chunk — same wait-for-renewal as the boundary guard, then retry the
               // chunk (attempt-- so the renewal itself doesn't burn one of the 3 attempts)
               onStatus(t('orch.tokenLapsedMid'), { level: 'wait' });
-              await store.writeProgress(dirHandle, plan, 'auth_expired');
+              await mark(plan, 'auth_expired');
               const fresh = ++authRetries > 2 ? null : await waitForFreshToken();   // a "fresh" token the API still rejects → real auth problem, stop retrying
               if (!fresh) {
-                if (flags.halted) { onStatus(t('orch.halted'), { level: 'err', terminal: true }); await store.writeProgress(dirHandle, plan, 'halted'); return; }
+                if (flags.halted) { onStatus(t('orch.halted'), { level: 'err', terminal: true }); await mark(plan, 'halted'); return; }
                 onStatus(t('orch.pausedNoToken2'), { level: 'wait', terminal: true });
-                flags.paused = true; await store.writeProgress(dirHandle, plan, 'auth_expired'); return;
+                flags.paused = true; await mark(plan, 'auth_expired'); return;
               }
               onToken(fresh); onStatus(t('orch.tokenRenewedRetry'), { level: 'run' });
-              await store.writeProgress(dirHandle, plan, 'running');
+              await mark(plan, 'running');
               attempt--; continue;
             }
             // Pause/Halt aborts the in-flight request → STOPPED. Emit an authoritative status here (the immediate
             // return bypasses the next-chunk-boundary check) so the footer/tracker don't stay frozen on the last
             // "▶ fetching…" line during a multi-hour run.
             if (e.code === 'STOPPED') {
-              if (flags.halted) { onStatus(t('orch.halted'), { level: 'err', terminal: true }); await store.writeProgress(dirHandle, plan, 'halted'); }
-              else { onStatus(t('orch.pausedAt', { i: i + 1, n: plan.chunks.length }), { level: 'wait', terminal: true }); await store.writeProgress(dirHandle, plan, 'paused'); }
+              if (flags.halted) { onStatus(t('orch.halted'), { level: 'err', terminal: true }); await mark(plan, 'halted'); }
+              else { onStatus(t('orch.pausedAt', { i: i + 1, n: plan.chunks.length }), { level: 'wait', terminal: true }); await mark(plan, 'paused'); }
               return;
             }
             const wait = 60000 * (attempt + 1); onStatus(t('orch.chunkBackoff', { i: i + 1, a: attempt + 1, msg, m: Math.round(wait / 60000) }), { level: 'wait', kind: 'backoff' });
@@ -297,9 +320,9 @@ export function createOrchestrator(hooks = {}) {
         if (ok) { done.add(c.id); failed.delete(c.id); }
         else if (!flags.paused && !flags.halted) { failed.add(c.id); consec++; }   // a Pause/Halt mid-attempt must not mark the chunk failed
         plan.doneIds = [...done]; plan.failedIds = [...failed];
-        store.saveState(plan); await store.writeProgress(dirHandle, plan, 'running');
+        store.saveState(plan); await mark(plan, 'running');
         onProgress(done.size, failed.size, plan.chunks.length - done.size);
-        if (consec >= 3) { onStatus(t('orch.haltedRepeated'), { level: 'err', terminal: true }); flags.halted = true; await store.writeProgress(dirHandle, plan, 'halted'); return; }
+        if (consec >= 3) { onStatus(t('orch.haltedRepeated'), { level: 'err', terminal: true }); flags.halted = true; await mark(plan, 'halted'); return; }
         await sleep(1000 + Math.floor(Math.random() * 500));
       }
       onChunk({ i: plan.chunks.length, n: plan.chunks.length, phase: 'idle', cur: 0, max: 0 });
