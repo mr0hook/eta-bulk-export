@@ -14,17 +14,29 @@
     "https://api-portal.invoicing.eta.gov.eg/*",
     "https://eta-bulk-leads.omsoliman95.workers.dev/*"
   ],
-  "background": { "service_worker": "bg.js" },
+  "background": {
+    "service_worker": "bg.js"
+  },
   "content_scripts": [
     {
-      "matches": ["https://invoicing.eta.gov.eg/*"],
-      "js": ["bridge.js"],
+      "matches": [
+        "https://invoicing.eta.gov.eg/*"
+      ],
+      "js": [
+        "bridge.js"
+      ],
       "run_at": "document_start",
       "world": "ISOLATED"
     },
     {
-      "matches": ["https://invoicing.eta.gov.eg/*"],
-      "js": ["csp-shim.js", "vendor/exceljs.min.js", "dist/etaBulk.js"],
+      "matches": [
+        "https://invoicing.eta.gov.eg/*"
+      ],
+      "js": [
+        "csp-shim.js",
+        "vendor/exceljs.min.js",
+        "dist/etaBulk.js"
+      ],
       "run_at": "document_idle",
       "world": "MAIN"
     }

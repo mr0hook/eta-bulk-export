@@ -8,7 +8,13 @@ import { lsGet, lsSet, lsDel } from './ls.js';
 import { t } from './i18n.js';
 
 // ← after deploying lead-worker/, set this to its URL (no trailing slash).
-export const LEAD_URL = 'https://eta-bulk-leads.omsoliman95.workers.dev';
+// The literal below is PRODUCTION and stays the single source of truth. `npm run build:staging`
+// overrides it via the esbuild define, so testing against staging is a command rather than an edit
+// you have to remember to undo — and build.mjs keeps bg.js's pinned origin and the manifest's
+// host_permissions in step with whichever target you built.
+export const LEAD_URL = (typeof __LEAD_URL__ !== 'undefined')
+  ? __LEAD_URL__
+  : 'https://eta-bulk-leads.omsoliman95.workers.dev';
 export const gateEnabled = () => !/REPLACE-ME/.test(LEAD_URL);   // until wired, the gate stays OFF
 
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;

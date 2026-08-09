@@ -12,18 +12,33 @@
   (name/email/company/TRN/quota) from KV into D1 so a user is one row instead of one per browser.
   Touches no export files and no invoice data. Nothing a taxpayer's documents ever pass through.
 
-## NEXT ACTION
-→ DECIDE TWO THINGS so the next phase can start. Both are yours; everything unblocked is done.
-  (1) The S1/S2 planner design — architecture section presented (planner leaves the extension, jobs
-      in D1, sealed cursor for the probe conversation), never ruled on. Admin phase A2 (jobs domain)
-      cannot start without it, and A3 (patched-client detection) sits behind A2.
-  (2) Three defaults for UI simplification U1 — pressing Export with no configuration: current year
-      or last 12 months? all statuses or valid-only? both directions or received-only? These decide
-      what the one-button flow does, and a wrong default silently produces an incomplete export.
-  If you'd rather not decide yet: admin phase A1 (Cloudflare Access, roles, actor in the audit log)
-  and A6 (grouped errors, alerting) are both unblocked and need nothing from the client side.
+## Build targets
+`npm run build` → production · `npm run build:staging` → staging. The flag switches all THREE things
+that must agree or the backend is silently unreachable: the LEAD_URL compiled into the bundle, the
+single origin bg.js is allowed to fetch, and manifest.json's host_permissions. A staging build shows
+up in `git status` (manifest.json changes) and `package-ext.mjs` refuses to zip one.
 
-Parked (extension milestone, unchanged): USER SMOKE TEST of v0.4.1 (built + packaged: dist-package/eta-bulk-export-v0.4.1.zip). F-10..F-15 are all code-complete and unit-green (252/252)
+## NEXT ACTION
+→ ONE REAL RUN AGAINST STAGING. Everything built since 2026-08-09 is verified only by tests and
+  synthetic probes; no real ETA data has ever passed through the server planner or the new flow.
+  `npm run build:staging`, reload the unpacked extension, press Download → folder → Sales → current
+  year → Start. Watch four things: the plan builds (chunk decisions stream from the server), the run
+  completes, merge fires by itself, and the COMBINED files open in real Excel. Then `npm run build`
+  to retarget production. Needs the portal login, so only you can do it.
+
+Then, in order:
+  (1) Promote the worker to production (`npm run deploy:prod`). Low risk — A0 verified byte-identical
+      on 29 routes, everything since only ADDS routes. Required before the extension can ship at all:
+      production has no /plan/* and the extension now needs it. LOOK FIRST at the one production
+      account holding four devices — after slice 3 its quota binds on the person.
+  (2) Run the staging migration (Migration card in /admin — one click, keeps the token out of a
+      transcript).
+  (3) Slice 4: bugs joined to users/jobs, audit trail with real admin identity (Cloudflare Access).
+      A single shared bearer token still guards a console that can kill every installation.
+
+Parked (extension milestone, unchanged): USER SMOKE TEST of v0.4.1 — F-10..F-15 have still never
+met real portal data. The run above covers much of it if the folder used is the big one that
+used to fail. (built + packaged: dist-package/eta-bulk-export-v0.4.1.zip). F-10..F-15 are all code-complete and unit-green (252/252)
 but NONE has been exercised against real portal data. Load the rebuilt extension and, in one
 session: (1) Merge the big folder that used to fail — confirm it completes and leaves no .jsonl;
 (2) Merge again immediately — must say "Already up to date" and write nothing; (3) sync a day, merge

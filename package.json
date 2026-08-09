@@ -9,7 +9,8 @@
     "icons": "node icons/gen-icons.mjs",
     "test": "cross-env TZ=Africa/Cairo node --test",
     "package": "node build.mjs && node package-ext.mjs",
-    "package:source": "node package-source.mjs"
+    "package:source": "node package-source.mjs",
+    "build:staging": "node build.mjs --staging"
   },
   "devDependencies": {
     "cross-env": "^10.1.0",
