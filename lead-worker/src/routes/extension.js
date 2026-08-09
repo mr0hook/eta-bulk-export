@@ -8,6 +8,7 @@ import { getDev, putDev, getCfg, isVoided, rinClaim, listPrefix, deviceRate } fr
 import { verifyEmail, verifySigned } from '../lib/auth.js';
 import { errlog } from '../lib/audit.js';
 import { computeVerdict } from '../lib/verdict.js';
+import { mirrorDevice } from '../users.js';
 
 export async function extensionRoutes(request, env, url, path) {
     // ── register (unsigned) ──────────────────────────────────────────────────
@@ -65,6 +66,12 @@ export async function extensionRoutes(request, env, url, path) {
       // email → device index (for per-user grouping)
       const idxKey = 'email:' + email; const idx = (await env.LEADS.get(idxKey, 'json')) || [];
       if (!idx.includes(deviceId)) { idx.push(deviceId); await env.LEADS.put(idxKey, JSON.stringify(idx)); }
+      // SPEC-017 dual-write: the portal reads D1, the extension still reads KV. A registration that
+      // landed only in KV would be invisible in the portal until someone re-ran the migration, and
+      // the two stores would quietly disagree about who exists. BEST-EFFORT and last: a D1 outage —
+      // or a deployment where /api/migrate has not yet created the tables — must never fail a
+      // registration that has already succeeded. The next migration run picks the record up.
+      try { await mirrorDevice(env, dev); } catch (e) { await errlog(env, request, 'dualwrite_fail', { msg: String((e && e.message) || e).slice(0, 120) }); }
       const allowed = dev.boundRins.includes(rin) && !dev.locked && !dev.killed && !cfg.globalKill;
       return json({ ok: true, clientKey: dev.clientKey, features: dev.features, boundRins: dev.boundRins, quota: dev.quota, allowed });
     }

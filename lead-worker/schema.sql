@@ -52,3 +52,76 @@ CREATE TABLE IF NOT EXISTS job_chunks (
   state     TEXT DEFAULT 'pending',  -- pending|done|failed
   PRIMARY KEY (job_id, idx)
 );
+
+-- ═══ SPEC-017 · admin portal v2 ══════════════════════════════════════════════════════════════════
+-- The defect these tables exist to close: a KV `dev:` record IS the user — it carries name, email,
+-- company, quota and boundRins, keyed by BROWSER. The same accountant on a laptop and an office PC
+-- is therefore two users holding two quotas. Quota belongs to the person; a device inherits it.
+-- That needs a real key (email) and joins, which KV prefix scans cannot give.
+--
+-- Additive: KV keeps audit, errors, snapshots, config, nonces and rate limits, and the extension API
+-- keeps enforcing from `dev:` until slice 3. /register dual-writes into these tables so the two
+-- stores cannot drift, and POST /api/migrate backfills them from KV (idempotent).
+
+CREATE TABLE IF NOT EXISTS users (
+  email       TEXT PRIMARY KEY,
+  name        TEXT,
+  company     TEXT,
+  phone       TEXT,
+  plan        TEXT DEFAULT 'free',
+  quota       INTEGER DEFAULT 1,
+  valid_until TEXT,
+  status      TEXT DEFAULT 'active',    -- active | locked | killed
+  superadmin  INTEGER DEFAULT 0,
+  features    TEXT,                     -- JSON array; plan fills it, per-user override wins
+  note        TEXT,
+  tags        TEXT,
+  country     TEXT,
+  created_at  TEXT,
+  updated_at  TEXT
+);
+CREATE INDEX IF NOT EXISTS users_status ON users (status, email);
+
+CREATE TABLE IF NOT EXISTS clients (
+  rin        TEXT PRIMARY KEY,
+  user_email TEXT,
+  company    TEXT,
+  voided     INTEGER DEFAULT 0,
+  created_at TEXT,
+  updated_at TEXT
+);
+CREATE INDEX IF NOT EXISTS clients_user ON clients (user_email);
+
+CREATE TABLE IF NOT EXISTS devices (
+  device_id  TEXT PRIMARY KEY,
+  user_email TEXT,
+  client_key TEXT,
+  version    TEXT,
+  country    TEXT,
+  last_seen  TEXT,
+  last_rin   TEXT,
+  exports    INTEGER DEFAULT 0,
+  docs       INTEGER DEFAULT 0,
+  pdfs       INTEGER DEFAULT 0,
+  created_at TEXT
+);
+CREATE INDEX IF NOT EXISTS devices_user ON devices (user_email);
+
+CREATE TABLE IF NOT EXISTS plans (
+  id       TEXT PRIMARY KEY,
+  name     TEXT,
+  quota    INTEGER,
+  features TEXT,
+  price    TEXT,
+  active   INTEGER DEFAULT 1
+);
+
+-- A job belongs to a person, not only to a browser. Backfilled from devices by /api/migrate.
+--
+-- SQLite has no `ADD COLUMN IF NOT EXISTS`, so a SECOND run of this file stops on the next line with
+-- "duplicate column name: user_email". That is harmless — every statement above is IF NOT EXISTS and
+-- has already applied — but it does abort the run, which is why the index below sits after it and
+-- why the Worker performs the identical step guarded (pragma_table_info) in src/users.js
+-- ensureSchema(), called by /api/migrate. Running the migration once gives you both without this file.
+ALTER TABLE jobs ADD COLUMN user_email TEXT;
+CREATE INDEX IF NOT EXISTS jobs_user_created ON jobs (user_email, created_at DESC);

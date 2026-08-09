@@ -15,6 +15,7 @@ import { errlog } from '../lib/audit.js';
 import { cursorKey, seal, unseal } from '../cursor.js';
 import { startPlan, advance } from '../planner.js';
 import { createJob, getJob, getChunks, finishPlan, checkpoint, listResumable, hasJobs } from '../jobs.js';
+import { stampJobs } from '../users.js';
 
 // Mirrors SOURCES in the extension (src/api/sources.js). Held server-side so a client cannot raise
 // its own cap and have the planner accept oversized chunks.
@@ -71,6 +72,9 @@ export async function planRoutes(request, env, url, path) {
       dir: String(b.dir || '').slice(0, 24), fromIso: from, toIso: to,
       statuses: Array.isArray(b.statuses) ? b.statuses.map(String).slice(0, 12) : [], version,
     });
+    // SPEC-017: a job belongs to a person, not only to a browser. Stamped here rather than inside
+    // createJob so a deployment whose D1 predates the users tables still mints jobs normally.
+    try { await stampJobs(env, dev.deviceId, dev.email); } catch {}
 
     const st = startPlan({ cap: src.cap, granular: src.granular.includes(field), subSplit: src.subSplit, field, from, to });
     const r = advance(st);

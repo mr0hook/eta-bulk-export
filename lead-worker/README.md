@@ -60,10 +60,32 @@ src/lib/kv.js             KV access — devices, prefix scans, RIN ownership, ra
 src/lib/audit.js          admin audit trail (180d) + extension failure log (30d)
 src/lib/auth.js           HMAC signature check, admin bearer token, email validation
 src/routes/extension.js   /register /session /rin-request /bug   (STABLE contract)
-src/routes/admin.js       /admin /privacy /api/* /export /backup
+src/routes/plan.js        /plan/* /job/*   the server-side chunk planner (SPEC-016)
+src/routes/portal.js      /api/dashboard /api/users /api/user /api/clients /api/client /api/migrate
+src/routes/admin.js       /admin /privacy /api/* /export /backup   (legacy KV dashboard)
+src/jobs.js               job + chunk records in D1
+src/users.js              users / clients / devices in D1 (SPEC-017)
 src/assets/*.html         dashboard + privacy pages, imported as text modules
-smoke-worker.mjs          `npm run smoke` — 18 functional assertions, no wrangler needed
+schema.sql                D1 schema — jobs, job_chunks, users, clients, devices, plans
+smoke-worker.mjs          `npm run smoke` — 50 functional assertions, no wrangler needed
 ```
+
+### Admin portal v2 (SPEC-017, D1-backed)
+`users` / `clients` / `devices` live in D1 because a KV `dev:` record IS the user, keyed by browser —
+so one accountant on two machines is two users with two quotas. Quota belongs to the person.
+
+Apply the schema, then run the migration once (idempotent, safe to re-run):
+```bash
+npx wrangler d1 execute eta-bulk-jobs --file=schema.sql --remote --env staging
+curl -X POST -H "Authorization: Bearer $ADMIN_TOKEN" https://<worker>/api/migrate
+```
+It reports `{ users, clients, devices, conflicts }`. A RIN held under two emails is listed as a
+conflict and left where the `rinowner:` Durable Object has it — never silently reassigned.
+
+Both stores stay live until slice 3: `/register` dual-writes into D1, and the portal mirrors the
+state KV can actually enforce (lock/kill/super/quota/features/void) back into the `dev:` records.
+Quota is still enforced per DEVICE by the extension API — the portal reports that truth rather than
+hiding it.
 
 ## Wire it to the extension (fixes the "Network error")
 Open `cleanroom/src/core/registration.js`, set `LEAD_URL` to that Worker URL (no trailing slash), rebuild:

@@ -23,20 +23,137 @@ const LEADS = {
   async delete(k) { store.delete(k); },
   async list({ prefix }) { return { keys: [...store.keys()].filter((n) => n.startsWith(prefix)).sort().map((name) => ({ name })), list_complete: true, cursor: null }; },
 };
-// Minimal D1 stub for the planner routes. Deliberately NOT a SQL engine — it recognises the six
-// statements jobs.js issues and nothing else, so an unrecognised query throws loudly rather than
-// silently returning empty and making a broken route look like it passed.
+// Minimal D1 stub for the planner (SPEC-016) and portal (SPEC-017) routes. Deliberately NOT a SQL
+// engine — it recognises the statements jobs.js and users.js issue and nothing else, so an
+// unrecognised query throws loudly rather than silently returning empty and making a broken route
+// look like it passed. Each branch reimplements that statement's SEMANTICS (the guarded client
+// upsert, the MAX-merged counters, the escalating status), because those are the parts worth
+// testing; getting them wrong here would make a wrong route pass.
 function makeD1() {
-  const jobs = new Map(), chunks = [];
+  const jobs = new Map(), chunks = [], users = new Map(), clients = new Map(), devices = new Map();
+  const kept = (cur, ex) => (cur !== null && cur !== undefined && cur !== '') ? cur : ex;   // COALESCE(NULLIF(cur,''), ex)
+  const owned = (email, m) => [...m.values()].filter((r) => r.user_email === email);
+
   const exec = (sql, a) => {
-    if (sql.includes('INSERT INTO jobs')) { jobs.set(a[0], { id: a[0], device_id: a[1], rin: a[2], source: a[3], date_field: a[4], dir: a[5], from_iso: a[6], to_iso: a[7], statuses: a[8], state: 'planning', version: a[9], created_at: a[10], updated_at: a[11], total_chunks: 0, total_rows: 0, done_count: 0, failed_count: 0, probes: 0 }); return { success: true }; }
+    if (/^\s*(CREATE|ALTER)\s/.test(sql)) return { success: true };                    // DDL: ensureSchema()
+    if (sql.includes('INSERT INTO jobs')) { jobs.set(a[0], { id: a[0], device_id: a[1], rin: a[2], source: a[3], date_field: a[4], dir: a[5], from_iso: a[6], to_iso: a[7], statuses: a[8], state: 'planning', version: a[9], created_at: a[10], updated_at: a[11], total_chunks: 0, total_rows: 0, done_count: 0, failed_count: 0, probes: 0, user_email: '' }); return { success: true }; }
     if (sql.includes('INSERT OR REPLACE INTO job_chunks')) { chunks.push({ job_id: a[0], idx: a[1], chunk_id: a[2], from_iso: a[3], to_iso: a[4], sub_f: a[5], sub_t: a[6], label: a[7], count: a[8], warn: a[9], state: 'pending' }); return { success: true }; }
     if (sql.includes("SET state='planned'")) { const j = jobs.get(a[4]); if (j) Object.assign(j, { state: 'planned', total_chunks: a[0], total_rows: a[1], probes: a[2], updated_at: a[3] }); return { success: true }; }
     if (sql.includes('SET state=?, done_count=?')) { const j = jobs.get(a[4]); if (j && j.device_id === a[5]) Object.assign(j, { state: a[0], done_count: a[1], failed_count: a[2], updated_at: a[3] }); return { success: true }; }
     if (sql.includes('DELETE FROM job_chunks')) { const j = jobs.get(a[1]); if (j && j.device_id === a[2]) { for (let i = chunks.length - 1; i >= 0; i--) if (chunks[i].job_id === a[0]) chunks.splice(i, 1); } return { success: true }; }
+    if (sql.includes('UPDATE jobs SET user_email')) { for (const j of jobs.values()) if (j.device_id === a[1] && !j.user_email) j.user_email = a[0]; return { success: true }; }
+
+    if (sql.includes('INSERT INTO users')) {
+      const k = ['email', 'name', 'company', 'phone', 'plan', 'quota', 'valid_until', 'status', 'superadmin', 'features', 'note', 'tags', 'country', 'created_at', 'updated_at'];
+      const ex = {}; k.forEach((n, i) => { ex[n] = a[i]; });
+      const cur = users.get(ex.email);
+      if (!cur) { users.set(ex.email, { ...ex }); return { success: true }; }
+      if (sql.includes('/* migrate */')) Object.assign(cur, {
+        name: kept(cur.name, ex.name), company: kept(cur.company, ex.company), phone: kept(cur.phone, ex.phone), country: kept(cur.country, ex.country),
+        quota: ex.quota, status: ex.status, superadmin: ex.superadmin,
+        features: (!cur.features || cur.features === '[]') ? ex.features : cur.features,
+        plan: kept(cur.plan, ex.plan), valid_until: kept(cur.valid_until, ex.valid_until),
+        note: kept(cur.note, ex.note), tags: kept(cur.tags, ex.tags),
+        created_at: kept(cur.created_at, ex.created_at), updated_at: ex.updated_at,
+      });
+      else Object.assign(cur, {
+        name: ex.name || cur.name, company: ex.company || cur.company, phone: ex.phone || cur.phone, country: ex.country || cur.country,
+        quota: Math.max(cur.quota | 0, ex.quota | 0),
+        status: (cur.status === 'killed' || ex.status === 'killed') ? 'killed' : (cur.status === 'locked' || ex.status === 'locked') ? 'locked' : 'active',
+        superadmin: Math.max(cur.superadmin | 0, ex.superadmin | 0), updated_at: ex.updated_at,
+      });
+      return { success: true };
+    }
+    if (sql.includes('UPDATE users SET')) { const col = sql.match(/UPDATE users SET (\w+) = \?/)[1]; const u = users.get(a[2]); if (u) { u[col] = a[0]; u.updated_at = a[1]; } return { success: true }; }
+    if (sql.includes('DELETE FROM users')) { users.delete(a[0]); return { success: true }; }
+
+    if (sql.includes('INSERT INTO clients')) {
+      const [rin, user_email, company, created_at, updated_at] = a;
+      const cur = clients.get(rin);
+      if (!cur) clients.set(rin, { rin, user_email, company, voided: 0, created_at, updated_at });
+      else if (cur.user_email === user_email) { cur.company = kept(cur.company, company); cur.updated_at = updated_at; }   // guarded WHERE: never reassigns
+      return { success: true };
+    }
+    if (sql.includes("UPDATE clients SET user_email = ''")) { for (const c of owned(a[1], clients)) { c.user_email = ''; c.updated_at = a[0]; } return { success: true }; }
+    if (sql.includes('UPDATE clients SET user_email = ?')) { const c = clients.get(a[2]); if (c) { c.user_email = a[0]; c.updated_at = a[1]; } return { success: true }; }
+    if (sql.includes('UPDATE clients SET voided')) { const c = clients.get(a[2]); if (c) { c.voided = a[0]; c.updated_at = a[1]; } return { success: true }; }
+
+    if (sql.includes('INSERT INTO devices')) {
+      const k = ['device_id', 'user_email', 'client_key', 'version', 'country', 'last_seen', 'last_rin', 'exports', 'docs', 'pdfs', 'created_at'];
+      const ex = {}; k.forEach((n, i) => { ex[n] = a[i]; });
+      const cur = devices.get(ex.device_id);
+      if (!cur) { devices.set(ex.device_id, { ...ex }); return { success: true }; }
+      Object.assign(cur, {
+        user_email: ex.user_email, client_key: ex.client_key,
+        version: ex.version || cur.version, country: ex.country || cur.country,
+        last_seen: String(cur.last_seen || '') > String(ex.last_seen || '') ? cur.last_seen : ex.last_seen,
+        last_rin: ex.last_rin || cur.last_rin,
+        exports: Math.max(cur.exports | 0, ex.exports | 0), docs: Math.max(cur.docs | 0, ex.docs | 0), pdfs: Math.max(cur.pdfs | 0, ex.pdfs | 0),
+      });
+      return { success: true };
+    }
+    if (sql.includes('DELETE FROM devices')) { for (const d of owned(a[0], devices)) devices.delete(d.device_id); return { success: true }; }
+
     throw new Error('D1 stub: unrecognised statement → ' + sql.slice(0, 70));
   };
+
+  // Derived columns the portal reads as scalar sub-selects.
+  const userRow = (u) => ({
+    ...u,
+    client_count: owned(u.email, clients).filter((c) => !c.voided).length,
+    device_count: owned(u.email, devices).length,
+    job_count: [...jobs.values()].filter((j) => j.user_email === u.email).length,
+    docs: owned(u.email, devices).reduce((n, d) => n + (d.docs | 0), 0),
+    last_seen: owned(u.email, devices).map((d) => d.last_seen || '').sort().pop() || null,
+  });
+  const clientRow = (c) => {
+    const js = [...jobs.values()].filter((j) => j.rin === c.rin);
+    const us = users.get(c.user_email);
+    return { ...c, user_name: us ? us.name : null, job_count: js.length, docs: js.reduce((n, j) => n + (j.total_rows | 0), 0), last_export_at: js.map((j) => j.updated_at || '').sort().pop() || null };
+  };
+  const like = (v, q) => String(v || '').toLowerCase().includes(q);
+
   const read = (sql, a) => {
+    if (sql.includes('pragma_table_info')) return [{ n: 1 }];                          // jobs.user_email exists here
+    if (sql.startsWith('SELECT (SELECT COUNT(*) FROM users)')) {
+      const js = [...jobs.values()];
+      return [{
+        users: users.size, clients: [...clients.values()].filter((c) => !c.voided).length, devices: devices.size,
+        active_jobs: js.filter((j) => ['planning', 'planned', 'running', 'merging'].includes(j.state)).length,
+        jobs_today: js.filter((j) => String(j.created_at) >= a[0]).length,
+        docs_today: js.filter((j) => String(j.created_at) >= a[0]).reduce((n, j) => n + (j.total_rows | 0), 0),
+        expiring_soon: [...users.values()].filter((u) => u.valid_until && u.valid_until <= a[2]).length,
+      }];
+    }
+    if (sql.includes('ORDER BY valid_until')) return [...users.values()].filter((u) => u.valid_until && u.valid_until <= a[0]).sort((x, y) => String(x.valid_until).localeCompare(String(y.valid_until))).slice(0, 10);
+
+    // NB the trailing space: the clients query joins `FROM users us`, which "FROM users u" also matches.
+    if (sql.includes('FROM users u ')) {
+      if (sql.includes('WHERE u.email = ?')) { const u = users.get(a[0]); return u ? [userRow(u)] : []; }
+      const [q, , , , status, , plan] = a;
+      const hit = [...users.values()].filter((u) =>
+        (!q || like(u.email, q) || like(u.name, q) || like(u.company, q)) &&
+        (!status || u.status === status) && (!plan || u.plan === plan));
+      if (sql.startsWith('SELECT COUNT(*)')) return [{ n: hit.length }];
+      const page = hit.map(userRow).sort((x, y) => String(y.last_seen || '').localeCompare(String(x.last_seen || '')) || String(x.email).localeCompare(String(y.email)));
+      return page.slice(a[9], a[9] + a[8]);
+    }
+    if (sql.includes('FROM clients c')) {
+      if (sql.includes('WHERE c.rin = ?')) { const c = clients.get(a[0]); return c ? [clientRow(c)] : []; }
+      const [q, , , , email] = a;
+      const hit = [...clients.values()].filter((c) =>
+        (!q || like(c.rin, q) || like(c.company, q) || like(c.user_email, q)) && (!email || c.user_email === email));
+      if (sql.startsWith('SELECT COUNT(*)')) return [{ n: hit.length }];
+      return hit.map(clientRow).sort((x, y) => String(x.rin).localeCompare(String(y.rin))).slice(a[7], a[7] + a[6]);
+    }
+    if (sql.includes('FROM devices WHERE user_email')) return owned(a[0], devices).sort((x, y) => String(y.last_seen || '').localeCompare(String(x.last_seen || '')));
+
+    if (sql.includes("FROM jobs WHERE state IN ('planning'")) return [...jobs.values()].filter((j) => ['planning', 'planned', 'running', 'merging'].includes(j.state)).sort((x, y) => String(y.updated_at).localeCompare(String(x.updated_at))).slice(0, 50);
+    if (sql.includes("FROM jobs WHERE (? = '' OR user_email = ?)")) {
+      const [email, , rin] = a;
+      return [...jobs.values()].filter((j) => (!email || j.user_email === email) && (!rin || j.rin === rin))
+        .sort((x, y) => String(y.created_at).localeCompare(String(x.created_at))).slice(0, a[4]);
+    }
     if (sql.includes('SELECT * FROM jobs WHERE id')) { const j = jobs.get(a[0]); return (j && j.device_id === a[1]) ? [j] : []; }
     if (sql.includes('SELECT * FROM job_chunks')) return chunks.filter((c) => c.job_id === a[0]).sort((x, y) => x.idx - y.idx);
     if (sql.includes('FROM jobs') && sql.includes('state IN')) {
@@ -53,7 +170,7 @@ function makeD1() {
     first: async () => read(sql, args || [])[0] || null,
     all: async () => ({ results: read(sql, args || []) }),
   });
-  return { prepare: (sql) => mk(sql, null), batch: async (stmts) => { for (const s of stmts) await s.run(); return []; }, _jobs: jobs, _chunks: chunks };
+  return { prepare: (sql) => mk(sql, null), batch: async (stmts) => { for (const s of stmts) await s.run(); return []; }, _jobs: jobs, _chunks: chunks, _users: users, _clients: clients, _devices: devices };
 }
 const JOBS = makeD1();
 const env = { LEADS, JOBS, ADMIN_TOKEN: 'testtok' };   // no LOCKS → KV fallbacks
@@ -227,6 +344,134 @@ try {
   const lj = await lockedStart.json();
   check('a locked device cannot mint a job', lockedStart.status === 403 && lj.reason === 'locked');
   await admin('/api/user', { deviceId: PD, action: 'unlock' });
+
+  // ── SPEC-017 slice 1: the admin portal spine ──────────────────────────────────────────────────
+  // Historical KV shapes, written straight into the store. That is deliberate: the migration exists
+  // for data that predates the users table, and /register can no longer PRODUCE the defect being
+  // migrated away from (a second device on one email holding different RINs) — the Locks DO refuses
+  // the duplicate claim and the email index is not enforced. Only a seeded namespace has it.
+  const mkDev = (o) => JSON.stringify({
+    deviceId: o.id, clientKey: 'ff'.repeat(16), boundRins: o.rins, features: o.features || [],
+    quota: o.quota, locked: !!o.locked, killed: false, superadmin: false, count: 1, firstAt: o.firstAt,
+    name: o.name, email: o.email, phone: '', company: o.company || '', taxpayerName: o.company || '',
+    version: '0.4.0', country: 'EG', lastRin: o.rins[0] || '', lastSeen: o.firstAt,
+  });
+  store.set('dev:mig-a', mkDev({ id: 'mig-a', email: 'SHARED@Example.com', name: 'Nadia Fouad', company: 'Fouad & Co', rins: ['700000001', '700000009'], quota: 3, firstAt: '2026-01-02T00:00:00Z' }));
+  store.set('dev:mig-b', mkDev({ id: 'mig-b', email: 'shared@example.com', name: 'Nadia (office PC)', rins: ['700000002'], quota: 5, locked: true, firstAt: '2026-02-02T00:00:00Z' }));
+  store.set('dev:mig-c', mkDev({ id: 'mig-c', email: 'other@example.com', name: 'Other Person', company: 'Other LLC', rins: ['700000009'], quota: 1, firstAt: '2026-03-02T00:00:00Z' }));
+  store.set('rinowner:700000009', 'mig-a');
+
+  const m1 = await (await admin('/api/migrate', {})).json();
+  const uShared = await (await admin('/api/user?email=shared@example.com')).json();
+  check('T-152 migration groups two devices sharing an email into ONE user',
+    m1.ok && uShared.ok && uShared.devices.length === 2 && uShared.user.email === 'shared@example.com'
+    && uShared.user.name === 'Nadia Fouad' && uShared.user.status === 'locked');
+  check('T-153 migrated quota is the MAX of the group, never the sum', uShared.user.quota === 5);
+
+  const conflict = m1.conflicts.find((c) => c.rin === '700000009');
+  const orphan = await (await admin('/api/clients?q=700000009')).json();
+  check('T-154 a RIN under two emails is reported as a conflict and left unassigned',
+    !!conflict && conflict.emails.join(',') === 'other@example.com,shared@example.com'
+    && conflict.owner === 'mig-a' && orphan.total === 0);
+
+  // The report counts what the migration OWNS after a run, not what it newly inserted — that is the
+  // only version of "ran it twice, nothing happened" a caller can actually check. Table sizes are
+  // larger (dual-write already recorded the RINs of devices registered earlier in this run) and are
+  // asserted separately: they must not move.
+  const sizes = () => [JOBS._users.size, JOBS._clients.size, JOBS._devices.size].join('/');
+  const sizesBefore = sizes();
+  const m2 = await (await admin('/api/migrate', {})).json();
+  const afterTwice = await (await admin('/api/users')).json();
+  check('T-155 migration is idempotent — same counts, no new rows',
+    m2.users === m1.users && m2.clients === m1.clients && m2.devices === m1.devices
+    && m2.conflicts.length === m1.conflicts.length && afterTwice.total === m1.users
+    && sizes() === sizesBefore);
+
+  // A live run and a run that stopped checkpointing two hours ago.
+  const live = await (await signed('/plan/start', startBody, PK, PD)).json();
+  await signed('/job/checkpoint', { jobId: live.jobId, state: 'running', done: 0, failed: 0 }, PK, PD);
+  const staleJob = JOBS._jobs.get(s0.jobId);
+  staleJob.state = 'running'; staleJob.updated_at = new Date(Date.now() - 2 * 3600000).toISOString();
+  const dash = await (await admin('/api/dashboard')).json();
+  check('T-156 /api/dashboard reports a running job as active and a stale one as an alert',
+    dash.ok && dash.stats.users === m1.users && dash.stats.devices === m1.devices
+    && dash.active.some((j) => j.jobId === live.jobId && j.state === 'running' && j.user === 'planner@gmail.com')
+    && dash.alerts.some((a) => a.ref === s0.jobId && a.level === 'alert')
+    && dash.recent.length > 0);
+
+  await admin('/api/user', { email: 'other@example.com', action: 'setPlan', value: 'pro' });
+  const uAll = await (await admin('/api/users')).json();
+  const uLocked = await (await admin('/api/users?status=locked')).json();
+  const uPro = await (await admin('/api/users?plan=pro')).json();
+  const uPage2 = await (await admin('/api/users?page=2')).json();
+  const uSearch = await (await admin('/api/users?q=fouad')).json();
+  check('T-157 /api/users paginates and filters by status and plan',
+    uAll.total === 4 && uLocked.total === 1 && uLocked.users[0].email === 'shared@example.com'
+    && uPro.total === 1 && uPro.users[0].email === 'other@example.com'
+    && uPage2.total === 4 && uPage2.users.length === 0 && uSearch.total === 1);
+
+  const uPlan = await (await admin('/api/user?email=planner@gmail.com')).json();
+  check('T-158 /api/user returns clients, devices and jobs for that email only',
+    uPlan.ok && uPlan.clients.length === 1 && uPlan.clients[0].rin === PRIN
+    && uPlan.devices.length === 1 && uPlan.devices[0].deviceId === PD
+    && !('clientKey' in uPlan.devices[0])                                   // the HMAC secret never leaves D1
+    && uPlan.jobs.length >= 1 && uPlan.jobs.every((j) => j.user === 'planner@gmail.com'));
+
+  const clientList = await (await admin('/api/clients')).json();
+  const c700 = clientList.clients.find((c) => c.rin === '700000001');
+  check('T-159 /api/clients shows the managing user for each TRN',
+    clientList.ok && clientList.total === JOBS._clients.size && c700
+    && c700.userEmail === 'shared@example.com' && c700.userName === 'Nadia Fouad');
+
+  const moved = await (await admin('/api/client', { rin: '700000001', action: 'move', value: 'other@example.com' })).json();
+  const c700b = await (await admin('/api/client?rin=700000001')).json();
+  const auditAll = () => [...store.keys()].filter((k) => k.startsWith('audit:')).sort().map((k) => JSON.parse(store.get(k)));
+  check('T-160 POST /api/client action=move reassigns ownership and writes an audit entry',
+    moved.ok && c700b.ok && c700b.client.userEmail === 'other@example.com'
+    && c700b.user.email === 'other@example.com'
+    && auditAll().some((e) => e.action === 'client:move' && e.target === '700000001' && e.detail.from === 'shared@example.com'));
+
+  await admin('/api/user', { email: 'other@example.com', action: 'setNote', value: 'called, renewing' });
+  await admin('/api/client', { rin: '700000002', action: 'void' });
+  await admin('/api/migrate', {});
+  // Matched by action, NOT by "the newest three": the audit key is millisecond-resolution with a
+  // random suffix, so two entries written in the same millisecond sort against each other by chance.
+  const entries = auditAll();
+  const logged = (a) => entries.filter((e) => e.action === a);
+  check('T-161 every mutating endpoint writes an audit entry carrying an actor',
+    ['user:setNote', 'client:void', 'client:move', 'migrate'].every((a) => logged(a).length >= 1)
+    && entries.every((e) => e.actor === 'token')                            // legacy KV actions too
+    && store.has('void:700000002'));                                        // and the KV blacklist stays in step
+
+  // Dual-write: the D1 device row must track the KV dev: record without a migration in between.
+  const dwBody = (version) => ({ method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ regId: 'dw', name: 'Dual Write', email: 'dual.write@example.com', company: 'DW Ltd', taxpayerName: 'DW Ltd', registrationNumber: '800000001', deviceId: 'dev-dw', consent: true, version }) });
+  await call('/register', dwBody('0.4.1'));
+  const dw1 = await (await admin('/api/user?email=dual.write@example.com')).json();
+  await call('/register', dwBody('0.5.0'));
+  const dw2 = await (await admin('/api/user?email=dual.write@example.com')).json();
+  const dwKv = JSON.parse(store.get('dev:dev-dw'));
+  check('T-162 dual-write keeps a KV dev: record and its D1 devices row in step',
+    dw1.ok && dw1.devices.length === 1 && dw1.devices[0].version === '0.4.1'
+    && dw1.clients.some((c) => c.rin === '800000001')
+    && dw2.devices[0].version === dwKv.version && dwKv.version === '0.5.0'
+    && dw2.user.quota === dwKv.quota);
+
+  // setMessage is KV-only by nature — /session reads it from the dev: record, and it is the only
+  // channel that reaches a BLOCKED user to tell them why. Keyed by person, it must fan out to every
+  // device they own, or the message depends on which browser they happen to open.
+  const msgRes = await (await admin('/api/user', { email: 'dual.write@example.com', action: 'setMessage', value: { text: 'your plan expires next week', level: 'warn' } })).json();
+  const msgKv = JSON.parse(store.get('dev:dev-dw'));
+  check('setMessage reaches the device through the person-keyed portal',
+    msgRes.ok && msgKv.message && msgKv.message.text === 'your plan expires next week' && msgKv.message.level === 'warn');
+  const emptyMsg = await admin('/api/user', { email: 'dual.write@example.com', action: 'setMessage', value: { text: '   ' } });
+  check('an empty message is refused rather than delivered blank', emptyMsg.status === 400);
+  await admin('/api/user', { email: 'dual.write@example.com', action: 'clearMessage' });
+  check('clearMessage removes it from the device', !JSON.parse(store.get('dev:dev-dw')).message);
+
+  // The legacy KV dashboard shares /api/user: a { deviceId } body must still reach routes/admin.js.
+  const legacy = await (await admin('/api/user', { deviceId: PD, action: 'setNote', value: 'legacy path' })).json();
+  check('a legacy { deviceId } /api/user action still falls through to the KV handler',
+    legacy.ok && JSON.parse(store.get('dev:' + PD)).note === 'legacy path');
 
   // ── top-level catch ──
   const origGet = LEADS.get; LEADS.get = async () => { throw new Error('kv exploded'); };

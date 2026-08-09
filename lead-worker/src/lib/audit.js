@@ -7,11 +7,14 @@ import { randHex } from './util.js';
 // Append-only admin audit trail. Key sorts reverse-chronologically (newest first on list) so the
 // dashboard can page the most recent actions cheaply. Best-effort: an audit write must never fail an
 // admin action, so every call site wraps it in try/catch. Entries auto-expire after 180 days.
-async function audit(env, action, target, detail) {
+// SPEC-017: entries carry an ACTOR. Every admin path is bearer-token authenticated and nothing else,
+// so 'token' is the honest default for all of them — recorded rather than left blank, and ready for
+// slice 4 to pass a real admin identity in its place.
+async function audit(env, action, target, detail, actor = 'token') {
   try {
     const ts = Date.now();
     const key = 'audit:' + (1e15 - ts).toString().padStart(16, '0') + ':' + randHex(4);   // descending ts prefix
-    await env.LEADS.put(key, JSON.stringify({ at: new Date(ts).toISOString(), action, target: String(target || ''), detail: detail || {} }), { expirationTtl: 180 * 86400 });
+    await env.LEADS.put(key, JSON.stringify({ at: new Date(ts).toISOString(), action, actor: String(actor || 'token'), target: String(target || ''), detail: detail || {} }), { expirationTtl: 180 * 86400 });
   } catch {}
 }
 // Extension-facing FAILURE log (sig failures, rate limits, register rejections, unhandled exceptions) —

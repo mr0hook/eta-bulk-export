@@ -1,679 +1,1651 @@
-<!doctype html><html lang="en"><head><meta charset="utf-8"><title>ETA Bulk — Admin</title>
+<!doctype html><html lang="en"><head><meta charset="utf-8"><title>ETA Bulk — Admin console</title>
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="dark light">
 <script>(function(){try{var t=localStorage.getItem('eta_admin_theme');if(t!=='light'&&t!=='dark')t=matchMedia('(prefers-color-scheme: light)').matches?'light':'dark';document.documentElement.setAttribute('data-theme',t);if(localStorage.getItem('eta_admin_dense')==='1')document.documentElement.setAttribute('data-dense','1')}catch(e){document.documentElement.setAttribute('data-theme','dark')}})();</script>
 <style>
-:root[data-theme="dark"]{--bg:#0e1116;--panel:#161b22;--panel2:#1b2230;--elev:#1f2733;--line:#28303c;--line2:#333d4a;--text:#e9edf3;--muted:#8b95a5;--gold:#e3a552;--gold2:#f0b765;--good:#43b581;--goodbg:#12291d;--goodln:#234634;--bad:#e5786b;--badbg:#301a17;--badln:#4a2721;--warn:#e3a552;--warnbg:#332714;--warnln:#5a4420;--super:#b9a6f0;--superbg:#241f38;--superln:#463a6a;--info:#62b6d6;--infobg:#132a33;--infoln:#234a56;--shadow:0 8px 30px rgba(0,0,0,.45)}
-:root[data-theme="light"]{--bg:#eef1f6;--panel:#ffffff;--panel2:#f6f8fc;--elev:#ffffff;--line:#e2e8f0;--line2:#d3dbe6;--text:#1f2733;--muted:#647085;--gold:#b9822c;--gold2:#d29a3e;--good:#177d54;--goodbg:#e6f5ee;--goodln:#bfe3d1;--bad:#c14434;--badbg:#fbeae7;--badln:#f0cdc6;--warn:#9a6a12;--warnbg:#fbf1dc;--warnln:#f0dcae;--super:#6b4fc4;--superbg:#efeafc;--superln:#d8cdf3;--info:#1d6f8b;--infobg:#e4f2f7;--infoln:#bfe0ea;--shadow:0 8px 24px rgba(31,41,51,.12)}
-*{box-sizing:border-box}html,body{margin:0}body{font:14px/1.45 system-ui,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--text);-webkit-font-smoothing:antialiased}
+/* ═══ ETA Bulk — admin console ═══════════════════════════════════════════════
+   Design language: omarsoliman.dev "clay & paper" — warm editorial-technical.
+   Paper grounds, ink browns, a clay accent for "you can act on this", and gold
+   reserved for ONE job: in-flight. Structure comes from hairline warm borders
+   and uppercase mono micro-labels, not from boxes and fills.
+   Self-contained by requirement: served as a wrangler Text module under a strict
+   CSP. No CDN, no remote fonts, no remote images. System stacks only — the same
+   compromise the extension drawer makes, so the two read as one product.
+   ─────────────────────────────────────────────────────────────────────────── */
+
+/* ── Tokens. Both themes are explicit; neither default is implicit. ────────── */
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#1a1712; --panel:#221e17; --panel2:#2b261d; --elev:#353023; --well:#131008;
+  --line:#3b3527; --line2:#564e3a;
+  --text:#f0eadb; --text2:#d6cebc; --muted:#a39a84; --faint:#7a715c;
+  --accent:#e08358; --accent2:#ec9a74; --accent-soft:#3a2a20; --on-accent:#1a1712;
+  --run:#d9b05e; --runbg:#3c321a; --runln:#5a4a24;
+  --ok:#7cbe96; --okbg:#24342a; --okln:#2c4a38;
+  --bad:#e08a7b; --badbg:#3d241f; --badln:#4e312b;
+  --warn:#d9b05e; --warnbg:#3c321a; --warnln:#5a4a24;
+  --info:#7dd6df; --infobg:#1e3539; --infoln:#2e5a60;
+  --moss:#8fae97; --mossbg:#26362f; --mossln:#3c5a4b;
+  --sweep:rgba(255,255,255,.26);
+  --shadow-card:0 1px 2px rgba(0,0,0,.25),0 4px 14px rgba(0,0,0,.30);
+  --shadow-pop:0 2px 4px rgba(0,0,0,.30),0 12px 32px rgba(0,0,0,.45);
+  --shadow-inset:inset 0 1px 2px rgba(0,0,0,.35);
+  --scrim:rgba(10,8,6,.58);
+  --grain:rgba(240,234,219,.022);
+}
+:root[data-theme="light"]{
+  color-scheme:light;
+  --bg:#faf6ee; --panel:#fffdf7; --panel2:#f2ebdd; --elev:#e7dec9; --well:#f2ebdd;
+  --line:#e3dac6; --line2:#c9bea3;
+  --text:#231f18; --text2:#3a342a; --muted:#6b6453; --faint:#968d78;
+  --accent:#a04a2a; --accent2:#7c381f; --accent-soft:#f4e2d6; --on-accent:#fffdf7;
+  --run:#95680f; --runbg:#f3e6c2; --runln:#e6d3a0;
+  --ok:#2e7b4f; --okbg:#ddebdb; --okln:#c4dcc9;
+  --bad:#b23f2e; --badbg:#f4ddd4; --badln:#e8c9bf;
+  --warn:#95680f; --warnbg:#f3e6c2; --warnln:#e6d3a0;
+  --info:#2e7a84; --infobg:#ddeef0; --infoln:#bfe0e4;
+  --moss:#2f4f41; --mossbg:#e2e9e0; --mossln:#c6d6c8;
+  --sweep:rgba(255,255,255,.55);
+  --shadow-card:0 1px 2px rgba(58,44,22,.05),0 4px 14px rgba(58,44,22,.06);
+  --shadow-pop:0 2px 4px rgba(58,44,22,.07),0 12px 32px rgba(58,44,22,.12);
+  --shadow-inset:inset 0 1px 2px rgba(58,44,22,.07);
+  --scrim:rgba(35,31,24,.40);
+  --grain:rgba(35,31,24,.020);
+}
+:root{
+  --font-ui:'Avenir Next','Segoe UI Variable Text','Segoe UI',system-ui,-apple-system,Helvetica,sans-serif;
+  --font-mono:ui-monospace,'SF Mono','Cascadia Mono','IBM Plex Mono',Menlo,Consolas,monospace;
+  --s1:4px; --s2:8px; --s3:12px; --s4:16px; --s5:20px; --s6:24px; --s7:32px; --s8:40px;
+  --r-sm:6px; --r:10px; --r-lg:16px; --r-pill:999px;
+  --d1:.12s; --d2:.2s; --d3:.35s; --ease:cubic-bezier(.22,1,.36,1);
+  --rail:224px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;height:100%}
+body{
+  font:15px/1.5 var(--font-ui); background:var(--bg); color:var(--text);
+  -webkit-font-smoothing:antialiased; text-rendering:optimizeLegibility;
+  /* Paper texture: a 4px warm hairline weave. Cheap, no image, invisible until
+     you look for it — which is the point. */
+  background-image:linear-gradient(var(--grain) 1px,transparent 1px),linear-gradient(90deg,var(--grain) 1px,transparent 1px);
+  background-size:26px 26px,26px 26px;
+}
 [hidden]{display:none!important}
-a{color:var(--gold)}
-.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
+a{color:var(--accent);text-decoration-color:color-mix(in srgb,var(--accent) 45%,transparent);text-underline-offset:3px}
+a:hover{color:var(--accent2)}
+.mono{font-family:var(--font-mono);font-variant-numeric:tabular-nums}
 .muted{color:var(--muted)}
-input,button,select,textarea{font:inherit;color:inherit}
-input,select,textarea{padding:9px 11px;border-radius:9px;background:var(--panel2);color:var(--text);border:1px solid var(--line);width:100%}
-textarea{resize:vertical;min-height:60px}
-input:focus,select:focus,textarea:focus{outline:none;border-color:var(--gold);box-shadow:0 0 0 3px color-mix(in srgb,var(--gold) 25%,transparent)}
-.btn{display:inline-flex;align-items:center;gap:6px;padding:8px 13px;border-radius:9px;border:1px solid var(--line);background:var(--panel2);color:var(--text);cursor:pointer;text-decoration:none;white-space:nowrap;transition:border-color .12s,background .12s,transform .05s;width:auto}
-.btn:hover{border-color:var(--line2);background:var(--elev)}.btn:active{transform:translateY(1px)}
-.btn:focus-visible{outline:none;border-color:var(--gold);box-shadow:0 0 0 3px color-mix(in srgb,var(--gold) 25%,transparent)}
-.btn.primary{background:linear-gradient(180deg,var(--gold2),var(--gold));color:#1a1206;border-color:transparent;font-weight:700}
-.btn.danger{color:var(--bad);border-color:var(--badln)}.btn.danger:hover{background:var(--badbg)}
-.btn.good{color:var(--good);border-color:var(--goodln)}.btn.good:hover{background:var(--goodbg)}
-.btn.tiny{padding:4px 9px;font-size:12px;border-radius:7px}
-.btn.ghost{background:transparent}
-.btn[disabled]{opacity:.5;cursor:not-allowed}
-header{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:12px;padding:12px 20px;background:color-mix(in srgb,var(--panel) 88%,transparent);backdrop-filter:saturate(1.4) blur(8px);border-bottom:1px solid var(--line)}
-header .seal{width:34px;height:34px;border-radius:9px;background:linear-gradient(160deg,var(--gold2),var(--gold));display:grid;place-items:center;color:#1a1206;font-weight:800;box-shadow:var(--shadow)}
-header h1{font-size:15px;margin:0;font-weight:700;letter-spacing:.2px}header .sub{font-size:11.5px;color:var(--muted);margin-top:1px}
+.faint{color:var(--faint)}
+.num{font-family:var(--font-mono);font-variant-numeric:tabular-nums;direction:ltr;unicode-bidi:isolate}
 .sp{flex:1}
-.dot{width:9px;height:9px;border-radius:50%;background:var(--muted);box-shadow:0 0 0 3px color-mix(in srgb,var(--muted) 20%,transparent)}
-.dot.on{background:var(--good);box-shadow:0 0 0 3px color-mix(in srgb,var(--good) 25%,transparent)}
-.dot.off{background:var(--bad);box-shadow:0 0 0 3px color-mix(in srgb,var(--bad) 25%,transparent)}
-.iconbtn{display:grid;place-items:center;width:36px;height:36px;padding:0;border-radius:9px;border:1px solid var(--line);background:var(--panel2);cursor:pointer;font-size:16px}
-.iconbtn:hover{border-color:var(--line2);background:var(--elev)}
-.iconbtn.on{border-color:var(--gold);color:var(--gold)}
-main{max-width:1240px;margin:0 auto;padding:18px 20px 80px}
-#login{max-width:380px;margin:9vh auto;padding:28px;background:var(--panel);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow)}
-#login .lg{width:46px;height:46px;border-radius:12px;background:linear-gradient(160deg,var(--gold2),var(--gold));display:grid;place-items:center;color:#1a1206;font-weight:800;font-size:20px;margin:0 auto 14px}
-#login h2{margin:0 0 4px;text-align:center;font-size:17px}#login p{margin:0 0 18px;text-align:center;color:var(--muted);font-size:12.5px}
-.pw{position:relative}.pw .iconbtn{position:absolute;right:5px;top:5px;width:30px;height:30px;border:none;background:transparent}
-#err{color:var(--bad);font-size:12.5px;min-height:18px;margin-top:10px;text-align:center}
-.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(122px,1fr));gap:10px;margin-bottom:18px}
-.stat{padding:13px 15px;background:var(--panel);border:1px solid var(--line);border-radius:13px;cursor:pointer;transition:border-color .12s,transform .06s}
-.stat:hover{border-color:var(--line2);transform:translateY(-1px)}.stat.on{border-color:var(--gold);box-shadow:0 0 0 3px color-mix(in srgb,var(--gold) 18%,transparent)}
-.stat .n{font-size:24px;font-weight:800;letter-spacing:-.5px}.stat .l{font-size:11.5px;color:var(--muted);margin-top:2px}
-.stat.good .n{color:var(--good)}.stat.bad .n{color:var(--bad)}.stat.warn .n{color:var(--warn)}.stat.super .n{color:var(--super)}
-nav.tabs{display:flex;gap:4px;margin-bottom:16px;border-bottom:1px solid var(--line);flex-wrap:wrap}
-nav.tabs button{position:relative;background:transparent;border:none;color:var(--muted);padding:10px 14px;border-radius:9px 9px 0 0;cursor:pointer;font-weight:600;font-size:13px}
-nav.tabs button:hover{color:var(--text)}
-nav.tabs button.on{color:var(--gold)}nav.tabs button.on::after{content:"";position:absolute;left:10px;right:10px;bottom:-1px;height:2px;background:var(--gold);border-radius:2px}
-.badge{display:inline-block;min-width:17px;text-align:center;background:var(--bad);color:#fff;border-radius:999px;padding:0 5px;font:700 10.5px ui-monospace;margin-left:6px}
-:root[data-theme="light"] .badge{color:#fff}
-.toolbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
-.toolbar .search{flex:1;min-width:200px}
+.nowrap{white-space:nowrap}
+::selection{background:var(--accent-soft);color:var(--text)}
+
+/* ── The signature: uppercase mono micro-label with a hairline rule. ───────── */
+.eyebrow{display:flex;align-items:center;gap:var(--s3);font:500 10px/1 var(--font-mono);
+  text-transform:uppercase;letter-spacing:.09em;color:var(--muted);margin:0 0 var(--s3)}
+.eyebrow::after{content:"";flex:1;height:1px;background:var(--line)}
+.eyebrow b{font-weight:500;color:var(--accent)}
+.mlabel{font:500 10px/1 var(--font-mono);text-transform:uppercase;letter-spacing:.09em;color:var(--muted)}
+
+/* ── Controls ─────────────────────────────────────────────────────────────── */
+input,button,select,textarea{font:inherit;color:inherit;font-family:var(--font-ui)}
+input,select,textarea{width:100%;padding:9px 12px;border-radius:var(--r);background:var(--panel2);
+  color:var(--text);border:1px solid var(--line);font-size:13.5px;transition:border-color var(--d1),box-shadow var(--d1)}
+input::placeholder,textarea::placeholder{color:var(--faint)}
+input:hover,select:hover,textarea:hover{border-color:var(--line2)}
+textarea{resize:vertical;min-height:76px;line-height:1.5}
+input:focus-visible,select:focus-visible,textarea:focus-visible{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft)}
+select{cursor:pointer}
+.btn{display:inline-flex;align-items:center;justify-content:center;gap:6px;padding:8px 14px;border-radius:var(--r);
+  border:1px solid var(--line2);background:transparent;color:var(--text);cursor:pointer;text-decoration:none;
+  white-space:nowrap;width:auto;font-size:13px;font-weight:600;letter-spacing:-.01em;
+  transition:border-color var(--d2),background var(--d2),color var(--d2)}
+.btn:hover{background:var(--panel2);border-color:var(--line2)}
+.btn:active{transform:translateY(1px)}
+.btn:focus-visible{outline:none;box-shadow:0 0 0 2px var(--panel),0 0 0 4px var(--accent)}
+.btn.primary{background:var(--accent);color:var(--on-accent);border-color:transparent;font-weight:700}
+.btn.primary:hover{background:var(--accent2);color:var(--on-accent)}
+.btn.danger{color:var(--bad);border-color:var(--badln)}
+.btn.danger:hover{background:var(--badbg)}
+.btn.danger.solid{background:var(--bad);color:var(--on-accent);border-color:transparent;font-weight:700}
+.btn.good{color:var(--ok);border-color:var(--okln)}
+.btn.good:hover{background:var(--okbg)}
+.btn.ghost{border-color:transparent}
+.btn.ghost:hover{border-color:var(--line)}
+.btn.tiny{padding:4px 10px;font-size:12px;border-radius:var(--r-sm);font-weight:600}
+.btn[disabled]{opacity:.45;cursor:not-allowed}
+.btn svg{width:14px;height:14px;flex:none}
+.iconbtn{display:grid;place-items:center;width:32px;height:32px;padding:0;border-radius:var(--r);
+  border:1px solid transparent;background:transparent;color:var(--muted);cursor:pointer;
+  transition:color var(--d2),background var(--d2),border-color var(--d2)}
+.iconbtn:hover{color:var(--text);background:var(--panel2);border-color:var(--line)}
+.iconbtn:focus-visible{outline:none;box-shadow:0 0 0 2px var(--panel),0 0 0 4px var(--accent)}
+.iconbtn.on{color:var(--accent);border-color:var(--accent);background:var(--accent-soft)}
+.iconbtn svg{width:16px;height:16px}
+.chip{padding:5px 12px;border-radius:var(--r-pill);border:1px solid var(--line);background:var(--panel2);
+  color:var(--muted);cursor:pointer;font:500 11px var(--font-mono);text-transform:uppercase;letter-spacing:.07em;
+  transition:color var(--d2),background var(--d2),border-color var(--d2)}
+.chip:hover{color:var(--text);border-color:var(--line2)}
+.chip.on{background:var(--accent-soft);border-color:color-mix(in srgb,var(--accent) 42%,transparent);color:var(--accent)}
 .chips{display:flex;gap:6px;flex-wrap:wrap}
-.chip{padding:6px 11px;border-radius:999px;border:1px solid var(--line);background:var(--panel2);color:var(--muted);cursor:pointer;font-size:12.5px;font-weight:600}
-.chip:hover{border-color:var(--line2);color:var(--text)}.chip.on{background:color-mix(in srgb,var(--gold) 16%,transparent);border-color:var(--gold);color:var(--gold)}
-.card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px 18px;margin-bottom:14px}
-.card h3{margin:0 0 3px;font-size:14px}.card .hint{color:var(--muted);font-size:12px;margin:0 0 14px}
-.grid2{display:grid;grid-template-columns:1fr 1fr;gap:14px}@media(max-width:680px){.grid2{grid-template-columns:1fr}}
-.field{display:flex;flex-direction:column;gap:6px;margin-bottom:12px}.field label{font-size:12px;color:var(--muted);font-weight:600}
-.inline{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-.switch{display:inline-flex;align-items:center;gap:9px;cursor:pointer;user-select:none}
-.switch input{position:absolute;opacity:0;width:0;height:0}
-.track{width:40px;height:23px;border-radius:999px;background:var(--line);position:relative;transition:background .15s;flex:none}
-.track::after{content:"";position:absolute;top:2px;left:2px;width:19px;height:19px;border-radius:50%;background:#fff;transition:transform .15s;box-shadow:0 1px 3px rgba(0,0,0,.3)}
-.switch input:checked+.track{background:var(--bad)}.switch input:checked+.track::after{transform:translateX(17px)}
-.switch.g input:checked+.track{background:var(--good)}
-.tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:14px;background:var(--panel)}
-table{width:100%;border-collapse:collapse;font-size:12.5px;min-width:760px}
-th,td{text-align:left;padding:10px 12px;border-bottom:1px solid var(--line);vertical-align:top}
-:root[data-dense="1"] th,:root[data-dense="1"] td{padding:5px 10px}
-tbody tr:last-child td{border-bottom:none}
-th{position:sticky;top:0;background:var(--panel2);color:var(--muted);font:600 11px ui-monospace;text-transform:uppercase;letter-spacing:.4px;white-space:nowrap}
-th.sortable{cursor:pointer}th.sortable:hover{color:var(--text)}th .ar{opacity:.6;font-size:10px}
-tbody tr.usr{cursor:pointer}
-tbody tr:hover td{background:var(--panel2)}
-.uname{font-weight:700}.usub{color:var(--muted);font-size:11.5px}
-.pill{display:inline-block;font:600 10.5px ui-monospace;padding:2px 8px;border-radius:999px;background:var(--goodbg);color:var(--good);border:1px solid var(--goodln);letter-spacing:.3px}
+.chk{width:15px;height:15px;accent-color:var(--accent);cursor:pointer}
+kbd{font:500 11px var(--font-mono);background:var(--panel2);border:1px solid var(--line);
+  border-bottom-width:2px;border-radius:var(--r-sm);padding:1px 6px;color:var(--muted)}
+
+/* ── Sign-in ──────────────────────────────────────────────────────────────── */
+#login{max-width:392px;margin:12vh auto;padding:var(--s7) var(--s6) var(--s6);background:var(--panel);
+  border:1px solid var(--line);border-radius:var(--r-lg);box-shadow:var(--shadow-pop);position:relative}
+#login::before{content:"";position:absolute;inset:-90px -60px auto;height:220px;z-index:-1;
+  background:radial-gradient(60% 100% at 50% 0,color-mix(in srgb,var(--accent) 22%,transparent),transparent 70%);
+  filter:blur(28px);pointer-events:none}
+#login .seal{width:46px;height:46px;border-radius:var(--r);background:var(--accent);color:var(--on-accent);
+  display:grid;place-items:center;margin:0 auto var(--s4);box-shadow:0 6px 18px -8px color-mix(in srgb,var(--accent) 70%,transparent)}
+#login .seal svg{width:24px;height:24px}
+#login h2{margin:0 0 var(--s1);text-align:center;font-size:20px;font-weight:700;letter-spacing:-.022em}
+#login .lead{margin:0 0 var(--s6);text-align:center;color:var(--muted);font-size:13px;line-height:1.6}
+#login .eyebrow{justify-content:center;margin-bottom:var(--s5)}
+#login .eyebrow::after,#login .eyebrow::before{content:"";flex:1;height:1px;background:var(--line)}
+.pw{position:relative}
+.pw input{padding-right:42px;font-family:var(--font-mono);letter-spacing:.06em}
+.pw .iconbtn{position:absolute;right:5px;top:4px}
+#err{color:var(--bad);font-size:12.5px;min-height:20px;margin-top:var(--s3);text-align:center}
+#login .foot{margin-top:var(--s5);padding-top:var(--s4);border-top:1px solid var(--line);
+  text-align:center;font:500 10px var(--font-mono);text-transform:uppercase;letter-spacing:.09em;color:var(--faint)}
+
+/* ── Shell: rail + main ───────────────────────────────────────────────────── */
+.shell{display:grid;grid-template-columns:var(--rail) minmax(0,1fr);min-height:100vh}
+.rail{position:sticky;top:0;align-self:start;height:100vh;display:flex;flex-direction:column;
+  gap:var(--s5);padding:var(--s5) var(--s3) var(--s4);border-right:1px solid var(--line);
+  background:linear-gradient(180deg,var(--panel),var(--bg) 42%);overflow:auto}
+.brand{display:flex;align-items:center;gap:10px;padding:0 var(--s2)}
+.brand .seal{width:32px;height:32px;border-radius:9px;background:var(--accent);color:var(--on-accent);
+  display:grid;place-items:center;flex:none;box-shadow:0 6px 16px -8px color-mix(in srgb,var(--accent) 70%,transparent)}
+.brand .seal svg{width:17px;height:17px}
+.brand .wm{font-size:14px;font-weight:700;letter-spacing:-.022em;line-height:1.15}
+.brand .sub{font:500 9.5px var(--font-mono);text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-top:2px}
+.navgroup{display:flex;flex-direction:column;gap:2px}
+.navgroup > .mlabel{padding:0 var(--s2) var(--s2)}
+.nav{display:flex;align-items:center;gap:10px;padding:8px var(--s2);border-radius:var(--r);
+  background:transparent;border:none;color:var(--muted);cursor:pointer;text-align:left;width:100%;
+  font-size:13.5px;font-weight:600;letter-spacing:-.01em;position:relative;
+  transition:color var(--d2),background var(--d2)}
+.nav svg{width:16px;height:16px;flex:none;opacity:.85}
+.nav:hover{color:var(--text);background:var(--panel2)}
+.nav.on{color:var(--accent);background:var(--accent-soft)}
+.nav.on::before{content:"";position:absolute;left:-13px;top:9px;bottom:9px;width:2px;border-radius:0 2px 2px 0;background:var(--accent)}
+.nav:focus-visible{outline:none;box-shadow:0 0 0 2px var(--bg),0 0 0 4px var(--accent)}
+.nav .count{margin-left:auto;font:600 10.5px var(--font-mono);padding:1px 6px;border-radius:var(--r-pill);
+  background:var(--bad);color:#fff;letter-spacing:.02em}
+.nav .count.q{background:var(--panel2);color:var(--muted);border:1px solid var(--line)}
+.railfoot{margin-top:auto;display:flex;flex-direction:column;gap:var(--s3);padding-top:var(--s4);border-top:1px solid var(--line)}
+.railfoot .row{display:flex;align-items:center;gap:2px}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--faint);flex:none;
+  box-shadow:0 0 0 3px color-mix(in srgb,var(--faint) 22%,transparent)}
+.dot.on{background:var(--ok);box-shadow:0 0 0 3px color-mix(in srgb,var(--ok) 25%,transparent)}
+.dot.off{background:var(--bad);box-shadow:0 0 0 3px color-mix(in srgb,var(--bad) 25%,transparent)}
+.dot.run{background:var(--run);box-shadow:0 0 0 3px color-mix(in srgb,var(--run) 25%,transparent);animation:pulse 1.7s var(--ease) infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.42}}
+
+.main{display:flex;flex-direction:column;min-width:0}
+.topbar{position:sticky;top:0;z-index:20;display:flex;align-items:center;gap:var(--s4);
+  padding:var(--s4) var(--s6);border-bottom:1px solid var(--line);
+  background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:saturate(1.3) blur(10px)}
+.topbar h1{margin:0;font-size:19px;font-weight:700;letter-spacing:-.022em;line-height:1.15}
+.topbar .sub{font-size:12.5px;color:var(--muted);margin-top:2px}
+.stamp{font:500 10px var(--font-mono);text-transform:uppercase;letter-spacing:.09em;color:var(--faint);white-space:nowrap}
+.views{padding:var(--s6) var(--s6) var(--s8);flex:1;min-width:0}
+.view{max-width:1360px;margin:0 auto;animation:rise var(--d3) var(--ease) both}
+@keyframes rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+
+/* ── Panels, tiles, callouts ──────────────────────────────────────────────── */
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--r-lg);
+  padding:var(--s5);box-shadow:var(--shadow-card);margin-bottom:var(--s4)}
+.panel > h3{margin:0 0 3px;font-size:15px;font-weight:700;letter-spacing:-.018em}
+.panel > .hint{color:var(--muted);font-size:12.5px;margin:0 0 var(--s4);line-height:1.55;max-width:76ch}
+.panel.flush{padding:0;overflow:hidden}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:var(--s4)}
+.grid3{display:grid;grid-template-columns:repeat(3,1fr);gap:var(--s4)}
+.split{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(0,1fr);gap:var(--s4);align-items:start}
+.field{display:flex;flex-direction:column;gap:6px;margin-bottom:var(--s3)}
+.field > label{font:500 10px var(--font-mono);text-transform:uppercase;letter-spacing:.09em;color:var(--muted)}
+.inline{display:flex;gap:var(--s2);align-items:center;flex-wrap:wrap}
+
+/* Stat strip: one bordered slab with internal hairlines — not eight cards. */
+.strip{display:grid;grid-template-columns:repeat(auto-fit,minmax(146px,1fr));gap:1px;background:var(--line);
+  border:1px solid var(--line);border-radius:var(--r-lg);overflow:hidden;margin-bottom:var(--s4);box-shadow:var(--shadow-card)}
+.tile{padding:var(--s4) var(--s5);border:0;color:inherit;font:inherit;
+  background:var(--panel);text-align:left;cursor:default;transition:background var(--d2);position:relative}
+.tile.act{cursor:pointer}
+.tile.act:hover{background:var(--panel2)}
+.tile.act:focus-visible{outline:none;box-shadow:inset 0 0 0 2px var(--accent)}
+.tile .v{display:block;width:100%;font:600 27px/1 var(--font-mono);font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+.tile .k{display:block;width:100%;margin-top:7px;font:500 10px/1.3 var(--font-mono);text-transform:uppercase;letter-spacing:.09em;color:var(--muted)}
+.tile.ok .v{color:var(--ok)} .tile.bad .v{color:var(--bad)} .tile.warn .v{color:var(--warn)}
+.tile.run .v{color:var(--run)} .tile.info .v{color:var(--info)} .tile.moss .v{color:var(--moss)}
+.tile.zero .v{color:var(--faint)}
+
+.callout{border:1px solid var(--line);border-radius:var(--r);padding:11px var(--s4);background:var(--panel2);
+  display:flex;gap:var(--s3);align-items:flex-start;font-size:13px;line-height:1.5}
+.callout + .callout{margin-top:var(--s2)}
+.callout .cl{font:500 10px/1.7 var(--font-mono);text-transform:uppercase;letter-spacing:.09em;flex:none;min-width:62px}
+.callout .cb{flex:1;min-width:0}
+.callout.bad{background:var(--badbg);border-color:var(--badln)} .callout.bad .cl{color:var(--bad)}
+.callout.warn{background:var(--warnbg);border-color:var(--warnln)} .callout.warn .cl{color:var(--warn)}
+.callout.info{background:var(--infobg);border-color:var(--infoln)} .callout.info .cl{color:var(--info)}
+.callout.ok{background:var(--okbg);border-color:var(--okln)} .callout.ok .cl{color:var(--ok)}
+.callout .ref{font:500 11px var(--font-mono);color:var(--muted);word-break:break-all}
+
+.pill{display:inline-block;font:600 10.5px var(--font-mono);padding:2px 8px;border-radius:var(--r-pill);
+  background:var(--okbg);color:var(--ok);border:1px solid var(--okln);letter-spacing:.04em;white-space:nowrap}
 .pill.bad{background:var(--badbg);color:var(--bad);border-color:var(--badln)}
 .pill.warn{background:var(--warnbg);color:var(--warn);border-color:var(--warnln)}
-.pill.super{background:var(--superbg);color:var(--super);border-color:var(--superln)}
 .pill.info{background:var(--infobg);color:var(--info);border-color:var(--infoln)}
+.pill.run{background:var(--runbg);color:var(--run);border-color:var(--runln)}
+.pill.moss{background:var(--mossbg);color:var(--moss);border-color:var(--mossln)}
+.pill.accent{background:var(--accent-soft);color:var(--accent);border-color:color-mix(in srgb,var(--accent) 42%,transparent)}
 .pill.muted{background:var(--panel2);color:var(--muted);border-color:var(--line)}
-.tag{display:inline-block;font:600 10.5px ui-monospace;padding:2px 8px;border-radius:6px;background:var(--superbg);color:var(--super);border:1px solid var(--superln);margin:0 3px 3px 0}
-.rins{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:5px}
-.rins .r{display:inline-flex;align-items:center;gap:5px;background:var(--panel2);border:1px solid var(--line);border-radius:7px;padding:2px 7px;font:600 11px ui-monospace}
-.rins .r a{color:var(--bad);text-decoration:none;font-weight:700;line-height:1}
+.tag{display:inline-block;font:500 10.5px var(--font-mono);padding:2px 8px;border-radius:var(--r-sm);
+  background:var(--mossbg);color:var(--moss);border:1px solid var(--mossln);margin:0 3px 3px 0;letter-spacing:.04em}
+
+/* ── Progress ─────────────────────────────────────────────────────────────── */
+.bar{height:6px;border-radius:var(--r-pill);background:var(--well);box-shadow:var(--shadow-inset);overflow:hidden}
+.bar > i{display:block;height:100%;border-radius:var(--r-pill);background:var(--run);
+  transition:width var(--d3) var(--ease);position:relative;overflow:hidden;min-width:2px}
+.bar.live > i::after{content:"";position:absolute;inset:0;
+  background:linear-gradient(90deg,transparent,var(--sweep),transparent);animation:sweep 1.7s var(--ease) infinite}
+@keyframes sweep{from{transform:translateX(-100%)}to{transform:translateX(100%)}}
+.bar.meter > i{background:var(--accent)}
+.bar.meter.full > i{background:var(--warn)}
+.bar.meter.over > i{background:var(--bad)}
+.bar.sm{height:4px}
+
+.runrow{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:var(--s2) var(--s4);align-items:center;
+  padding:var(--s3) 0;border-top:1px solid var(--line)}
+.runrow:first-of-type{border-top:none}
+.runrow .who{font-size:13.5px;font-weight:600;letter-spacing:-.01em;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.runrow .meta{margin-top:3px;font:500 10.5px var(--font-mono);color:var(--muted);letter-spacing:.04em}
+.runrow .cnt{font:600 15px var(--font-mono);font-variant-numeric:tabular-nums;color:var(--run);white-space:nowrap}
+.runrow .cnt small{color:var(--muted);font-size:11px;font-weight:500}
+.runrow .bar{grid-column:1/-1}
+
+/* ── Timeline ─────────────────────────────────────────────────────────────── */
+.tl{position:relative;padding-inline-start:var(--s5);margin:0}
+.tl::before{content:"";position:absolute;inset-inline-start:4px;top:6px;bottom:6px;width:1px;background:var(--line)}
+.tl li{list-style:none;position:relative;padding:7px 0;display:flex;gap:var(--s3);align-items:baseline;font-size:13px}
+.tl li::before{content:"";position:absolute;inset-inline-start:calc(-1 * var(--s5) + 1px);top:13px;
+  width:7px;height:7px;border-radius:50%;background:var(--line2);box-shadow:0 0 0 3px var(--panel)}
+.tl li.ok::before{background:var(--ok)} .tl li.bad::before{background:var(--bad)}
+.tl li.warn::before{background:var(--warn)} .tl li.run::before{background:var(--run)}
+.tl li.accent::before{background:var(--accent)}
+.tl .tt{flex:none;font:500 10px var(--font-mono);text-transform:uppercase;letter-spacing:.09em;color:var(--faint);min-width:66px}
+.tl .tx{flex:1;min-width:0;line-height:1.5;word-break:break-word}
+.tl .tk{flex:none}
+
+/* ── Tables ───────────────────────────────────────────────────────────────── */
+.tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:var(--r-lg);background:var(--panel);
+  box-shadow:var(--shadow-card);margin-bottom:var(--s3)}
+table{width:100%;border-collapse:collapse;font-size:13px}
+table.wide{min-width:900px}
+th,td{text-align:left;padding:11px var(--s4);border-bottom:1px solid var(--line);vertical-align:top}
+:root[data-dense="1"] th,:root[data-dense="1"] td{padding:5px var(--s3)}
+tbody tr:last-child td{border-bottom:none}
+th{position:sticky;top:0;z-index:1;background:var(--panel2);color:var(--muted);
+  font:500 10px var(--font-mono);text-transform:uppercase;letter-spacing:.09em;white-space:nowrap}
+th.sortable{cursor:pointer;user-select:none}
+th.sortable:hover{color:var(--text)}
+th .ar{color:var(--accent)}
+tbody tr.click{cursor:pointer}
+tbody tr:hover > td{background:var(--panel2)}
+.uname{font-weight:650;letter-spacing:-.01em}
+.usub{color:var(--muted);font-size:11.5px;line-height:1.45}
 .act{display:flex;gap:5px;flex-wrap:wrap}
-.empty{padding:44px;text-align:center;color:var(--muted)}
-.empty .big{font-size:34px;margin-bottom:8px;opacity:.6}
-.msg{white-space:pre-wrap;max-width:420px;word-break:break-word}
-.result{margin-top:12px;padding:12px 14px;border-radius:11px;background:var(--panel2);border:1px solid var(--line);font-size:12.5px;display:none}
+.empty{padding:var(--s8) var(--s5);text-align:center;color:var(--muted);font-size:13.5px;
+  border:1px dashed var(--line2);border-radius:var(--r-lg);background:var(--panel)}
+.empty .big{font-size:15px;font-weight:700;color:var(--text);margin-bottom:6px;letter-spacing:-.018em}
+.empty .mlabel{display:block;margin-bottom:var(--s3)}
+.pager{display:flex;gap:var(--s2);align-items:center;justify-content:flex-end;margin-bottom:var(--s4);
+  font:500 11px var(--font-mono);color:var(--muted);letter-spacing:.04em}
+.toolbar{display:flex;gap:var(--s3);align-items:center;flex-wrap:wrap;margin-bottom:var(--s4)}
+.toolbar .search{flex:1;min-width:220px;max-width:420px}
+.bulkbar{position:sticky;bottom:var(--s4);z-index:15;display:flex;gap:var(--s2);align-items:center;flex-wrap:wrap;
+  margin-top:var(--s4);padding:11px var(--s4);background:var(--panel);border:1px solid var(--accent);
+  border-radius:var(--r);box-shadow:var(--shadow-pop)}
+.bulkbar b{color:var(--accent);font:600 12px var(--font-mono);letter-spacing:.04em}
+.copy{cursor:pointer;color:var(--faint);border:none;background:transparent;padding:0 4px;
+  font:500 10px var(--font-mono);text-transform:uppercase;letter-spacing:.09em}
+.copy:hover{color:var(--accent)}
+.kv{display:grid;grid-template-columns:132px minmax(0,1fr);gap:7px var(--s3);font-size:13px}
+.kv .k{font:500 10px/1.7 var(--font-mono);text-transform:uppercase;letter-spacing:.09em;color:var(--muted)}
+.kv .v{word-break:break-word;color:var(--text2)}
+.msg{white-space:pre-wrap;max-width:460px;word-break:break-word}
+.result{margin-top:var(--s3);padding:var(--s3) var(--s4);border-radius:var(--r);background:var(--panel2);
+  border:1px solid var(--line);font-size:12.5px;display:none;line-height:1.6}
 .result.show{display:block}
-.voidlist{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
-.pager{display:flex;gap:8px;align-items:center;justify-content:flex-end;margin-top:12px;font-size:12.5px;color:var(--muted)}
-.chk{width:16px;height:16px;accent-color:var(--gold);cursor:pointer}
-.bulkbar{position:sticky;bottom:0;z-index:15;display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-top:12px;padding:11px 14px;background:var(--elev);border:1px solid var(--gold);border-radius:12px;box-shadow:var(--shadow)}
-.bulkbar b{color:var(--gold)}
-.copy{cursor:pointer;color:var(--muted);border:none;background:transparent;padding:0 4px;font-size:12px}
-.copy:hover{color:var(--gold)}
-#toasts{position:fixed;right:16px;bottom:16px;z-index:60;display:flex;flex-direction:column;gap:8px;max-width:340px;pointer-events:none}
-.toast{pointer-events:auto;padding:11px 14px;border-radius:11px;background:var(--elev);border:1px solid var(--line);box-shadow:var(--shadow);font-size:13px;opacity:0;transform:translateY(8px);transition:opacity .2s,transform .2s}
-.toast.in{opacity:1;transform:none}.toast.ok{border-color:var(--goodln)}.toast.ok::before{content:"✓  ";color:var(--good);font-weight:800}
-.toast.bad{border-color:var(--badln)}.toast.bad::before{content:"!  ";color:var(--bad);font-weight:800}
-#modal-root{position:fixed;inset:0;z-index:90;display:grid;place-items:center;padding:18px}
-#modal-root[hidden]{display:none}
-.modal-overlay{position:absolute;inset:0;background:rgba(0,0,0,.5);backdrop-filter:blur(2px)}
-.modal-card{position:relative;width:100%;max-width:440px;background:var(--panel);border:1px solid var(--line);border-radius:16px;padding:22px;box-shadow:var(--shadow);animation:pop .13s ease-out}
-@keyframes pop{from{transform:scale(.97);opacity:.6}to{transform:none;opacity:1}}
-.modal-title{font-size:16px;font-weight:700;margin-bottom:6px}.modal-msg{color:var(--muted);font-size:13px;margin-bottom:16px}
-.modal-label{display:block;font-size:12px;color:var(--muted);font-weight:600;margin-bottom:16px}.modal-label input,.modal-label select{margin-top:6px}
-.modal-foot{display:flex;justify-content:flex-end;gap:9px}
-#udrawer{position:fixed;inset:0;z-index:80}#udrawer[hidden]{display:none}
-#udrawer .ov{position:absolute;inset:0;background:rgba(0,0,0,.5);backdrop-filter:blur(2px)}
-#udrawer .panel{position:absolute;top:0;right:0;bottom:0;width:460px;max-width:100vw;background:var(--panel);border-left:1px solid var(--line);box-shadow:var(--shadow);overflow:auto;padding:20px 22px;animation:slidein .18s ease-out}
-@keyframes slidein{from{transform:translateX(30px);opacity:.4}to{transform:none;opacity:1}}
-#udrawer h2{font-size:17px;margin:0 0 2px}
-#udrawer .dsub{color:var(--muted);font-size:12.5px;margin-bottom:14px}
-#udrawer .sec{border-top:1px solid var(--line);padding:13px 0;margin:0}
-#udrawer .sec h4{margin:0 0 9px;font:600 11px ui-monospace;text-transform:uppercase;letter-spacing:.5px;color:var(--muted)}
-.kv{display:grid;grid-template-columns:120px 1fr;gap:5px 10px;font-size:12.5px}
-.kv .k{color:var(--muted)}.kv .v{word-break:break-word}
-#udrawer .close{position:absolute;top:14px;right:16px}
-.insight-grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}@media(max-width:820px){.insight-grid{grid-template-columns:1fr}}
-.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:10px;margin-bottom:14px}
-.kpi{padding:13px 15px;background:var(--panel2);border:1px solid var(--line);border-radius:12px}
-.kpi .n{font-size:22px;font-weight:800}.kpi .l{font-size:11px;color:var(--muted);margin-top:2px}
+.rins{display:flex;gap:5px;flex-wrap:wrap}
+.rins .r{display:inline-flex;align-items:center;gap:6px;background:var(--panel2);border:1px solid var(--line);
+  border-radius:var(--r-sm);padding:2px 8px;font:500 11.5px var(--font-mono)}
+
+/* ── Detail header ────────────────────────────────────────────────────────── */
+.back{display:inline-flex;align-items:center;gap:6px;background:none;border:none;cursor:pointer;padding:0;
+  font:500 10px var(--font-mono);text-transform:uppercase;letter-spacing:.09em;color:var(--muted);margin-bottom:var(--s3)}
+.back:hover{color:var(--accent)}
+.dhead{display:flex;gap:var(--s4);align-items:flex-start;flex-wrap:wrap;padding-bottom:var(--s5);
+  margin-bottom:var(--s5);border-bottom:1px solid var(--line)}
+.dhead h2{margin:0;font-size:25px;font-weight:700;letter-spacing:-.024em;line-height:1.1}
+.dhead .dsub{margin-top:6px;color:var(--muted);font-size:13px}
+.dhead .pills{margin-top:10px;display:flex;gap:5px;flex-wrap:wrap}
+.dhead .acts{margin-left:auto;display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end;max-width:520px}
+
+/* ── Charts (inline SVG, no libraries) ────────────────────────────────────── */
 .chartcard svg{width:100%;height:auto;display:block}
-.chartcard text.cl{fill:var(--muted);font:600 11px ui-monospace}
-.chartcard text.cv{fill:var(--text);font:700 11px ui-monospace}
-.chartcard .axis{fill:var(--muted);font:500 9px ui-monospace}
-.legend{display:flex;gap:14px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin-top:8px}
-.legend i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:middle}
-.health{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
-.hc{padding:12px 14px;border-radius:11px;border:1px solid var(--line);background:var(--panel2)}
-.hc.ok{border-color:var(--goodln);background:var(--goodbg)}.hc.bad{border-color:var(--badln);background:var(--badbg)}.hc.warn{border-color:var(--warnln);background:var(--warnbg)}
-.hc .hl{font-size:11.5px;color:var(--muted)}.hc .hv{font-weight:700;margin-top:3px}
-kbd{font:600 11px ui-monospace;background:var(--panel2);border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;padding:1px 6px}
-@media(max-width:560px){main{padding:14px}header{padding:11px 14px}.stat .n{font-size:20px}#udrawer .panel{width:100%}}
+.chartcard text.cl{fill:var(--muted);font:500 11px var(--font-mono)}
+.chartcard text.cv{fill:var(--text);font:600 11px var(--font-mono)}
+.chartcard .axis{fill:var(--faint);font:500 9px var(--font-mono)}
+.legend{display:flex;gap:var(--s4);flex-wrap:wrap;font:500 11px var(--font-mono);color:var(--muted);margin-top:var(--s2);letter-spacing:.04em}
+.legend i{display:inline-block;width:9px;height:9px;border-radius:3px;margin-right:6px;vertical-align:middle}
+.health{display:grid;grid-template-columns:repeat(auto-fit,minmax(158px,1fr));gap:var(--s2)}
+.hc{padding:11px var(--s3);border-radius:var(--r);border:1px solid var(--line);background:var(--panel2)}
+.hc.ok{border-color:var(--okln);background:var(--okbg)}
+.hc.bad{border-color:var(--badln);background:var(--badbg)}
+.hc.warn{border-color:var(--warnln);background:var(--warnbg)}
+.hc .hl{font:500 10px var(--font-mono);text-transform:uppercase;letter-spacing:.09em;color:var(--muted)}
+.hc .hv{font-weight:650;margin-top:4px;font-size:13px}
+.switch{display:inline-flex;align-items:center;gap:10px;cursor:pointer;user-select:none}
+.switch input{position:absolute;opacity:0;width:0;height:0}
+.swtrack{width:40px;height:23px;border-radius:var(--r-pill);background:var(--line2);position:relative;
+  transition:background var(--d2);flex:none}
+.swtrack::after{content:"";position:absolute;top:2px;left:2px;width:19px;height:19px;border-radius:50%;
+  background:var(--panel);transition:transform var(--d2) var(--ease);box-shadow:0 1px 3px rgba(0,0,0,.35)}
+.switch input:checked + .swtrack{background:var(--bad)}
+.switch input:checked + .swtrack::after{transform:translateX(17px)}
+.switch input:focus-visible + .swtrack{box-shadow:0 0 0 3px var(--accent-soft)}
+
+/* ── Toasts + modal ───────────────────────────────────────────────────────── */
+#toasts{position:fixed;right:var(--s4);bottom:var(--s4);z-index:60;display:flex;flex-direction:column;
+  gap:var(--s2);max-width:360px;pointer-events:none}
+.toast{pointer-events:auto;padding:11px var(--s4);border-radius:var(--r);background:var(--panel);
+  border:1px solid var(--line);box-shadow:var(--shadow-pop);font-size:13px;opacity:0;transform:translateY(8px);
+  transition:opacity var(--d2) var(--ease),transform var(--d2) var(--ease);display:flex;gap:9px;align-items:baseline}
+.toast.in{opacity:1;transform:none}
+.toast .tl2{font:500 10px var(--font-mono);text-transform:uppercase;letter-spacing:.09em;flex:none}
+.toast.ok{border-color:var(--okln)} .toast.ok .tl2{color:var(--ok)}
+.toast.bad{border-color:var(--badln)} .toast.bad .tl2{color:var(--bad)}
+.toast .tl2.n{color:var(--muted)}
+#modal-root{position:fixed;inset:0;z-index:90;display:grid;place-items:center;padding:var(--s5)}
+#modal-root[hidden]{display:none}
+.modal-overlay{position:absolute;inset:0;background:var(--scrim);backdrop-filter:blur(3px)}
+.modal-card{position:relative;width:100%;max-width:460px;background:var(--panel);border:1px solid var(--line);
+  border-radius:var(--r-lg);padding:var(--s6);box-shadow:var(--shadow-pop);animation:pop var(--d2) var(--ease)}
+@keyframes pop{from{transform:scale(.97) translateY(6px);opacity:0}to{transform:none;opacity:1}}
+.modal-title{font-size:17px;font-weight:700;letter-spacing:-.02em;margin-bottom:6px}
+.modal-msg{color:var(--muted);font-size:13px;margin-bottom:var(--s5);line-height:1.6}
+.modal-label{display:block;font:500 10px var(--font-mono);text-transform:uppercase;letter-spacing:.09em;
+  color:var(--muted);margin-bottom:var(--s5)}
+.modal-label input,.modal-label select{margin-top:7px}
+.modal-foot{display:flex;justify-content:flex-end;gap:var(--s2)}
+.demo{background:var(--runbg);border-bottom:1px solid var(--runln);color:var(--run);
+  font:500 10px var(--font-mono);text-transform:uppercase;letter-spacing:.09em;padding:6px var(--s6);text-align:center}
+
+/* ── Responsive: laptop first, then narrow ────────────────────────────────── */
+@media(max-width:1180px){
+  :root{--rail:64px}
+  .rail{align-items:center;padding:var(--s5) var(--s2) var(--s4)}
+  .brand .txt,.navgroup > .mlabel,.nav span.lbl{display:none}
+  .nav{justify-content:center;padding:9px 0}
+  .nav.on::before{left:-9px}
+  .nav .count{position:absolute;top:2px;right:2px;margin:0;font-size:9px;padding:0 4px}
+  .railfoot .row{flex-direction:column}
+  .split,.grid3{grid-template-columns:minmax(0,1fr)}
+}
+@media(max-width:980px){ .grid2{grid-template-columns:minmax(0,1fr)} .views{padding:var(--s5) var(--s4) var(--s8)} .topbar{padding:var(--s3) var(--s4)} }
+@media(max-width:720px){
+  .shell{grid-template-columns:minmax(0,1fr)}
+  .rail{position:static;height:auto;flex-direction:row;flex-wrap:wrap;gap:var(--s3);
+    border-right:none;border-bottom:1px solid var(--line);align-items:center}
+  .navgroup{flex-direction:row}
+  .railfoot{margin:0 0 0 auto;border-top:none;padding-top:0}
+  .railfoot .row{flex-direction:row}
+  .nav.on::before{display:none}
+  .dhead .acts{margin-left:0;max-width:none}
+  .kv{grid-template-columns:minmax(0,1fr)}
+  .kv .k{margin-top:var(--s2)}
+}
+@media(prefers-reduced-motion:reduce){
+  *,::before,::after{transition-duration:.01ms!important;animation-duration:.01ms!important;animation-iteration-count:1!important}
+}
 </style></head><body>
-<header>
-  <div class="seal">A</div>
-  <div><h1>ETA Bulk Export</h1><div class="sub">Management console</div></div>
-  <div class="sp"></div>
-  <span id="autotxt" class="usb muted" style="font-size:11px" hidden></span>
-  <span id="conn" class="dot" title="Not connected" aria-label="connection status"></span>
-  <button id="auto" class="iconbtn" title="Toggle auto-refresh (every 30s)" aria-label="Toggle auto-refresh" hidden>&#8635;</button>
-  <button id="dense" class="iconbtn" title="Toggle compact rows" aria-label="Toggle density" hidden>&#8801;</button>
-  <button id="theme" class="iconbtn" title="Toggle theme" aria-label="Toggle light/dark theme">&#9680;</button>
-  <button id="logout" class="btn ghost" hidden>Sign out</button>
-</header>
 
 <section id="login">
-  <div class="lg">A</div>
-  <h2>Admin sign-in</h2>
-  <p>Enter your admin token to manage users.</p>
+  <div class="seal"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 1.6l2.35 7.05L21.4 11l-7.05 2.35L12 20.4l-2.35-7.05L2.6 11l7.05-2.35z"/></svg></div>
+  <h2>Admin console</h2>
+  <p class="lead">Operations, accounts and taxpayers for ETA Bulk Export.</p>
+  <div class="eyebrow">Bearer token</div>
   <div class="pw">
-    <input id="token" type="password" placeholder="Admin token" autocomplete="off" aria-label="Admin token">
-    <button id="peek" class="iconbtn" title="Show / hide" aria-label="Show or hide token" tabindex="-1">&#9697;</button>
+    <input id="token" type="password" placeholder="Paste admin token" autocomplete="off" spellcheck="false" aria-label="Admin token">
+    <button id="peek" class="iconbtn" title="Show / hide token" aria-label="Show or hide token" tabindex="-1"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M2.5 12S6 5.5 12 5.5 21.5 12 21.5 12 18 18.5 12 18.5 2.5 12 2.5 12z"/><circle cx="12" cy="12" r="2.8"/></svg></button>
   </div>
-  <div style="margin-top:14px"><button class="btn primary" id="go" style="width:100%;justify-content:center">Open console</button></div>
+  <div style="margin-top:16px"><button class="btn primary" id="go" style="width:100%;padding:11px">Open console</button></div>
   <div id="err" role="alert"></div>
+  <div class="foot">Token is held in this tab only</div>
 </section>
 
-<main id="app" hidden>
-  <section class="stats" id="stats"></section>
-  <nav class="tabs" role="tablist">
-    <button class="on" data-tab="users" role="tab" aria-selected="true">Users</button>
-    <button data-tab="insights" role="tab" aria-selected="false">Insights</button>
-    <button data-tab="requests" role="tab" aria-selected="false">RIN requests<span id="reqBadge"></span></button>
-    <button data-tab="bugs" role="tab" aria-selected="false">Bug reports<span id="bugBadge"></span></button>
-    <button data-tab="activity" role="tab" aria-selected="false">Activity</button>
-    <button data-tab="tools" role="tab" aria-selected="false">Tools</button>
-  </nav>
-
-  <section id="tab-users" class="tab" role="tabpanel">
-    <div class="toolbar">
-      <input id="search" class="search" placeholder="Search name / email / company / RIN / tag..." aria-label="Search users">
-      <div class="chips" id="chips"></div>
-      <button id="exportUsers" class="btn">&#10515; Users CSV</button>
-      <button id="refresh" class="btn">&#8635; Refresh</button>
+<div id="shell" class="shell" hidden>
+  <aside class="rail">
+    <div class="brand">
+      <div class="seal"><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 1.6l2.35 7.05L21.4 11l-7.05 2.35L12 20.4l-2.35-7.05L2.6 11l7.05-2.35z"/></svg></div>
+      <div class="txt"><div class="wm">ETA Bulk</div><div class="sub">Admin</div></div>
     </div>
-    <div class="tablewrap">
-      <table>
-        <thead><tr>
-          <th style="width:34px"><input type="checkbox" id="chkAll" class="chk" title="Select all on page"></th>
-          <th class="sortable" data-sort="name">User</th>
-          <th>Contact</th><th>Allowed RINs</th><th>Quota</th><th>Status</th>
-          <th class="sortable" data-sort="lastSeen">Last seen</th><th></th>
-        </tr></thead>
-        <tbody id="ubody"></tbody>
-      </table>
-    </div>
-    <div class="empty" id="uempty" hidden><div class="big">&#128100;</div>No users match. New registrations appear here automatically.</div>
-    <div class="pager" id="upager" hidden></div>
-    <div class="bulkbar" id="bulkbar" hidden>
-      <b id="bulkcount">0 selected</b>
-      <div class="sp" style="flex:1"></div>
-      <button class="btn tiny" data-bulk="lock">Lock</button>
-      <button class="btn tiny" data-bulk="unlock">Unlock</button>
-      <button class="btn tiny danger" data-bulk="kill">Kill</button>
-      <button class="btn tiny good" data-bulk="revive">Revive</button>
-      <button class="btn tiny danger" data-bulk="delete">Delete</button>
-      <button class="btn tiny ghost" id="bulkclear">Clear</button>
-    </div>
-  </section>
-
-  <section id="tab-insights" class="tab" role="tabpanel" hidden>
-    <div class="kpis" id="funnel"></div>
-    <div class="insight-grid">
-      <div class="card chartcard"><h3>Trend — 60 days</h3><p class="hint">Users and documents exported, from the daily 02:00 UTC snapshot cron.</p><div id="chartTrend"></div></div>
-      <div class="card chartcard"><h3>Registrations over time</h3><p class="hint">New sign-ups per day (from firstAt).</p><div id="chartReg"></div></div>
-      <div class="card chartcard"><h3>Activity segmentation</h3><p class="hint">By most recent /session check-in.</p><div id="chartAct"></div></div>
-      <div class="card chartcard"><h3>Version adoption</h3><p class="hint">Installed versions across users — check before setting a kill rule.</p><div id="chartVer"></div></div>
-      <div class="card chartcard"><h3>Country breakdown</h3><p class="hint">From Cloudflare geo at registration.</p><div id="chartCountry"></div></div>
-      <div class="card chartcard"><h3>Value delivered</h3><p class="hint">Top accounts by documents exported (from check-in telemetry, v0.3.0+ clients).</p><div id="chartValue"></div></div>
-      <div class="card chartcard"><h3>Lead quality</h3><p class="hint">Corporate-domain vs free-mail email addresses.</p><div id="chartLead"></div></div>
-      <div class="card chartcard"><h3>Top email domains</h3><p class="hint">Where your leads come from.</p><div id="chartDom"></div></div>
-    </div>
-  </section>
-
-  <section id="tab-requests" class="tab" role="tabpanel" hidden>
-    <div class="toolbar">
-      <input id="rsearch" class="search" placeholder="Search requests..." aria-label="Search requests">
-      <div class="chips" id="rchips"></div>
-      <button id="exportReqs" class="btn">&#10515; CSV</button>
-    </div>
-    <div class="tablewrap"><table>
-      <thead><tr><th>When</th><th>User</th><th>Requested RIN</th><th>Note</th><th>Status</th><th></th></tr></thead>
-      <tbody id="rbody"></tbody>
-    </table></div>
-    <div class="empty" id="rempty" hidden><div class="big">&#128276;</div>No RIN requests.</div>
-  </section>
-
-  <section id="tab-bugs" class="tab" role="tabpanel" hidden>
-    <div class="toolbar">
-      <input id="bsearch" class="search" placeholder="Search bug reports..." aria-label="Search bugs">
-      <div class="chips" id="bchips"></div>
-      <button id="exportBugs" class="btn">&#10515; CSV</button>
-    </div>
-    <div class="tablewrap"><table>
-      <thead><tr><th>When</th><th>User</th><th>RIN</th><th>Report</th><th>Status</th><th></th></tr></thead>
-      <tbody id="bbody"></tbody>
-    </table></div>
-    <div class="empty" id="bempty" hidden><div class="big">&#128027;</div>No bug reports.</div>
-  </section>
-
-  <section id="tab-activity" class="tab" role="tabpanel" hidden>
-    <div class="card"><h3>Admin action log</h3><p class="hint">Every lock, kill, void, quota change, delete, RIN move, config edit and request decision — newest first. Kept 180 days.</p></div>
-    <div class="tablewrap"><table>
-      <thead><tr><th>When</th><th>Action</th><th>Target</th><th>Detail</th></tr></thead>
-      <tbody id="abody"></tbody>
-    </table></div>
-    <div class="empty" id="aempty" hidden><div class="big">&#128220;</div>No admin actions recorded yet.</div>
-    <div class="card" style="margin-top:14px"><h3>Extension-facing errors</h3><p class="hint">Failures the extensions hit against this server &mdash; signature failures, rate limits, register rejections, unhandled exceptions. Newest first, kept 30 days, write-budgeted.</p></div>
-    <div class="tablewrap"><table>
-      <thead><tr><th>When</th><th>Kind</th><th>Path</th><th>Device</th><th>Geo</th><th>Detail</th></tr></thead>
-      <tbody id="ebody"></tbody>
-    </table></div>
-    <div class="empty" id="eempty" hidden><div class="big">&#9989;</div>No extension-facing errors in the last 30 days.</div>
-  </section>
-
-  <section id="tab-tools" class="tab" role="tabpanel" hidden>
-    <div class="grid2">
-      <div class="card">
-        <h3>Global settings</h3>
-        <p class="hint">Account-wide controls.</p>
-        <div class="field"><label>Emergency kill switch &mdash; blocks every account immediately</label>
-          <label class="switch"><input type="checkbox" id="killsw"><span class="track"></span><span id="killtxt" class="muted">Off</span></label>
-        </div>
-        <div class="field"><label>Default RIN quota for new registrations</label>
-          <input id="defq" type="number" min="0" style="max-width:120px">
-        </div>
-      </div>
-      <div class="card">
-        <h3>Health &amp; self-check</h3>
-        <p class="hint">Which mode is production actually running in?</p>
-        <div class="health" id="healthbox"></div>
-        <button id="healthref" class="btn tiny" style="margin-top:12px">&#8635; Re-check</button>
+    <nav id="nav" aria-label="Sections"></nav>
+    <div class="railfoot">
+      <div class="row">
+        <span id="conn" class="dot" title="Not connected" aria-label="Connection status" style="margin:0 8px"></span>
+        <span class="sp"></span>
+        <button id="auto" class="iconbtn" title="Auto-refresh every 30s" aria-label="Toggle auto-refresh"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M20 11a8 8 0 10-2.3 6.3"/><path d="M20 4.5V11h-6.2"/></svg></button>
+        <button id="dense" class="iconbtn" title="Compact rows" aria-label="Toggle density"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M4 7h16M4 12h16M4 17h16"/></svg></button>
+        <button id="theme" class="iconbtn" title="Light / dark" aria-label="Toggle theme"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><circle cx="12" cy="12" r="4.4"/><path d="M12 2.6v2.2M12 19.2v2.2M2.6 12h2.2M19.2 12h2.2M5.4 5.4l1.6 1.6M17 17l1.6 1.6M18.6 5.4L17 7M7 17l-1.6 1.6"/></svg></button>
+        <button id="logout" class="iconbtn" title="Sign out" aria-label="Sign out"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M15 4.5h3.5A1.5 1.5 0 0120 6v12a1.5 1.5 0 01-1.5 1.5H15"/><path d="M10 8l-4 4 4 4M6 12h9"/></svg></button>
       </div>
     </div>
-    <div class="card">
-      <h3>Announcement banner</h3>
-      <p class="hint">Pushed to every extension on its next check-in &mdash; a soft channel that isn't the kill switch. Empty text clears it.</p>
-      <div id="annCur" class="result"></div>
-      <div class="grid2">
-        <div class="field"><label>Message</label><textarea id="annText" maxlength="400" placeholder="e.g. Maintenance tonight 22:00 Cairo &mdash; exports may pause briefly."></textarea></div>
-        <div>
-          <div class="field"><label>Level</label><select id="annLevel"><option value="info">Info (blue)</option><option value="warn">Warning (amber)</option><option value="alert">Alert (red)</option></select></div>
-          <div class="field"><label>Auto-expire (optional)</label><input id="annUntil" type="datetime-local"></div>
-        </div>
-      </div>
-      <div class="inline"><button id="annSave" class="btn primary">Publish banner</button><button id="annClear" class="btn danger">Clear banner</button></div>
-    </div>
-    <div class="card">
-      <h3>Superadmin &middot; RIN tools</h3>
-      <p class="hint">Void a registration number (blocks it everywhere within ~60s &mdash; KV propagation) or look up which account owns it.</p>
-      <div class="field"><label>Registration number</label>
-        <div class="inline"><input id="voidrin" placeholder="e.g. 123456789" style="flex:1;min-width:150px" class="mono">
-          <button id="docheck" class="btn">Check</button>
-          <button id="dovoid" class="btn danger">Void</button>
-          <button id="dounvoid" class="btn">Un-void</button>
-        </div>
-      </div>
-      <div class="result" id="checkout"></div>
-      <div class="voidlist" id="voidlist"></div>
-    </div>
-    <div class="card">
-      <h3>Version control &middot; kill switch</h3>
-      <p class="hint">Force users onto a newer build, or block specific versions. Applies to every account, superadmins included. See the live version spread below before you set a rule.</p>
-      <div id="verspread" class="legend" style="margin-bottom:12px"></div>
-      <div class="grid2">
-        <div class="field"><label>Minimum allowed version &mdash; older installs get "update required"</label>
-          <input id="minver" placeholder="e.g. 0.2.0" class="mono" style="max-width:170px"></div>
-        <div class="field"><label>Killed versions &mdash; comma-separated exact versions</label>
-          <input id="killver" placeholder="e.g. 0.1.0, 0.1.3" class="mono"></div>
-      </div>
-      <button id="saveVer" class="btn primary">Save version rules</button>
-    </div>
-    <div class="card">
-      <h3>Export &amp; backup</h3>
-      <p class="hint">CSV is UTF-8 (Excel + Arabic safe). The JSON backup is the ONLY export that can restore the namespace &mdash; it includes device keys, RIN bindings, requests, bugs, voids and config.</p>
-      <div class="inline">
-        <button id="csv" class="btn">&#10515; Users CSV</button>
-        <button id="csvReq" class="btn">&#10515; Requests CSV</button>
-        <button id="csvBug" class="btn">&#10515; Bugs CSV</button>
-        <button id="backup" class="btn primary">&#128190; Full JSON backup</button>
-      </div>
-    </div>
-    <div class="card">
-      <h3>Trash</h3>
-      <p class="hint">Deleted accounts are recoverable here for 30 days (account, telemetry, requests and bug reports; RINs are re-claimed on restore &mdash; ones taken by another account in the meantime are reported, not stolen).</p>
-      <div class="tablewrap"><table style="min-width:0">
-        <thead><tr><th>Deleted</th><th>User</th><th>RINs</th><th></th></tr></thead>
-        <tbody id="tbody-trash"></tbody>
-      </table></div>
-      <div class="empty" id="trashempty" hidden><div class="big">&#128465;</div>Trash is empty.</div>
-    </div>
-  </section>
-</main>
+  </aside>
 
-<div id="udrawer" hidden><div class="ov"></div><div class="panel" id="upanel"></div></div>
+  <div class="main">
+    <div id="demobar" class="demo" hidden>Demo data — no server is being read</div>
+    <header class="topbar">
+      <div style="min-width:0"><h1 id="ptitle">Dashboard</h1><div class="sub" id="psub"></div></div>
+      <span class="sp"></span>
+      <span class="stamp" id="stamp"></span>
+      <button id="refresh" class="btn"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><path d="M20 11a8 8 0 10-2.3 6.3"/><path d="M20 4.5V11h-6.2"/></svg>Refresh</button>
+    </header>
+    <div class="views" id="views"></div>
+  </div>
+</div>
+
 <div id="toasts"></div>
 <div id="modal-root" hidden></div>
 
 <script>
 (function(){
-  var token='',users=[],reqs=[],bugs=[],voids=[],audit=[],errs=[],trash=[],snaps=[],insights=null,health=null,cfg={},filter='all',rfilter='all',bfilter='all',sort={key:'lastSeen',dir:-1};
-  var selected={},page=1,PAGE=25,autoTimer=null,curUser=null;
-  var $=function(i){return document.getElementById(i)};
-  function q(sel,fn){Array.prototype.forEach.call(document.querySelectorAll(sel),fn)}
-  function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,function(c){return{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]})}
-  function cairo(iso){if(!iso)return '—';try{return new Date(iso).toLocaleString('en-GB',{timeZone:'Africa/Cairo',year:'numeric',month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false})}catch(e){return esc(String(iso).slice(0,16).replace('T',' '))}}
-  function rel(iso){if(!iso)return '';var t=Date.parse(iso);if(!t)return '';var s=(Date.now()-t)/1000;if(s<0)s=0;if(s<60)return 'just now';var m=s/60;if(m<60)return Math.floor(m)+'m ago';var hr=m/60;if(hr<24)return Math.floor(hr)+'h ago';var d=hr/24;if(d<30)return Math.floor(d)+'d ago';var mo=d/30;if(mo<12)return Math.floor(mo)+'mo ago';return Math.floor(d/365)+'y ago'}
-  function when(iso){var c=cairo(iso),r=rel(iso);return '<span title="'+c+' Cairo">'+esc(r||c)+'</span>'}
+'use strict';
+/* ───────────────────────────────────────────────────────────────────────────
+   ETA Bulk admin console.
+   Slice 1 sections (Dashboard / Users / Clients) speak the SPEC-017 contract:
+     GET  /api/dashboard   GET /api/users   GET /api/user?email=   POST /api/user
+     GET  /api/clients     GET /api/client?rin=                    POST /api/client
+     POST /api/migrate
+   The legacy sections (Insights / Requests / Bugs / Activity / Tools) keep
+   speaking the endpoints they already have. Nothing was dropped to make room.
+   Views are rendered from templates into #views — one section mounted at a time.
+   ─────────────────────────────────────────────────────────────────────────── */
 
-  $('theme').onclick=function(){var cur=document.documentElement.getAttribute('data-theme');var next=cur==='light'?'dark':'light';document.documentElement.setAttribute('data-theme',next);try{localStorage.setItem('eta_admin_theme',next)}catch(e){}};
-  $('dense').onclick=function(){var on=document.documentElement.getAttribute('data-dense')==='1';document.documentElement.setAttribute('data-dense',on?'0':'1');$('dense').classList.toggle('on',!on);try{localStorage.setItem('eta_admin_dense',on?'0':'1')}catch(e){}};
-  if(document.documentElement.getAttribute('data-dense')==='1')$('dense').classList.add('on');
+var DEMO = /(^|[?&])demo=1(&|$)/.test(location.search);
 
-  function authFetch(p,opts){opts=opts||{};var h=opts.headers||{};h['authorization']='Bearer '+token;opts.headers=h;return fetch(p,opts)}
-  function api(p){return authFetch(p).then(function(r){return r.json()}).catch(function(){return {ok:false,error:'network'}})}
-  function post(p,body){return authFetch(p,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body||{})}).then(function(r){return r.json()}).then(function(j){if(!j||!j.ok)toast((j&&j.error)||'Request failed','bad');return j||{ok:false}}).catch(function(){toast('Network error','bad');return {ok:false}})}
-  function setConn(ok){var d=$('conn');d.className='dot '+(ok?'on':'off');d.title=ok?'Connected':'Authentication error'}
-  function download(path,filename){authFetch(path).then(function(r){return r.blob()}).then(function(b){var u=URL.createObjectURL(b);var a=document.createElement('a');a.href=u;a.download=filename;document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(u)},1000)}).catch(function(){toast('Export failed','bad')})}
+var S = {
+  token:'', section:'dashboard',
+  dash:null, dashErr:'',
+  users:[], utotal:0, upage:1, uq:'', ustatus:'all', uplan:'', usort:{key:'lastSeen',dir:-1}, usel:{},
+  user:null, userEmail:'',
+  clients:[], ctotal:0, cpage:1, cq:'',
+  client:null, clientRin:'',
+  reqs:[], bugs:[], voids:[], audit:[], errs:[], trash:[], snaps:[],
+  insights:null, health:null, cfg:{}, stats:null,
+  rfilter:'all', bfilter:'all',
+  autoTimer:null, lastLoad:0
+};
+var PAGE = 25;
 
-  function toast(msg,type,ms){var c=$('toasts');var el=document.createElement('div');el.className='toast '+(type==='bad'?'bad':(type==='ok'?'ok':''));el.textContent=msg;c.appendChild(el);requestAnimationFrame(function(){el.classList.add('in')});setTimeout(function(){el.classList.remove('in');setTimeout(function(){el.remove()},250)},ms||2800)}
-  function modal(o){o=o||{};return new Promise(function(resolve){
-    var root=$('modal-root');var hasInput=!!o.input;var inp=o.input||{};var opts=inp.options;
-    var control='';
+/* ── tiny helpers ─────────────────────────────────────────────────────────── */
+var $ = function(id){ return document.getElementById(id); };
+function q(sel,fn){ Array.prototype.forEach.call(document.querySelectorAll(sel), fn); }
+function esc(s){ return String(s==null?'':s).replace(/[&<>"']/g,function(c){ return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]; }); }
+function n(v){ return Number(v||0).toLocaleString('en-US'); }
+/* Field names are not pinned by the contract for devices/jobs (the SQL is snake_case,
+   the JSON elsewhere is camelCase). Read whichever arrives. */
+function f(o){ if(!o) return null; for(var i=1;i<arguments.length;i++){ var k=arguments[i]; if(o[k]!=null&&o[k]!=='') return o[k]; } return null; }
+function cairo(iso){ if(!iso) return '—'; try{ return new Date(iso).toLocaleString('en-GB',{timeZone:'Africa/Cairo',year:'numeric',month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false}); }catch(e){ return String(iso).slice(0,16).replace('T',' '); } }
+function rel(iso){ if(!iso) return ''; var t=Date.parse(iso); if(!t) return ''; var s=(Date.now()-t)/1000; if(s<0)s=0;
+  if(s<60) return 'just now'; var m=s/60; if(m<60) return Math.floor(m)+'m ago'; var h=m/60; if(h<24) return Math.floor(h)+'h ago';
+  var d=h/24; if(d<30) return Math.floor(d)+'d ago'; var mo=d/30; if(mo<12) return Math.floor(mo)+'mo ago'; return Math.floor(d/365)+'y ago'; }
+function when(iso){ var c=cairo(iso), r=rel(iso); return '<span title="'+esc(c)+' Cairo">'+esc(r||c)+'</span>'; }
+function days(iso){ if(!iso) return null; var t=Date.parse(iso); if(!t) return null; return (t-Date.now())/86400000; }
+function ago(iso){ if(!iso) return null; var t=Date.parse(iso); if(!t) return null; return (Date.now()-t)/86400000; }
+function pct(a,b){ b=Number(b||0); if(!b) return 0; return Math.max(0,Math.min(100,Math.round(Number(a||0)/b*100))); }
+
+/* ── transport ────────────────────────────────────────────────────────────── */
+function authFetch(p,opts){ opts=opts||{}; var h=opts.headers||{}; h['authorization']='Bearer '+S.token; opts.headers=h; return fetch(p,opts); }
+function api(p){
+  if(DEMO) return Promise.resolve(demoGet(p));
+  return authFetch(p).then(function(r){ return r.json().catch(function(){ return {ok:false,error:'bad response'}; }); })
+    .catch(function(){ return {ok:false,error:'network'}; });
+}
+function post(p,body){
+  if(DEMO){ toast('Demo mode — nothing was written','n'); return Promise.resolve({ok:false,error:'demo'}); }
+  return authFetch(p,{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body||{})})
+    .then(function(r){ return r.json(); })
+    .then(function(j){ if(!j||!j.ok) toast((j&&j.error)||'Request failed','bad'); return j||{ok:false}; })
+    .catch(function(){ toast('Network error','bad'); return {ok:false}; });
+}
+function download(path,filename){
+  if(DEMO){ toast('Demo mode — nothing to export','n'); return; }
+  authFetch(path).then(function(r){ return r.blob(); }).then(function(b){
+    var u=URL.createObjectURL(b), a=document.createElement('a'); a.href=u; a.download=filename;
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(function(){ URL.revokeObjectURL(u); },1000);
+  }).catch(function(){ toast('Export failed','bad'); });
+}
+function setConn(state){ var d=$('conn'); d.className='dot '+state; d.title = state==='on'?'Connected':state==='run'?'Loading':'Authentication error'; }
+
+/* ── toast + modal ────────────────────────────────────────────────────────── */
+function toast(msg,type,ms){
+  var c=$('toasts'), el=document.createElement('div');
+  var kind = type==='bad'?'bad':type==='ok'?'ok':'n';
+  el.className='toast '+(kind==='n'?'':kind);
+  el.innerHTML='<span class="tl2 '+(kind==='n'?'n':'')+'">'+(kind==='bad'?'Failed':kind==='ok'?'Done':'Note')+'</span><span>'+esc(msg)+'</span>';
+  c.appendChild(el); requestAnimationFrame(function(){ el.classList.add('in'); });
+  setTimeout(function(){ el.classList.remove('in'); setTimeout(function(){ el.remove(); },260); }, ms||2800);
+}
+function modal(o){
+  o=o||{};
+  return new Promise(function(resolve){
+    var root=$('modal-root'), inp=o.input||{}, hasInput=!!o.input, opts=inp.options, control='';
     if(hasInput){
-      if(opts){control='<select id="modal-input">'+opts.map(function(op){return '<option value="'+esc(op.value)+'">'+esc(op.label)+'</option>'}).join('')+'</select>'}
-      else{control='<input id="modal-input" type="'+esc(inp.type||'text')+'"'+(inp.min!=null?' min="'+esc(inp.min)+'"':'')+' placeholder="'+esc(inp.placeholder||'')+'">'}
+      if(opts) control='<select id="modal-input">'+opts.map(function(op){ return '<option value="'+esc(op.value)+'">'+esc(op.label)+'</option>'; }).join('')+'</select>';
+      else if(inp.type==='textarea') control='<textarea id="modal-input" placeholder="'+esc(inp.placeholder||'')+'"></textarea>';
+      else control='<input id="modal-input" type="'+esc(inp.type||'text')+'"'+(inp.min!=null?' min="'+esc(inp.min)+'"':'')+' placeholder="'+esc(inp.placeholder||'')+'">';
     }
-    var h='<div class="modal-overlay"></div><div class="modal-card" role="dialog" aria-modal="true" aria-label="'+esc(o.title||'Confirm')+'">'
+    root.innerHTML='<div class="modal-overlay"></div><div class="modal-card" role="dialog" aria-modal="true" aria-label="'+esc(o.title||'Confirm')+'">'
       +'<div class="modal-title">'+esc(o.title||'Confirm')+'</div>'
       +(o.message?'<div class="modal-msg">'+esc(o.message)+'</div>':'')
       +(hasInput?'<label class="modal-label">'+esc(inp.label||'')+control+'</label>':'')
       +'<div class="modal-foot"><button class="btn ghost" id="modal-cancel">'+esc(o.cancelText||'Cancel')+'</button>'
-      +'<button class="btn '+(o.danger?'danger':'primary')+'" id="modal-ok">'+esc(o.confirmText||'Confirm')+'</button></div></div>';
-    root.innerHTML=h;root.hidden=false;
-    var field=$('modal-input');if(field){if(!opts&&inp.value!=null)field.value=inp.value;setTimeout(function(){field.focus();try{field.select()}catch(e){}},20)}else{setTimeout(function(){$('modal-ok').focus()},20)}
-    function done(v){root.hidden=true;root.innerHTML='';document.removeEventListener('keydown',onkey);resolve(v)}
-    function ok(){done(hasInput?(field?field.value:''):true)}
-    $('modal-ok').onclick=ok;$('modal-cancel').onclick=function(){done(null)};root.querySelector('.modal-overlay').onclick=function(){done(null)};
-    function onkey(e){if(e.key==='Escape'){done(null);return}if(e.key==='Enter'){var ae=document.activeElement;if(ae&&ae.id==='modal-cancel'){done(null);return}ok()}}
+      +'<button class="btn '+(o.danger?'danger solid':'primary')+'" id="modal-ok">'+esc(o.confirmText||'Confirm')+'</button></div></div>';
+    root.hidden=false;
+    var field=$('modal-input');
+    if(field){ if(!opts&&inp.value!=null) field.value=inp.value; setTimeout(function(){ field.focus(); try{ field.select(); }catch(e){} },20); }
+    else setTimeout(function(){ $('modal-ok').focus(); },20);
+    function done(v){ root.hidden=true; root.innerHTML=''; document.removeEventListener('keydown',onkey); resolve(v); }
+    function ok(){ done(hasInput?(field?field.value:''):true); }
+    $('modal-ok').onclick=ok; $('modal-cancel').onclick=function(){ done(null); };
+    root.querySelector('.modal-overlay').onclick=function(){ done(null); };
+    function onkey(e){
+      if(e.key==='Escape'){ e.stopPropagation(); done(null); return; }
+      if(e.key==='Enter'&&!(field&&field.tagName==='TEXTAREA')){ var a=document.activeElement; if(a&&a.id==='modal-cancel'){ done(null); return; } ok(); }
+    }
     document.addEventListener('keydown',onkey);
-  })}
+  });
+}
+function confirmDanger(title,message,confirmText){ return modal({title:title,message:message,confirmText:confirmText||'Confirm',danger:true}); }
 
-  function openApp(){$('login').hidden=true;$('app').hidden=false;$('logout').hidden=false;$('auto').hidden=false;$('dense').hidden=false;loadAll()}
-  function logout(){token='';try{sessionStorage.removeItem('at')}catch(e){}filter='all';rfilter='all';bfilter='all';sort={key:'lastSeen',dir:-1};selected={};page=1;if(autoTimer){clearInterval(autoTimer);autoTimer=null;$('auto').classList.remove('on');$('autotxt').hidden=true}if($('search'))$('search').value='';renderChips();$('app').hidden=true;$('logout').hidden=true;$('auto').hidden=true;$('dense').hidden=true;$('login').hidden=false;$('token').value='';setConn(false);$('conn').className='dot'}
-  function attemptLogin(){var t=$('token').value.trim();if(!t){$('err').textContent='Enter your admin token.';return}token=t;$('err').textContent='';
-    api('/api/stats').then(function(j){if(!j.ok){setConn(false);$('err').textContent=j.error==='unauthorized'?'Invalid token.':'Could not reach the server.';token='';return}try{sessionStorage.setItem('at',token)}catch(e){}setConn(true);openApp()})}
+/* ── icons ────────────────────────────────────────────────────────────────── */
+var ICON = {
+  dashboard:'<rect x="3" y="3" width="7.4" height="8.6" rx="1.6"/><rect x="13.6" y="3" width="7.4" height="5" rx="1.6"/><rect x="13.6" y="10.4" width="7.4" height="10.6" rx="1.6"/><rect x="3" y="14" width="7.4" height="7" rx="1.6"/>',
+  users:'<circle cx="9.2" cy="8" r="3.3"/><path d="M3.2 20c0-3.4 2.7-5.2 6-5.2s6 1.8 6 5.2"/><path d="M16.2 11.4a3 3 0 100-6"/><path d="M18.4 20c0-2.5-.8-4.1-2-4.8"/>',
+  clients:'<path d="M4 21V5.4A1.4 1.4 0 015.4 4h7.2A1.4 1.4 0 0114 5.4V21"/><path d="M14 10.4h4.6A1.4 1.4 0 0120 11.8V21"/><path d="M2.6 21h18.8"/><path d="M7.2 8h3.6M7.2 12h3.6M7.2 16h3.6"/>',
+  insights:'<path d="M3 20.4h18"/><rect x="4.8" y="11" width="3.4" height="6.4" rx="1.1"/><rect x="10.3" y="6.6" width="3.4" height="10.8" rx="1.1"/><rect x="15.8" y="13.4" width="3.4" height="4" rx="1.1"/>',
+  requests:'<path d="M6.2 9.4a5.8 5.8 0 1111.6 0c0 3.9 1.5 5.4 1.5 5.4H4.7s1.5-1.5 1.5-5.4z"/><path d="M10 18.4a2 2 0 004 0"/>',
+  bugs:'<path d="M9 6.2a3 3 0 016 0"/><rect x="7.2" y="8" width="9.6" height="10.4" rx="4.8"/><path d="M4 11.2h3.2M16.8 11.2H20M4 16.4h3.2M16.8 16.4H20M12 8v10.4"/>',
+  activity:'<path d="M2.8 12.4h4.1L9.4 6l4 13.2 2.4-6.8h5.4"/>',
+  tools:'<circle cx="12" cy="12" r="3.2"/><path d="M12 3v2.3M12 18.7V21M21 12h-2.3M5.3 12H3M18.4 5.6L16.8 7.2M7.2 16.8L5.6 18.4M18.4 18.4l-1.6-1.6M7.2 7.2L5.6 5.6"/>'
+};
+function ic(k,cls){ return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"'+(cls?' class="'+cls+'"':'')+' aria-hidden="true">'+ICON[k]+'</svg>'; }
 
-  function loadAll(){loadUsers();loadReqs();loadBugs();loadVoids();loadInsights();loadAudit();loadErrs();loadHealth();loadTrash();loadSnaps()}
-  function loadUsers(){api('/api/users').then(function(j){if(!j.ok){setConn(false);if(j.error==='unauthorized')logout();return}setConn(true);users=j.users||[];cfg=j.cfg||{};syncCfg();renderStats();renderUsers();if(curUser)refreshDetail()})}
-  function loadReqs(){api('/api/requests').then(function(j){reqs=(j.requests||[]);var p=reqs.filter(function(r){return r.status==='pending'}).length;$('reqBadge').innerHTML=p?'<span class="badge">'+p+'</span>':'';renderStats();renderReqs()})}
-  function loadBugs(){api('/api/bugs').then(function(j){bugs=(j.bugs||[]);var o=bugs.filter(function(g){return g.status==='open'}).length;$('bugBadge').innerHTML=o?'<span class="badge">'+o+'</span>':'';renderStats();renderBugs()})}
-  function loadVoids(){api('/api/voids').then(function(j){voids=(j.voids||[]);renderStats();renderVoidList()})}
-  function loadInsights(){api('/api/insights').then(function(j){if(j.ok){insights=j.insights;renderInsights()}})}
-  function loadAudit(){api('/api/audit').then(function(j){audit=(j.audit||[]);renderActivity()})}
-  function loadErrs(){api('/api/errors').then(function(j){errs=(j.errors||[]);renderErrs()})}
-  function loadTrash(){api('/api/trash').then(function(j){trash=(j.trash||[]);renderTrash()})}
-  function loadSnaps(){api('/api/snaps').then(function(j){snaps=(j.snaps||[]);renderTrend()})}
-  function loadHealth(){api('/api/health').then(function(j){if(j.ok){health=j.health;renderHealth()}})}
-  function syncCfg(){$('killsw').checked=!!cfg.globalKill;$('killtxt').textContent=cfg.globalKill?'On — everyone blocked':'Off';$('defq').value=cfg.defaultQuota==null?1:cfg.defaultQuota;$('minver').value=cfg.minVersion||'';$('killver').value=(cfg.killedVersions||[]).join(', ');renderAnnouncement()}
+/* ── section registry ─────────────────────────────────────────────────────── */
+var SECTIONS = [
+  {group:'Operations', items:[
+    {id:'dashboard', label:'Dashboard', icon:'dashboard', title:'Dashboard',  sub:'What is happening right now'},
+    {id:'users',     label:'Users',     icon:'users',     title:'Users',      sub:'One record per person, not per browser'},
+    {id:'clients',   label:'Clients',   icon:'clients',   title:'Clients',    sub:'One row per taxpayer registration number'}
+  ]},
+  {group:'Signals', items:[
+    {id:'insights',  label:'Insights',  icon:'insights',  title:'Insights',   sub:'Aggregates from the nightly snapshot'},
+    {id:'requests',  label:'Requests',  icon:'requests',  title:'RIN requests', sub:'Access requests waiting on a decision'},
+    {id:'bugs',      label:'Bugs',      icon:'bugs',      title:'Bug reports', sub:'Reported from inside the extension'},
+    {id:'activity',  label:'Activity',  icon:'activity',  title:'Activity',   sub:'Admin action log and extension-facing errors'}
+  ]},
+  {group:'System', items:[
+    {id:'tools',     label:'Tools',     icon:'tools',     title:'Tools',      sub:'Configuration, migration, backup, trash'}
+  ]}
+];
+var DETAIL = {
+  user:   {title:'User',   sub:'Clients, devices, jobs, bugs and history on one page', parent:'users'},
+  client: {title:'Client', sub:'Who exports for this taxpayer, and everything they ran', parent:'clients'}
+};
+function sectionMeta(id){
+  if(DETAIL[id]) return DETAIL[id];
+  for(var g=0; g<SECTIONS.length; g++) for(var i=0; i<SECTIONS[g].items.length; i++) if(SECTIONS[g].items[i].id===id) return SECTIONS[g].items[i];
+  return SECTIONS[0].items[0];
+}
+function renderNav(){
+  var pending = S.reqs.filter(function(r){ return r.status==='pending'; }).length;
+  var open = S.bugs.filter(function(g){ return g.status==='open'; }).length;
+  var counts = {requests:pending, bugs:open};
+  var active = DETAIL[S.section] ? DETAIL[S.section].parent : S.section;
+  $('nav').innerHTML = SECTIONS.map(function(g){
+    return '<div class="navgroup" style="margin-bottom:14px"><div class="mlabel">'+esc(g.group)+'</div>'
+      + g.items.map(function(it){
+          var c = counts[it.id];
+          return '<button class="nav'+(active===it.id?' on':'')+'" data-go="'+it.id+'" title="'+esc(it.label)+'">'
+            + ic(it.icon) + '<span class="lbl">'+esc(it.label)+'</span>'
+            + (c?'<span class="count">'+c+'</span>':'') + '</button>';
+        }).join('')
+      + '</div>';
+  }).join('');
+  q('#nav [data-go]', function(b){ b.onclick=function(){ go(b.getAttribute('data-go')); }; });
+}
 
-  function renderStats(){
-    var s={users:users.length,
-      active:users.filter(function(d){return !d.locked&&!d.killed}).length,
-      locked:users.filter(function(d){return d.locked&&!d.killed}).length,
-      killed:users.filter(function(d){return d.killed}).length,
-      supers:users.filter(function(d){return d.superadmin}).length,
-      pending:reqs.filter(function(r){return r.status==='pending'}).length,
-      openbugs:bugs.filter(function(g){return g.status==='open'}).length,
-      voided:voids.length};
-    var cards=[
-      {n:s.users,l:'Users',f:'all',c:''},
-      {n:s.active,l:'Active',f:'active',c:'good'},
-      {n:s.locked,l:'Locked',f:'locked',c:'warn'},
-      {n:s.killed,l:'Killed',f:'killed',c:'bad'},
-      {n:s.supers,l:'Superadmins',f:'super',c:'super'},
-      {n:s.pending,l:'Pending RIN',go:'requests',c:'warn'},
-      {n:s.openbugs,l:'Open bugs',go:'bugs',c:'bad'},
-      {n:s.voided,l:'Voided RINs',go:'tools',c:''}];
-    $('stats').innerHTML=cards.map(function(c){
-      var on=(c.f&&c.f===filter)?' on':'';
-      return '<div class="stat '+c.c+on+'" data-f="'+esc(c.f||'')+'" data-go="'+esc(c.go||'')+'"><div class="n">'+c.n+'</div><div class="l">'+esc(c.l)+'</div></div>'}).join('');
-    q('#stats .stat',function(el){el.onclick=function(){var go=el.getAttribute('data-go');if(go){tab(go);return}setFilter(el.getAttribute('data-f')||'all');tab('users')}});
+/* ── router ───────────────────────────────────────────────────────────────── */
+var RENDER = {};   /* filled in below, one per section */
+function go(section, arg){
+  S.section = section;
+  if(section==='user') S.userEmail = arg || S.userEmail;
+  if(section==='client') S.clientRin = arg || S.clientRin;
+  var m = sectionMeta(section);
+  $('ptitle').textContent = m.title;
+  $('psub').textContent = m.sub;
+  renderNav();
+  paint();
+  document.querySelector('.views').scrollTop = 0;
+  window.scrollTo(0,0);
+}
+function paint(){
+  var fn = RENDER[S.section];
+  if(!fn) return;
+  $('views').innerHTML = '<section class="view">' + fn() + '</section>';
+  wire();
+}
+var WIRE = {};
+function wire(){ var fn = WIRE[S.section]; if(fn) fn(); }
+/* Repaint only if the section that owns this data is on screen — and never while
+   the operator is typing into it, because a background refresh must not eat a
+   half-written announcement or note. */
+function repaint(section){
+  if(S.section!==section) return;
+  var a=document.activeElement;
+  if(a && /INPUT|TEXTAREA|SELECT/.test(a.tagName) && a.closest && a.closest('#views')){ S._stale=section; return; }
+  paint();
+}
+function stamp(){ S.lastLoad=Date.now(); $('stamp').textContent = 'Updated '+new Date().toLocaleTimeString('en-GB',{hour:'2-digit',minute:'2-digit',second:'2-digit',hour12:false}); }
+
+/* ── loaders ──────────────────────────────────────────────────────────────── */
+function guard(j){ if(j&&j.error==='unauthorized'){ logout(); return false; } return true; }
+
+function loadDashboard(){
+  return api('/api/dashboard').then(function(j){
+    if(!guard(j)) return;
+    if(j.ok){ S.dash=j; S.dashErr=''; setConn('on'); }
+    else { S.dash=null; S.dashErr=j.error||'unavailable'; }
+    repaint('dashboard');
+  });
+}
+function usersQuery(){
+  return '/api/users?q='+encodeURIComponent(S.uq)+'&status='+encodeURIComponent(S.ustatus==='all'?'':S.ustatus)
+       + '&plan='+encodeURIComponent(S.uplan)+'&page='+S.upage;
+}
+function loadUsers(){
+  return api(usersQuery()).then(function(j){
+    if(!guard(j)) return;
+    if(j.ok){ S.users=j.users||[]; S.utotal=(j.total!=null?j.total:S.users.length); S.usersErr=''; setConn('on'); }
+    else { S.users=[]; S.utotal=0; S.usersErr=j.error||'unavailable'; }
+    repaint('users');
+  });
+}
+function loadUser(email){
+  S.user=null; repaint('user');
+  return api('/api/user?email='+encodeURIComponent(email)).then(function(j){
+    if(!guard(j)) return;
+    S.user = j.ok ? j : null; S.userErr = j.ok ? '' : (j.error||'unavailable');
+    repaint('user');
+  });
+}
+function loadClients(){
+  return api('/api/clients?q='+encodeURIComponent(S.cq)+'&page='+S.cpage).then(function(j){
+    if(!guard(j)) return;
+    if(j.ok){ S.clients=j.clients||[]; S.ctotal=(j.total!=null?j.total:S.clients.length); S.clientsErr=''; }
+    else { S.clients=[]; S.ctotal=0; S.clientsErr=j.error||'unavailable'; }
+    repaint('clients');
+  });
+}
+function loadClient(rin){
+  S.client=null; repaint('client');
+  return api('/api/client?rin='+encodeURIComponent(rin)).then(function(j){
+    if(!guard(j)) return;
+    S.client = j.ok ? j : null; S.clientErr = j.ok ? '' : (j.error||'unavailable');
+    repaint('client');
+  });
+}
+function loadStats(){ return api('/api/stats').then(function(j){ if(!guard(j)) return; if(j.ok){ S.stats=j.stats; S.cfg=j.cfg||{}; setConn('on'); repaint('tools'); } }); }
+function loadReqs(){ return api('/api/requests').then(function(j){ S.reqs=j.requests||[]; renderNav(); repaint('requests'); }); }
+function loadBugs(){ return api('/api/bugs').then(function(j){ S.bugs=j.bugs||[]; renderNav(); repaint('bugs'); }); }
+function loadVoids(){ return api('/api/voids').then(function(j){ S.voids=j.voids||[]; repaint('tools'); }); }
+function loadAudit(){ return api('/api/audit').then(function(j){ S.audit=j.audit||[]; repaint('activity'); }); }
+function loadErrs(){ return api('/api/errors').then(function(j){ S.errs=j.errors||[]; repaint('activity'); }); }
+function loadTrash(){ return api('/api/trash').then(function(j){ S.trash=j.trash||[]; repaint('tools'); }); }
+function loadSnaps(){ return api('/api/snaps').then(function(j){ S.snaps=j.snaps||[]; repaint('insights'); }); }
+function loadInsights(){ return api('/api/insights').then(function(j){ S.insights=(j&&j.ok&&j.insights)||null; S.insightsDone=true; repaint('insights'); repaint('tools'); }); }
+function loadHealth(){ return api('/api/health').then(function(j){ if(j.ok){ S.health=j.health; repaint('tools'); } }); }
+
+function loadAll(){
+  setConn('run');
+  Promise.all([loadDashboard(), loadStats(), loadReqs(), loadBugs()]).then(stamp);
+  loadUsers(); loadClients(); loadVoids(); loadAudit(); loadErrs(); loadTrash(); loadSnaps(); loadInsights(); loadHealth();
+  if(S.section==='user'&&S.userEmail) loadUser(S.userEmail);
+  if(S.section==='client'&&S.clientRin) loadClient(S.clientRin);
+}
+function loadLive(){ loadDashboard(); loadStats(); loadReqs(); loadBugs(); stamp(); }
+
+/* ── auth ─────────────────────────────────────────────────────────────────── */
+function openApp(){ $('login').hidden=true; $('shell').hidden=false; $('demobar').hidden=!DEMO; go(S.section); loadAll(); }
+function logout(){
+  S.token=''; try{ sessionStorage.removeItem('at'); }catch(e){}
+  if(S.autoTimer){ clearInterval(S.autoTimer); S.autoTimer=null; $('auto').classList.remove('on'); }
+  S.section='dashboard'; S.usel={}; S.upage=1; S.uq=''; S.ustatus='all'; S.uplan=''; S.cpage=1; S.cq='';
+  S.dash=null; S.users=[]; S.clients=[]; S.user=null; S.client=null;
+  $('shell').hidden=true; $('login').hidden=false; $('token').value=''; $('err').textContent='';
+  setConn(''); $('stamp').textContent='';
+}
+function attemptLogin(){
+  var t=$('token').value.trim();
+  if(!t && !DEMO){ $('err').textContent='Enter your admin token.'; return; }
+  S.token=t; $('err').textContent='';
+  api('/api/stats').then(function(j){
+    if(!j.ok && !DEMO){
+      setConn('off');
+      $('err').textContent = j.error==='unauthorized' ? 'That token was rejected.' : 'Could not reach the server.';
+      S.token=''; return;
+    }
+    try{ sessionStorage.setItem('at',S.token); }catch(e){}
+    setConn('on'); openApp();
+  });
+}
+
+/* ═══ DASHBOARD ═══════════════════════════════════════════════════════════ */
+function alertClass(l){ l=String(l||'').toLowerCase(); if(/err|danger|crit|high|stuck|fail/.test(l)) return 'bad'; if(/warn|expir|medium/.test(l)) return 'warn'; if(/ok|good/.test(l)) return 'ok'; return 'info'; }
+function eventClass(k){ k=String(k||'').toLowerCase(); if(/fail|error|kill|delete|void|deny|stuck/.test(k)) return 'bad'; if(/lock|warn|expir/.test(k)) return 'warn'; if(/run|start|progress|job/.test(k)) return 'run'; if(/done|complete|approve|unlock|revive/.test(k)) return 'ok'; return 'accent'; }
+function jobStateClass(s){ s=String(s||'').toLowerCase(); if(/fail|error|dead/.test(s)) return 'bad'; if(/done|complete/.test(s)) return 'ok'; if(/wait|queue|pending/.test(s)) return 'info'; return 'run'; }
+
+RENDER.dashboard = function(){
+  if(!S.dash){
+    return '<div class="empty"><span class="mlabel">Dashboard</span><div class="big">'
+      + (S.dashErr ? 'GET /api/dashboard is not answering' : 'Loading…') + '</div>'
+      + (S.dashErr ? 'The server returned <span class="mono">'+esc(S.dashErr)+'</span>. Slice 1&#39;s backend half may not be deployed yet — every other section below still works against its own endpoint.' : '')
+      + '</div>';
   }
+  var st = S.dash.stats||{}, active=S.dash.active||[], recent=S.dash.recent||[], alerts=S.dash.alerts||[];
+  var tiles = [
+    {k:'Users',    v:st.users,    go:'users'},
+    {k:'Clients',  v:st.clients,  go:'clients'},
+    {k:'Devices',  v:st.devices,  c:'moss'},
+    {k:'Running now', v:st.activeJobs, c:'run'},
+    {k:'Jobs today',  v:st.jobsToday},
+    {k:'Docs today',  v:st.docsToday, c:'info'},
+    {k:'Open bugs',   v:st.openBugs,  c:'bad',  go:'bugs'},
+    {k:'Pending RIN', v:st.pendingRequests, c:'warn', go:'requests'},
+    {k:'Expiring 14d',v:st.expiringSoon, c:'warn', go:'users'}
+  ];
+  var strip = '<div class="strip">'+tiles.map(function(t){
+    var zero = !Number(t.v);
+    return '<'+(t.go?'button':'div')+' class="tile'+(t.c&&!zero?' '+t.c:'')+(zero?' zero':'')+(t.go?' act':'')+'"'+(t.go?' data-go="'+t.go+'"':'')+'>'
+      + '<div class="v">'+n(t.v)+'</div><div class="k">'+esc(t.k)+'</div></'+(t.go?'button':'div')+'>';
+  }).join('')+'</div>';
 
-  function tab(name){['users','insights','requests','bugs','activity','tools'].forEach(function(t){$('tab-'+t).hidden=t!==name});q('nav.tabs button',function(b){var sel=b.getAttribute('data-tab')===name;b.classList.toggle('on',sel);b.setAttribute('aria-selected',sel?'true':'false')})}
-  function setFilter(f){filter=f;page=1;renderChips();renderStats();renderUsers()}
-  function renderChips(){var defs=[['all','All'],['active','Active'],['locked','Locked'],['killed','Killed'],['super','Superadmins'],['dormant','Dormant 30d+'],['never','Never seen']];
-    $('chips').innerHTML=defs.map(function(d){return '<button class="chip'+(filter===d[0]?' on':'')+'" data-cf="'+d[0]+'">'+d[1]+'</button>'}).join('');
-    q('#chips .chip',function(b){b.onclick=function(){setFilter(b.getAttribute('data-cf'))}})}
-  function ageDays(d){if(!d.lastSeen)return null;return (Date.now()-Date.parse(d.lastSeen))/86400000}
-  function matchFilter(d){switch(filter){case 'active':return !d.locked&&!d.killed;case 'locked':return d.locked&&!d.killed;case 'killed':return !!d.killed;case 'super':return !!d.superadmin;case 'dormant':{var a=ageDays(d);return a!=null&&a>=30};case 'never':return !d.lastSeen;default:return true}}
+  var live = '<div class="panel"><div class="eyebrow">Live now'+(active.length?' &middot; <b>'+active.length+'</b>':'')+'</div>'
+    + (active.length ? active.map(function(a){
+        var p = pct(a.done,a.total);
+        return '<div class="runrow">'
+          + '<div><div class="who">'+esc(a.user||'—')+' <span class="faint">&rarr;</span> <span class="num">'+esc(a.rin||'')+'</span></div>'
+          + '<div class="meta">'+esc(a.source||'')+' &middot; '+esc(a.jobId||'').slice(0,12)+' &middot; '+esc(rel(a.updatedAt)||'')+'</div></div>'
+          + '<div style="text-align:right"><span class="pill '+jobStateClass(a.state)+'">'+esc(a.state||'running')+'</span>'
+          + '<div class="cnt" style="margin-top:5px">'+n(a.done)+'<small> / '+n(a.total)+'</small></div></div>'
+          + '<div class="bar live"><i style="width:'+p+'%"></i></div>'
+          + '</div>';
+      }).join('')
+      : '<div class="muted" style="font-size:13px;padding:6px 0">Nothing running. Runs appear here the moment an extension starts one.</div>')
+    + '</div>';
 
-  function statusPill(d){var p=[];if(d.superadmin)p.push('<span class="pill super">SUPER</span>');if(d.killed)p.push('<span class="pill bad">KILLED</span>');else if(d.locked)p.push('<span class="pill bad">LOCKED</span>');else p.push('<span class="pill">active</span>');if(!d.lastSeen)p.push('<span class="pill muted">never seen</span>');else{var a=ageDays(d);if(a>=30)p.push('<span class="pill warn">dormant</span>')}return p.join(' ')}
-  function currentRows(){
-    var query=($('search').value||'').toLowerCase().trim();
-    var rows=users.filter(matchFilter).filter(function(d){return !query||[d.name,d.email,d.company,(d.boundRins||[]).join(' '),(d.tags||[]).join(' '),d.lastRin].join(' ').toLowerCase().indexOf(query)>=0});
-    rows.sort(function(a,b){var k=sort.key,va,vb;if(k==='name'){va=(a.name||'').toLowerCase();vb=(b.name||'').toLowerCase()}else{va=a.lastSeen||'';vb=b.lastSeen||''}return va<vb?-sort.dir:va>vb?sort.dir:0});
-    return rows;
+  var alertBox = '<div class="panel"><div class="eyebrow">Needs a decision'+(alerts.length?' &middot; <b>'+alerts.length+'</b>':'')+'</div>'
+    + (alerts.length ? alerts.map(function(a){
+        var c=alertClass(a.level);
+        return '<div class="callout '+c+'"><span class="cl">'+esc(a.level||c)+'</span><span class="cb">'+esc(a.text||'')
+          + (a.ref?'<div class="ref">'+esc(a.ref)+'</div>':'')+'</span></div>';
+      }).join('')
+      : '<div class="callout ok"><span class="cl">Clear</span><span class="cb">No stuck jobs, no plans expiring inside 14 days, no error spike.</span></div>')
+    + '</div>';
+
+  var feed = '<div class="panel"><div class="eyebrow">Recent events</div>'
+    + (recent.length ? '<ul class="tl">'+recent.map(function(e){
+        return '<li class="'+eventClass(e.kind)+'"><span class="tt">'+esc(rel(e.at)||'—')+'</span>'
+          + '<span class="tx">'+esc(e.text||'')+(e.ref?' <span class="mono faint">'+esc(e.ref)+'</span>':'')+'</span>'
+          + '<span class="tk"><span class="pill muted">'+esc(e.kind||'event')+'</span></span></li>';
+      }).join('')+'</ul>'
+      : '<div class="muted" style="font-size:13px">No events recorded yet.</div>')
+    + '</div>';
+
+  return strip + '<div class="split">'+live+alertBox+'</div>' + feed;
+};
+WIRE.dashboard = function(){ q('#views [data-go]', function(b){ b.onclick=function(){ go(b.getAttribute('data-go')); }; }); };
+
+/* ═══ USERS ═══════════════════════════════════════════════════════════════ */
+function userPills(u){
+  var p=[], st=String(u.status||'active').toLowerCase();
+  if(u.superadmin) p.push('<span class="pill moss">SUPER</span>');
+  if(st==='killed') p.push('<span class="pill bad">KILLED</span>');
+  else if(st==='locked') p.push('<span class="pill warn">LOCKED</span>');
+  else p.push('<span class="pill">active</span>');
+  var d = days(u.validUntil);
+  if(d!=null){ if(d<0) p.push('<span class="pill bad">EXPIRED</span>'); else if(d<=14) p.push('<span class="pill warn">'+Math.ceil(d)+'d left</span>'); }
+  if(!u.lastSeen) p.push('<span class="pill muted">never seen</span>');
+  else { var a=ago(u.lastSeen); if(a!=null&&a>=30) p.push('<span class="pill muted">dormant</span>'); }
+  return p.join(' ');
+}
+function quotaCell(u){
+  var used=Number(u.clientCount||0), cap=Number(u.quota||0);
+  var cls = cap && used>cap ? ' over' : cap && used>=cap ? ' full' : '';
+  return '<div class="num" style="font-size:12.5px">'+used+' / '+(cap||'∞')+'</div>'
+    + (cap?'<div class="bar sm meter'+cls+'" style="margin-top:5px;width:64px"><i style="width:'+pct(used,cap)+'%"></i></div>':'');
+}
+function planOptions(sel){
+  var seen={}; S.users.forEach(function(u){ if(u.plan) seen[u.plan]=1; });
+  ['free','pro','team'].forEach(function(p){ if(!(p in seen)) seen[p]=1; });
+  return '<option value="">All plans</option>'+Object.keys(seen).sort().map(function(p){
+    return '<option value="'+esc(p)+'"'+(sel===p?' selected':'')+'>'+esc(p)+'</option>'; }).join('');
+}
+function pager(id,page,total){
+  var pages=Math.max(1,Math.ceil(total/PAGE));
+  if(total<=PAGE) return '';
+  return '<div class="pager"><button class="btn tiny" data-pg="'+id+':prev"'+(page<=1?' disabled':'')+'>&larr; Prev</button>'
+    + '<span>Page '+page+' / '+pages+' &middot; '+n(total)+' rows</span>'
+    + '<button class="btn tiny" data-pg="'+id+':next"'+(page>=pages?' disabled':'')+'>Next &rarr;</button></div>';
+}
+function sortPage(rows,sort){
+  return rows.slice().sort(function(a,b){
+    var k=sort.key, va,vb;
+    if(k==='name'){ va=String(a.name||a.email||'').toLowerCase(); vb=String(b.name||b.email||'').toLowerCase(); }
+    else if(k==='docs'){ va=Number(a.docs||0); vb=Number(b.docs||0); }
+    else { va=a[k]||''; vb=b[k]||''; }
+    return va<vb?-sort.dir:va>vb?sort.dir:0;
+  });
+}
+function sortHead(key,label,sort){
+  return '<th class="sortable" data-sort="'+key+'">'+esc(label)+(sort.key===key?' <span class="ar">'+(sort.dir>0?'↑':'↓')+'</span>':'')+'</th>';
+}
+
+RENDER.users = function(){
+  var rows = sortPage(S.users, S.usort);
+  var head = '<div class="toolbar">'
+    + '<input id="usearch" class="search" placeholder="Search name, email, company, tag…" aria-label="Search users" value="'+esc(S.uq)+'">'
+    + '<div class="chips" id="uchips">'+[['all','All'],['active','Active'],['locked','Locked'],['killed','Killed']].map(function(d){
+        return '<button class="chip'+(S.ustatus===d[0]?' on':'')+'" data-us="'+d[0]+'">'+d[1]+'</button>'; }).join('')+'</div>'
+    + '<select id="uplan" style="width:auto;min-width:130px">'+planOptions(S.uplan)+'</select>'
+    + '<span class="sp"></span>'
+    + '<button class="btn" id="uexport">Users CSV</button></div>';
+
+  if(S.usersErr) return head + '<div class="empty"><span class="mlabel">Users</span><div class="big">GET /api/users returned <span class="mono">'+esc(S.usersErr)+'</span></div>The email-keyed user index arrives with slice 1&#39;s backend half.</div>';
+  if(!rows.length) return head + '<div class="empty"><span class="mlabel">Users</span><div class="big">Nothing matches</div>Registrations appear here automatically once they check in.</div>';
+
+  var body = rows.map(function(u){
+    var e = esc(u.email||'');
+    return '<tr class="click" data-open="'+e+'">'
+      + '<td><input type="checkbox" class="chk rowchk" data-e="'+e+'"'+(S.usel[u.email]?' checked':'')+'></td>'
+      + '<td><div class="uname">'+esc(u.name||u.email||'—')+'</div>'
+        + '<div class="usub">'+esc(u.company||'')+'</div>'
+        + '<div class="usub mono">'+e+'</div>'
+        + ((u.tags&&u.tags.length)?'<div style="margin-top:4px">'+(typeof u.tags==='string'?u.tags.split(','):u.tags).map(function(t){ return '<span class="tag">'+esc(String(t).trim())+'</span>'; }).join('')+'</div>':'')
+      + '</td>'
+      + '<td><span class="pill accent">'+esc(u.plan||'free')+'</span>'+(u.validUntil?'<div class="usub" style="margin-top:4px">to '+esc(String(u.validUntil).slice(0,10))+'</div>':'')+'</td>'
+      + '<td>'+quotaCell(u)+'</td>'
+      + '<td class="num">'+n(u.deviceCount)+'</td>'
+      + '<td class="num">'+n(u.jobCount)+'</td>'
+      + '<td class="num">'+n(u.docs)+'</td>'
+      + '<td>'+userPills(u)+'</td>'
+      + '<td class="usub">'+when(u.lastSeen)+'</td>'
+      + '<td><div class="act">'
+        + (String(u.status).toLowerCase()==='locked' ? '<button class="btn tiny" data-a="unlock" data-e="'+e+'">Unlock</button>' : '<button class="btn tiny" data-a="lock" data-e="'+e+'">Lock</button>')
+        + (String(u.status).toLowerCase()==='killed' ? '<button class="btn tiny good" data-a="revive" data-e="'+e+'">Revive</button>' : '<button class="btn tiny danger" data-a="kill" data-e="'+e+'">Kill</button>')
+        + '<button class="btn tiny" data-open2="'+e+'">Open</button></div></td></tr>';
+  }).join('');
+
+  return head
+    + '<div class="tablewrap"><table class="wide"><thead><tr>'
+    + '<th style="width:34px"><input type="checkbox" id="chkAll" class="chk" title="Select all on this page"></th>'
+    + sortHead('name','User',S.usort)
+    + '<th>Plan</th><th>Clients / quota</th><th>Devices</th><th>Jobs</th>'
+    + sortHead('docs','Documents',S.usort)
+    + '<th>Status</th>' + sortHead('lastSeen','Last seen',S.usort) + '<th></th>'
+    + '</tr></thead><tbody>'+body+'</tbody></table></div>'
+    + pager('u',S.upage,S.utotal)
+    + (Object.keys(S.usel).length ? '<div class="bulkbar"><b>'+Object.keys(S.usel).length+' SELECTED</b><span class="sp"></span>'
+        + '<button class="btn tiny" data-bulk="lock">Lock</button><button class="btn tiny" data-bulk="unlock">Unlock</button>'
+        + '<button class="btn tiny danger" data-bulk="kill">Kill</button><button class="btn tiny good" data-bulk="revive">Revive</button>'
+        + '<button class="btn tiny danger" data-bulk="delete">Delete</button>'
+        + '<button class="btn tiny ghost" id="bulkclear">Clear</button></div>' : '');
+};
+WIRE.users = function(){
+  var si=$('usearch');
+  if(si){
+    si.oninput=function(){ S.uq=si.value; S.upage=1; clearTimeout(WIRE._t); WIRE._t=setTimeout(loadUsers,220); };
+    si.onkeydown=function(e){ if(e.key==='Enter'){ clearTimeout(WIRE._t); loadUsers(); } };
   }
-  function renderUsers(){
-    var rows=currentRows();
-    var total=rows.length,pages=Math.max(1,Math.ceil(total/PAGE));if(page>pages)page=pages;
-    var slice=rows.slice((page-1)*PAGE,page*PAGE);
-    var h='';slice.forEach(function(d){
-      var did=esc(d.deviceId);var chk=selected[d.deviceId]?' checked':'';
-      var rins='<div class="rins">'+(d.boundRins||[]).map(function(r){return '<span class="r">'+esc(r)+'<a href="#" data-rm-d="'+did+'" data-rm-r="'+esc(r)+'" title="Remove">×</a></span>'}).join('')+'</div>'
-        +'<button class="btn tiny" data-add="'+did+'">+ RIN</button>';
-      var tags=(d.tags||[]).length?'<div style="margin-top:3px">'+(d.tags||[]).map(function(t){return '<span class="tag">'+esc(t)+'</span>'}).join('')+'</div>':'';
-      h+='<tr class="usr" data-open="'+did+'">'
-        +'<td><input type="checkbox" class="chk rowchk" data-d="'+did+'"'+chk+'></td>'
-        +'<td><div class="uname">'+esc(d.name||'—')+'</div><div class="usub">'+esc(d.company||'')+'</div><div class="usub mono">'+(d.version?('v'+esc(d.version)+' · '):'')+esc((d.deviceId||'').slice(0,8))+(d.docs?' · '+Number(d.docs).toLocaleString()+' docs':'')+'</div>'+tags+'</td>'
-        +'<td>'+esc(d.email||'—')+'<div class="usub">'+esc(d.phone||'')+(d.country?' · '+esc(d.country):'')+'</div>'+(d.emailVerified?' <span class="pill" style="padding:1px 6px">✓ email</span>':'')+'</td>'
-        +'<td>'+rins+'</td>'
-        +'<td>'+esc(d.quota)+' <button class="btn tiny" data-q="'+did+'">set</button></td>'
-        +'<td>'+statusPill(d)+'</td>'
-        +'<td class="usub">'+when(d.lastSeen)+'</td>'
-        +'<td><div class="act">'
-        +(d.locked?'<button class="btn tiny" data-a="unlock" data-d="'+did+'">Unlock</button>':'<button class="btn tiny" data-a="lock" data-d="'+did+'">Lock</button>')
-        +(d.killed?'<button class="btn tiny good" data-a="revive" data-d="'+did+'">Revive</button>':'<button class="btn tiny danger" data-a="kill" data-d="'+did+'">Kill</button>')
-        +'<button class="btn tiny" data-open2="'+did+'">Details</button>'
-        +'</div></td></tr>';
-    });
-    $('ubody').innerHTML=h;$('uempty').hidden=total>0;
-    $('upager').hidden=total<=PAGE;$('upager').innerHTML=total<=PAGE?'':('<button class="btn tiny" id="pprev"'+(page<=1?' disabled':'')+'>← Prev</button><span>Page '+page+' / '+pages+' · '+total+' users</span><button class="btn tiny" id="pnext"'+(page>=pages?' disabled':'')+'>Next →</button>');
-    if($('pprev'))$('pprev').onclick=function(){if(page>1){page--;renderUsers()}};
-    if($('pnext'))$('pnext').onclick=function(){if(page<pages){page++;renderUsers()}};
-    $('chkAll').checked=slice.length>0&&slice.every(function(d){return selected[d.deviceId]});
-    wireUsers();renderBulk();
+  q('#uchips [data-us]', function(b){ b.onclick=function(){ S.ustatus=b.getAttribute('data-us'); S.upage=1; loadUsers(); }; });
+  if($('uplan')) $('uplan').onchange=function(){ S.uplan=$('uplan').value; S.upage=1; loadUsers(); };
+  if($('uexport')) $('uexport').onclick=function(){ download('/export?type=users','eta-bulk-users.csv'); };
+  q('#views [data-pg]', function(b){ b.onclick=function(){
+    var d=b.getAttribute('data-pg').split(':')[1];
+    S.upage = d==='next' ? S.upage+1 : Math.max(1,S.upage-1); loadUsers(); }; });
+  q('#views th.sortable', function(th){ th.onclick=function(){
+    var k=th.getAttribute('data-sort');
+    S.usort = S.usort.key===k ? {key:k,dir:-S.usort.dir} : {key:k,dir:k==='name'?1:-1}; paint(); }; });
+  q('#views tr.click', function(tr){ tr.onclick=function(e){ if(e.target.closest('button,a,input')) return; openUser(tr.getAttribute('data-open')); }; });
+  q('#views [data-open2]', function(b){ b.onclick=function(e){ e.stopPropagation(); openUser(b.getAttribute('data-open2')); }; });
+  q('#views .rowchk', function(c){ c.onclick=function(e){ e.stopPropagation();
+    if(c.checked) S.usel[c.getAttribute('data-e')]=1; else delete S.usel[c.getAttribute('data-e')]; paint(); }; });
+  if($('chkAll')) $('chkAll').onclick=function(){
+    var on=$('chkAll').checked; S.users.forEach(function(u){ if(on) S.usel[u.email]=1; else delete S.usel[u.email]; }); paint(); };
+  if($('bulkclear')) $('bulkclear').onclick=function(){ S.usel={}; paint(); };
+  q('#views [data-bulk]', function(b){ b.onclick=function(){ bulk(b.getAttribute('data-bulk')); }; });
+};
+function openUser(email){ S.userEmail=email; S.user=null; go('user',email); loadUser(email); }
+function actUser(email,action,value){ return post('/api/user',{email:email,action:action,value:value}); }
+function bulk(action){
+  var ids=Object.keys(S.usel); if(!ids.length) return;
+  var cap=action.charAt(0).toUpperCase()+action.slice(1);
+  modal({title:cap+' '+ids.length+' user'+(ids.length===1?'':'s')+'?',
+    message: action==='delete' ? 'Deletes '+ids.length+' account(s). Every mutation is written to the audit trail with an actor.'
+                               : 'Applies "'+action+'" to '+ids.length+' selected account(s).',
+    confirmText:cap, danger:(action==='delete'||action==='kill')}).then(function(v){
+    if(!v) return;
+    var done=0;
+    (function step(i){
+      if(i>=ids.length){ toast(action+' applied to '+done+'/'+ids.length,'ok'); S.usel={}; loadUsers(); loadAudit(); return; }
+      actUser(ids[i],action).then(function(j){ if(j&&j.ok) done++; step(i+1); });
+    })(0);
+  });
+}
+
+/* ═══ USER DETAIL ═════════════════════════════════════════════════════════ */
+RENDER.user = function(){
+  var back='<button class="back" data-back="users">&larr; All users</button>';
+  if(!S.user){
+    return back+'<div class="empty"><span class="mlabel">User</span><div class="big">'
+      + (S.userErr ? 'GET /api/user returned '+esc(S.userErr) : 'Loading '+esc(S.userEmail)+'…') + '</div></div>';
   }
-  function actUser(deviceId,action,value,extra){var body={deviceId:deviceId,action:action,value:value};if(extra)for(var k in extra)body[k]=extra[k];return post('/api/user',body)}
-  function userById(id){for(var i=0;i<users.length;i++)if(users[i].deviceId===id)return users[i];return null}
-  function wireUsers(){
-    q('#ubody tr.usr',function(tr){tr.onclick=function(e){if(e.target.closest('button,a,input'))return;openDetail(tr.getAttribute('data-open'))}});
-    q('#ubody [data-open2]',function(b){b.onclick=function(e){e.stopPropagation();openDetail(b.getAttribute('data-open2'))}});
-    q('#ubody .rowchk',function(c){c.onclick=function(e){e.stopPropagation();if(c.checked)selected[c.getAttribute('data-d')]=1;else delete selected[c.getAttribute('data-d')];renderBulk();$('chkAll').checked=false}});
-    q('#ubody [data-a]',function(b){b.onclick=function(){var a=b.getAttribute('data-a'),d=b.getAttribute('data-d');if(b.disabled)return;b.disabled=true;actUser(d,a).then(function(j){if(j.ok){toast('Updated','ok');loadUsers();loadAudit()}else{b.disabled=false}})}});
-    q('#ubody [data-add]',function(b){b.onclick=function(){addRinFlow(b.getAttribute('data-add'))}});
-    q('#ubody [data-rm-d]',function(b){b.onclick=function(e){e.preventDefault();removeRinFlow(b.getAttribute('data-rm-d'),b.getAttribute('data-rm-r'))}});
-    q('#ubody [data-q]',function(b){b.onclick=function(){quotaFlow(b.getAttribute('data-q'))}});
+  var u=S.user.user||{}, cs=S.user.clients||[], ds=S.user.devices||[], js=S.user.jobs||[], bs=S.user.bugs||[], au=S.user.audit||[];
+  var st=String(u.status||'active').toLowerCase();
+  var tags = typeof u.tags==='string' ? u.tags.split(',').map(function(s){return s.trim();}).filter(Boolean) : (u.tags||[]);
+  var feats = typeof u.features==='string' ? (function(){ try{ return JSON.parse(u.features); }catch(e){ return u.features.split(','); } })() : (u.features||[]);
+
+  var header = '<div class="dhead"><div style="min-width:0">'
+    + '<h2>'+esc(u.name||u.email||'—')+'</h2>'
+    + '<div class="dsub">'+esc(u.company||'no company on file')+' &middot; <span class="mono">'+esc(u.email||'')+'</span></div>'
+    + '<div class="pills">'+userPills(u)+'</div></div>'
+    + '<div class="acts">'
+      + (st==='locked'?'<button class="btn" data-ua="unlock">Unlock</button>':'<button class="btn" data-ua="lock">Lock</button>')
+      + (st==='killed'?'<button class="btn good" data-ua="revive">Revive</button>':'<button class="btn danger" data-ua="kill">Kill</button>')
+      + (u.superadmin?'<button class="btn" data-ua="unsuper">Remove super</button>':'<button class="btn" data-ua="super">Make super</button>')
+      + '<button class="btn danger" id="udel">Delete</button>'
+    + '</div></div>';
+
+  var totals = '<div class="strip">'
+    + [{k:'Clients',v:(u.clientCount!=null?u.clientCount:cs.length)},{k:'Devices',v:(u.deviceCount!=null?u.deviceCount:ds.length)},
+       {k:'Jobs',v:(u.jobCount!=null?u.jobCount:js.length)},{k:'Documents',v:u.docs,c:'info'},
+       {k:'Open bugs',v:bs.filter(function(b){return b.status==='open';}).length,c:'bad'},
+       {k:'Quota',v:(u.clientCount!=null?u.clientCount:cs.length)+' / '+(u.quota||'∞'),c:'moss'}]
+      .map(function(t){ return '<div class="tile'+(t.c?' '+t.c:'')+'"><div class="v">'+(typeof t.v==='string'?esc(t.v):n(t.v))+'</div><div class="k">'+esc(t.k)+'</div></div>'; }).join('')
+    + '</div>';
+
+  var identity = '<div class="panel"><div class="eyebrow">Identity</div><div class="kv">'
+    + '<span class="k">Email</span><span class="v mono">'+(u.email?'<a href="mailto:'+esc(u.email)+'">'+esc(u.email)+'</a>':'—')+' <button class="copy" data-copy="'+esc(u.email||'')+'">copy</button></span>'
+    + '<span class="k">Phone</span><span class="v">'+(u.phone?'<a href="tel:'+esc(u.phone)+'">'+esc(u.phone)+'</a>':'—')+'</span>'
+    + '<span class="k">Company</span><span class="v">'+esc(u.company||'—')+'</span>'
+    + '<span class="k">Country</span><span class="v">'+esc(u.country||'—')+'</span>'
+    + '<span class="k">Registered</span><span class="v">'+cairo(f(u,'createdAt','created_at'))+' <span class="usub">'+esc(rel(f(u,'createdAt','created_at'))||'')+'</span></span>'
+    + '<span class="k">Last seen</span><span class="v">'+cairo(u.lastSeen)+' <span class="usub">'+esc(rel(u.lastSeen)||'never')+'</span></span>'
+    + '</div></div>';
+
+  var entitlement = '<div class="panel"><div class="eyebrow">Entitlement</div><div class="kv">'
+    + '<span class="k">Plan</span><span class="v"><span class="pill accent">'+esc(u.plan||'free')+'</span> <button class="btn tiny" data-ue="setPlan">change</button></span>'
+    + '<span class="k">Client quota</span><span class="v"><span class="num">'+esc(u.quota==null?'—':u.quota)+'</span> <button class="btn tiny" data-ue="setQuota">set</button></span>'
+    + '<span class="k">Valid until</span><span class="v"><span class="num">'+esc(u.validUntil?String(u.validUntil).slice(0,10):'—')+'</span> <button class="btn tiny" data-ue="setValidUntil">set</button></span>'
+    + '<span class="k">Features</span><span class="v">'+(feats.length?feats.map(function(x){ return '<span class="tag">'+esc(String(x).trim())+'</span>'; }).join(''):'<span class="muted">plan default</span>')+' <button class="btn tiny" data-ue="setFeatures">edit</button></span>'
+    + '<span class="k">Tags</span><span class="v">'+(tags.length?tags.map(function(t){ return '<span class="tag">'+esc(t)+'</span>'; }).join(''):'<span class="muted">none</span>')+' <button class="btn tiny" data-ue="setTags">edit</button></span>'
+    + '</div>'
+    + '<div class="field" style="margin-top:16px"><label>Admin note — private</label>'
+    + '<textarea id="unote" placeholder="Why is this account locked / trusted / suspicious?">'+esc(u.note||'')+'</textarea></div>'
+    + '<button class="btn tiny" id="unotesave">Save note</button></div>';
+
+  var clients = '<div class="panel flush"><div style="padding:18px 20px 0"><div class="eyebrow">Clients &middot; <b>'+cs.length+'</b></div></div>'
+    + (cs.length ? '<div class="tablewrap" style="border:none;border-radius:0;box-shadow:none;margin:0"><table><thead><tr>'
+        + '<th>RIN</th><th>Company</th><th>Jobs</th><th>Documents</th><th>Last export</th><th>State</th><th></th></tr></thead><tbody>'
+        + cs.map(function(c){
+            var rin=esc(f(c,'rin')||'');
+            return '<tr class="click" data-crin="'+rin+'"><td class="num"><b>'+rin+'</b></td>'
+              + '<td>'+esc(c.company||'—')+'</td><td class="num">'+n(c.jobCount)+'</td><td class="num">'+n(c.docs)+'</td>'
+              + '<td class="usub">'+when(f(c,'lastExportAt','last_export_at'))+'</td>'
+              + '<td>'+(Number(c.voided)?'<span class="pill bad">VOIDED</span>':'<span class="pill">live</span>')+'</td>'
+              + '<td><div class="act">'
+                + (Number(c.voided)?'<button class="btn tiny" data-cact="unvoid" data-r="'+rin+'">Un-void</button>':'<button class="btn tiny danger" data-cact="void" data-r="'+rin+'">Void</button>')
+                + '<button class="btn tiny" data-cact="move" data-r="'+rin+'">Move</button></div></td></tr>';
+          }).join('')+'</tbody></table></div>'
+      : '<div style="padding:4px 20px 18px" class="muted">No taxpayer registration numbers bound to this user.</div>')
+    + '</div>';
+
+  var devices = '<div class="panel flush"><div style="padding:18px 20px 0"><div class="eyebrow">Devices &middot; <b>'+ds.length+'</b></div></div>'
+    + (ds.length ? '<div class="tablewrap" style="border:none;border-radius:0;box-shadow:none;margin:0"><table><thead><tr>'
+        + '<th>Device</th><th>Version</th><th>Country</th><th>Last RIN</th><th>Exports</th><th>Documents</th><th>Last seen</th></tr></thead><tbody>'
+        + ds.map(function(d){
+            var id=String(f(d,'deviceId','device_id','id')||'');
+            return '<tr><td class="mono">'+esc(id.slice(0,12))+' <button class="copy" data-copy="'+esc(id)+'">copy</button></td>'
+              + '<td class="num">'+esc(d.version||'—')+'</td><td>'+esc(d.country||'—')+'</td>'
+              + '<td class="num">'+esc(f(d,'lastRin','last_rin')||'—')+'</td>'
+              + '<td class="num">'+n(d.exports)+'</td><td class="num">'+n(d.docs)+'</td>'
+              + '<td class="usub">'+when(f(d,'lastSeen','last_seen'))+'</td></tr>';
+          }).join('')+'</tbody></table></div>'
+      : '<div style="padding:4px 20px 18px" class="muted">No browser registrations. Until slice 3 the quota is still enforced per device in the extension API — this list is the truth about that.</div>')
+    + '</div>';
+
+  var jobs = '<div class="panel flush"><div style="padding:18px 20px 0"><div class="eyebrow">Jobs &middot; <b>'+js.length+'</b></div></div>'
+    + (js.length ? '<div class="tablewrap" style="border:none;border-radius:0;box-shadow:none;margin:0"><table><thead><tr>'
+        + '<th>Job</th><th>RIN</th><th>Source</th><th>State</th><th>Progress</th><th>Started</th></tr></thead><tbody>'
+        + js.map(jobRow).join('')+'</tbody></table></div>'
+      : '<div style="padding:4px 20px 18px" class="muted">No export runs recorded.</div>')
+    + '</div>';
+
+  var bugsPanel = '<div class="panel"><div class="eyebrow">Bug reports &middot; <b>'+bs.length+'</b></div>'
+    + (bs.length ? bs.map(function(g){
+        return '<div class="callout '+(g.status==='open'?'warn':'ok')+'"><span class="cl">'+esc(g.status||'open')+'</span>'
+          + '<span class="cb">'+esc(g.message||'')+'<div class="ref">'+esc(rel(g.at)||'')+(g.rin?' &middot; '+esc(g.rin):'')+'</div></span></div>';
+      }).join('') : '<div class="muted" style="font-size:13px">None reported.</div>')
+    + '</div>';
+
+  var auditPanel = '<div class="panel"><div class="eyebrow">History &middot; <b>'+au.length+'</b></div>'
+    + (au.length ? '<ul class="tl">'+au.map(function(a){
+        return '<li class="'+eventClass(a.action||a.kind)+'"><span class="tt">'+esc(rel(a.at)||'—')+'</span>'
+          + '<span class="tx">'+esc(a.action||a.kind||'')+(a.detail?' <span class="mono faint">'+esc(typeof a.detail==='string'?a.detail:JSON.stringify(a.detail))+'</span>':'')+'</span>'
+          + '<span class="tk"><span class="pill muted">'+esc(a.actor||'token')+'</span></span></li>';
+      }).join('')+'</ul>' : '<div class="muted" style="font-size:13px">No recorded admin actions against this account.</div>')
+    + '</div>';
+
+  var message = '<div class="panel"><div class="eyebrow">Message to user</div>'
+    + '<p class="hint">Shown inside the extension on its next check-in — it reaches a blocked account too.</p>'
+    + '<div class="field"><textarea id="umsg" maxlength="400" placeholder="e.g. Your plan expires on Sunday — renew to keep exporting."></textarea></div>'
+    + '<div class="inline"><select id="umsglvl" style="width:auto;min-width:130px"><option value="info">Info</option><option value="warn">Warning</option><option value="alert">Alert</option></select>'
+    + '<button class="btn primary" id="umsgsend">Send</button></div></div>';
+
+  return back + header + totals + '<div class="grid2">'+identity+entitlement+'</div>'
+    + clients + devices + jobs + '<div class="grid2">'+bugsPanel+auditPanel+'</div>' + message;
+};
+function jobRow(j){
+  var id=String(f(j,'jobId','job_id','id')||''), done=f(j,'done','rows','completed')||0, total=f(j,'total','chunks','expected')||0;
+  var state=f(j,'state','status')||'—';
+  return '<tr><td class="mono">'+esc(id.slice(0,14))+'</td>'
+    + '<td class="num">'+esc(f(j,'rin')||'—')+'</td><td>'+esc(f(j,'source')||'—')+'</td>'
+    + '<td><span class="pill '+jobStateClass(state)+'">'+esc(state)+'</span></td>'
+    + '<td style="min-width:130px"><div class="num" style="font-size:12px">'+n(done)+' / '+n(total)+'</div>'
+      + '<div class="bar sm" style="margin-top:5px"><i style="width:'+pct(done,total)+'%"></i></div></td>'
+    + '<td class="usub">'+when(f(j,'createdAt','created_at','startedAt','at'))+'</td></tr>';
+}
+WIRE.user = function(){
+  wireCommon();
+  var email=S.userEmail;
+  q('#views [data-ua]', function(b){ b.onclick=function(){
+    var a=b.getAttribute('data-ua'); b.disabled=true;
+    actUser(email,a).then(function(j){ if(j.ok){ toast('Updated','ok'); loadUser(email); loadUsers(); loadAudit(); } else b.disabled=false; }); }; });
+  q('#views [data-ue]', function(b){ b.onclick=function(){ editField(email,b.getAttribute('data-ue')); }; });
+  if($('unotesave')) $('unotesave').onclick=function(){ actUser(email,'setNote',$('unote').value).then(function(j){ if(j.ok) toast('Note saved','ok'); }); };
+  if($('udel')) $('udel').onclick=function(){
+    confirmDanger('Delete '+(S.user.user.name||email)+'?','Removes the account and releases the clients it owns. The deletion is written to the audit trail.','Delete')
+      .then(function(v){ if(v) actUser(email,'delete').then(function(j){ if(j.ok){ toast('User deleted','ok'); go('users'); loadUsers(); loadAudit(); } }); }); };
+  q('#views tr.click[data-crin]', function(tr){ tr.onclick=function(e){ if(e.target.closest('button,a,input')) return; openClient(tr.getAttribute('data-crin')); }; });
+  q('#views [data-cact]', function(b){ b.onclick=function(e){ e.stopPropagation(); clientAction(b.getAttribute('data-cact'), b.getAttribute('data-r'), function(){ loadUser(email); }); }; });
+  if($('umsgsend')) $('umsgsend').onclick=function(){
+    var tx=$('umsg').value.trim(); if(!tx){ toast('Enter a message','bad'); return; }
+    /* Out of the SPEC-017 action list — kept because dropping it would lose a shipped
+       feature. If the server rejects it, the error surfaces honestly. */
+    actUser(email,'setMessage',{text:tx,level:$('umsglvl').value}).then(function(j){ if(j.ok){ toast('Queued — delivered on next check-in','ok'); loadUser(email); } });
+  };
+};
+function editField(email,action){
+  var u=(S.user&&S.user.user)||{};
+  var specs = {
+    setPlan:{title:'Change plan',label:'Plan id',value:u.plan||'free',placeholder:'free / pro / team'},
+    setQuota:{title:'Client quota',label:'Maximum registration numbers',type:'number',min:0,value:u.quota==null?1:u.quota,
+      message:'Enforced once, on the user. Devices inherit it.'},
+    setValidUntil:{title:'Valid until',label:'Date',type:'date',value:u.validUntil?String(u.validUntil).slice(0,10):''},
+    setFeatures:{title:'Features',label:'Comma-separated flags',value:(Array.isArray(u.features)?u.features.join(', '):(u.features||'')),placeholder:'auto-reject, pdf, priority',
+      message:'A per-user override wins over the plan default.'},
+    setTags:{title:'Tags',label:'Comma-separated tags',value:(Array.isArray(u.tags)?u.tags.join(', '):(u.tags||''))}
+  };
+  var sp=specs[action]; if(!sp) return;
+  modal({title:sp.title, message:sp.message, confirmText:'Save',
+    input:{label:sp.label,type:sp.type,min:sp.min,value:sp.value,placeholder:sp.placeholder}}).then(function(v){
+    if(v===null) return;
+    var val = sp.type==='number' ? (parseInt(v,10)||0) : v;
+    actUser(email,action,val).then(function(j){ if(j.ok){ toast(sp.title+' saved','ok'); loadUser(email); loadUsers(); loadAudit(); } });
+  });
+}
+function wireCommon(){
+  q('#views [data-back]', function(b){ b.onclick=function(){ go(b.getAttribute('data-back')); }; });
+  q('#views [data-copy]', function(b){ b.onclick=function(e){ e.stopPropagation();
+    try{ navigator.clipboard.writeText(b.getAttribute('data-copy')); toast('Copied','ok',1100); }catch(err){} }; });
+}
+
+/* ═══ CLIENTS ═════════════════════════════════════════════════════════════ */
+RENDER.clients = function(){
+  var head = '<div class="toolbar">'
+    + '<input id="csearch" class="search" placeholder="Search RIN, company or managing user…" aria-label="Search clients" value="'+esc(S.cq)+'">'
+    + '<span class="sp"></span><span class="mlabel">'+n(S.ctotal)+' registered</span></div>';
+  if(S.clientsErr) return head + '<div class="empty"><span class="mlabel">Clients</span><div class="big">GET /api/clients returned <span class="mono">'+esc(S.clientsErr)+'</span></div>Until the backend half lands, Tools &rarr; RIN lookup answers the same question one number at a time.</div>';
+  if(!S.clients.length) return head + '<div class="empty"><span class="mlabel">Clients</span><div class="big">No taxpayer matches</div>A client row appears for every registration number a user binds.</div>';
+  var body = S.clients.map(function(c){
+    var rin=esc(c.rin||'');
+    return '<tr class="click" data-crin="'+rin+'">'
+      + '<td class="num"><b>'+rin+'</b></td>'
+      + '<td><div class="uname">'+esc(c.company||'—')+'</div></td>'
+      + '<td><div class="uname" style="font-weight:600">'+esc(c.userName||'—')+'</div><div class="usub mono">'+esc(c.userEmail||'')+'</div></td>'
+      + '<td>'+(Number(c.voided)?'<span class="pill bad">VOIDED</span>':'<span class="pill">live</span>')+'</td>'
+      + '<td class="num">'+n(c.jobCount)+'</td><td class="num">'+n(c.docs)+'</td>'
+      + '<td class="usub">'+when(c.lastExportAt)+'</td>'
+      + '<td><div class="act">'
+        + (Number(c.voided)?'<button class="btn tiny" data-cact="unvoid" data-r="'+rin+'">Un-void</button>':'<button class="btn tiny danger" data-cact="void" data-r="'+rin+'">Void</button>')
+        + '<button class="btn tiny" data-cact="move" data-r="'+rin+'">Move</button>'
+        + '<button class="btn tiny" data-copen="'+rin+'">Open</button></div></td></tr>';
+  }).join('');
+  return head
+    + '<div class="tablewrap"><table class="wide"><thead><tr>'
+    + '<th>RIN</th><th>Taxpayer</th><th>Managed by</th><th>State</th><th>Jobs</th><th>Documents</th><th>Last export</th><th></th>'
+    + '</tr></thead><tbody>'+body+'</tbody></table></div>'
+    + pager('c',S.cpage,S.ctotal);
+};
+WIRE.clients = function(){
+  var si=$('csearch');
+  if(si){
+    si.oninput=function(){ S.cq=si.value; S.cpage=1; clearTimeout(WIRE._c); WIRE._c=setTimeout(loadClients,220); };
+    si.onkeydown=function(e){ if(e.key==='Enter'){ clearTimeout(WIRE._c); loadClients(); } };
   }
-  function addRinFlow(id){modal({title:'Add allowed RIN',message:'Bind another registration number to this user.',input:{label:'Registration number',placeholder:'e.g. 123456789'},confirmText:'Add'}).then(function(v){v=(v||'').trim();if(v)actUser(id,'addRin',v).then(function(j){if(j.ok){toast('RIN added','ok');loadUsers();loadAudit()}})})}
-  function removeRinFlow(id,r){modal({title:'Remove RIN?',message:'Remove '+r+' from this user’s allowed list.',confirmText:'Remove',danger:true}).then(function(v){if(v)actUser(id,'removeRin',r).then(function(j){if(j.ok){toast('RIN removed','ok');loadUsers();loadAudit()}})})}
-  function quotaFlow(id){var d=userById(id);modal({title:'RIN quota',message:'Maximum distinct registration numbers this user may bind.',input:{type:'number',min:0,label:'Quota',value:d?d.quota:1},confirmText:'Save'}).then(function(v){if(v!==null&&v!=='')actUser(id,'setQuota',parseInt(v,10)||0).then(function(j){if(j.ok){toast('Quota updated','ok');loadUsers();loadAudit()}})})}
-  function moveRinFlow(id,r){var opts=users.filter(function(u){return u.deviceId!==id}).map(function(u){return {value:u.deviceId,label:(u.name||u.email||'?')+' · '+(u.email||'')+' · '+(u.deviceId||'').slice(0,8)}});if(!opts.length){toast('No other account to move to','bad');return}modal({title:'Move RIN '+r,message:'Transfer '+r+' to another account (releases it from this one and claims it for the target).',input:{label:'Target account',options:opts},confirmText:'Move',danger:true}).then(function(v){if(v)actUser(id,'moveRin',r,{toDeviceId:v}).then(function(j){if(j.ok){toast('RIN moved','ok');loadUsers();loadAudit()}})})}
-
-  function renderBulk(){var n=Object.keys(selected).length;$('bulkbar').hidden=n===0;$('bulkcount').textContent=n+' selected'}
-  $('chkAll').onclick=function(){var on=$('chkAll').checked;var rows=currentRows().slice((page-1)*PAGE,page*PAGE);rows.forEach(function(d){if(on)selected[d.deviceId]=1;else delete selected[d.deviceId]});renderUsers()};
-  $('bulkclear').onclick=function(){selected={};renderUsers()};
-  q('#bulkbar [data-bulk]',function(b){b.onclick=function(){var a=b.getAttribute('data-bulk');var ids=Object.keys(selected);if(!ids.length)return;
-    modal({title:a.charAt(0).toUpperCase()+a.slice(1)+' '+ids.length+' user(s)?',message:a==='delete'?'Deletes '+ids.length+' account(s) and frees their RINs. Recoverable from Tools → Trash for 30 days.':'Apply "'+a+'" to '+ids.length+' selected account(s).',confirmText:a.charAt(0).toUpperCase()+a.slice(1),danger:(a==='delete'||a==='kill')}).then(function(v){if(!v)return;
-      var done=0;function step(i){if(i>=ids.length){toast(a+' applied to '+done+'/'+ids.length,'ok');selected={};loadUsers();loadVoids();loadAudit();return}actUser(ids[i],a).then(function(j){if(j&&j.ok)done++;step(i+1)})}step(0)})}});
-
-  function openDetail(id){curUser=id;refreshDetail();$('udrawer').hidden=false}
-  function closeDetail(){curUser=null;$('udrawer').hidden=true}
-  $('udrawer').querySelector('.ov').onclick=closeDetail;
-  function refreshDetail(){var d=userById(curUser);if(!d){closeDetail();return}
-    var myReqs=reqs.filter(function(r){return r.deviceId===d.deviceId});
-    var myBugs=bugs.filter(function(g){return g.deviceId===d.deviceId});
-    var rins=(d.boundRins||[]).map(function(r){return '<span class="r">'+esc(r)+' <a href="#" data-drm="'+esc(r)+'" title="Remove">×</a> <a href="#" data-dmv="'+esc(r)+'" title="Move to another account" style="color:var(--info)">⇄</a></span>'}).join(' ')||'<span class="muted">none</span>';
-    var h='<button class="iconbtn close" id="dclose" title="Close">×</button>'
-      +'<h2>'+esc(d.name||'—')+'</h2><div class="dsub">'+esc(d.company||'')+'  '+statusPill(d)+'</div>'
-      +'<div class="sec"><h4>Identity</h4><div class="kv">'
-      +'<span class="k">Email</span><span class="v">'+(d.email?'<a href="mailto:'+esc(d.email)+'">'+esc(d.email)+'</a>':'—')+(d.emailVerified?' <span class="pill" style="padding:0 6px">✓</span>':'')+'</span>'
-      +'<span class="k">Phone</span><span class="v">'+(d.phone?'<a href="tel:'+esc(d.phone)+'">'+esc(d.phone)+'</a>':'—')+'</span>'
-      +'<span class="k">Taxpayer name</span><span class="v">'+esc(d.taxpayerName||'—')+'</span>'
-      +'<span class="k">Country</span><span class="v">'+esc(d.country||'—')+'</span>'
-      +'<span class="k">Version</span><span class="v mono">'+esc(d.version||'—')+'</span>'
-      +'</div></div>'
-      +'<div class="sec"><h4>Account</h4><div class="kv">'
-      +'<span class="k">Device ID</span><span class="v mono">'+esc(d.deviceId||'')+' <button class="copy" data-copy="'+esc(d.deviceId||'')+'">copy</button></span>'
-      +'<span class="k">Registered</span><span class="v">'+cairo(d.firstAt)+' <span class="usub">('+rel(d.firstAt)+')</span></span>'
-      +'<span class="k">Last seen</span><span class="v">'+cairo(d.lastSeen)+' <span class="usub">('+(rel(d.lastSeen)||'never')+')</span></span>'
-      +'<span class="k">Check-ins</span><span class="v">'+esc(d.count||0)+'</span>'
-      +'<span class="k">Exports</span><span class="v">'+Number(d.exports||0).toLocaleString()+' run'+(d.exports===1?'':'s')+'</span>'
-      +'<span class="k">Documents</span><span class="v">'+Number(d.docs||0).toLocaleString()+(d.pdfs?' <span class="usub">(+'+Number(d.pdfs).toLocaleString()+' PDFs)</span>':'')+'</span>'
-      +'<span class="k">Last export</span><span class="v">'+(d.lastExportAt?cairo(d.lastExportAt)+' <span class="usub">('+rel(d.lastExportAt)+')</span>':'<span class="muted">never</span>')+'</span>'
-      +'<span class="k">Quota</span><span class="v">'+esc(d.quota)+' <button class="btn tiny" id="dq">set</button></span>'
-      +'<span class="k">Features</span><span class="v">'+esc((d.features||[]).join(', ')||'—')+' <button class="btn tiny" id="dfeat">edit</button></span>'
-      +'</div></div>'
-      +'<div class="sec"><h4>Allowed RINs</h4><div class="rins">'+rins+'</div><button class="btn tiny" id="dadd" style="margin-top:6px">+ RIN</button></div>'
-      +'<div class="sec"><h4>Tags</h4><div>'+((d.tags||[]).map(function(t){return '<span class="tag">'+esc(t)+'</span>'}).join('')||'<span class="muted">none</span>')+'</div><div class="inline" style="margin-top:8px"><input id="dtags" placeholder="comma,separated,tags" value="'+esc((d.tags||[]).join(', '))+'"><button class="btn tiny" id="dtagsave">Save</button></div></div>'
-      +'<div class="sec"><h4>Admin note</h4><textarea id="dnote" placeholder="Why is this account locked / trusted / suspicious? Private to you.">'+esc(d.note||'')+'</textarea><button class="btn tiny" id="dnotesave" style="margin-top:8px">Save note</button></div>'
-      +'<div class="sec"><h4>Message to user</h4>'
-      +(d.message?'<div class="usub" style="margin-bottom:6px"><span class="pill '+(d.message.level==='alert'?'bad':d.message.level==='warn'?'warn':'')+'">'+esc(d.message.level)+'</span> '+esc(d.message.text)+' <span class="muted">· '+rel(d.message.at)+'</span></div>':'<div class="muted" style="margin-bottom:6px">none</div>')
-      +'<textarea id="dmsg" maxlength="400" placeholder="Shown inside the user\'s extension on its next check-in (works even while blocked).">'+esc(d.message?d.message.text:'')+'</textarea>'
-      +'<div class="inline" style="margin-top:8px"><select id="dmsglvl" style="max-width:140px"><option value="info">Info</option><option value="warn">Warning</option><option value="alert">Alert</option></select>'
-      +'<button class="btn tiny primary" id="dmsgsend">Send</button>'+(d.message?'<button class="btn tiny danger" id="dmsgclear">Clear</button>':'')+'</div></div>'
-      +'<div class="sec"><h4>RIN requests ('+myReqs.length+')</h4>'+(myReqs.length?myReqs.map(function(r){return '<div class="usub" style="margin-bottom:4px"><b class="mono">'+esc(r.requestedRin)+'</b> · '+esc(r.status)+' · '+rel(r.at)+(r.note?' — '+esc(r.note):'')+'</div>'}).join(''):'<span class="muted">none</span>')+'</div>'
-      +'<div class="sec"><h4>Bug reports ('+myBugs.length+')</h4>'+(myBugs.length?myBugs.map(function(g){return '<div class="usub" style="margin-bottom:6px">['+esc(g.status)+'] '+rel(g.at)+'<div class="msg">'+esc(g.message)+'</div></div>'}).join(''):'<span class="muted">none</span>')+'</div>'
-      +'<div class="sec"><h4>Actions</h4><div class="act">'
-      +(d.locked?'<button class="btn tiny" data-da="unlock">Unlock</button>':'<button class="btn tiny" data-da="lock">Lock</button>')
-      +(d.killed?'<button class="btn tiny good" data-da="revive">Revive</button>':'<button class="btn tiny danger" data-da="kill">Kill</button>')
-      +(d.superadmin?'<button class="btn tiny" data-da="unsuper">Un-super</button>':'<button class="btn tiny" data-da="super">Make super</button>')
-      +'<button class="btn tiny danger" id="ddel">Delete user</button>'
-      +'</div></div>';
-    $('upanel').innerHTML=h;wireDetail(d);
+  q('#views [data-pg]', function(b){ b.onclick=function(){
+    var d=b.getAttribute('data-pg').split(':')[1];
+    S.cpage = d==='next' ? S.cpage+1 : Math.max(1,S.cpage-1); loadClients(); }; });
+  q('#views tr.click[data-crin]', function(tr){ tr.onclick=function(e){ if(e.target.closest('button,a,input')) return; openClient(tr.getAttribute('data-crin')); }; });
+  q('#views [data-copen]', function(b){ b.onclick=function(e){ e.stopPropagation(); openClient(b.getAttribute('data-copen')); }; });
+  q('#views [data-cact]', function(b){ b.onclick=function(e){ e.stopPropagation(); clientAction(b.getAttribute('data-cact'), b.getAttribute('data-r'), loadClients); }; });
+};
+function openClient(rin){ S.clientRin=rin; S.client=null; go('client',rin); loadClient(rin); }
+function clientAction(action,rin,after){
+  if(action==='move'){
+    var opts=S.users.map(function(u){ return {value:u.email,label:(u.name||u.email)+' — '+(u.company||'')}; });
+    var body = opts.length
+      ? modal({title:'Move '+rin, message:'Reassigns ownership of this taxpayer. The move is written to the audit trail with an actor.',
+          input:{label:'New owner',options:opts}, confirmText:'Move', danger:true})
+      : modal({title:'Move '+rin, message:'Reassigns ownership of this taxpayer.',
+          input:{label:'New owner email',placeholder:'name@company.com'}, confirmText:'Move', danger:true});
+    body.then(function(v){ if(v) post('/api/client',{rin:rin,action:'move',value:v}).then(function(j){ if(j.ok){ toast('Ownership moved','ok'); if(after) after(); loadAudit(); } }); });
+    return;
   }
-  function wireDetail(d){
-    $('dclose').onclick=closeDetail;
-    q('#upanel [data-copy]',function(b){b.onclick=function(){try{navigator.clipboard.writeText(b.getAttribute('data-copy'));toast('Copied','ok',1000)}catch(e){}}});
-    q('#upanel [data-da]',function(b){b.onclick=function(){b.disabled=true;actUser(d.deviceId,b.getAttribute('data-da')).then(function(j){if(j.ok){toast('Updated','ok');loadUsers();loadAudit()}else b.disabled=false})}});
-    q('#upanel [data-drm]',function(b){b.onclick=function(e){e.preventDefault();removeRinFlow(d.deviceId,b.getAttribute('data-drm'))}});
-    q('#upanel [data-dmv]',function(b){b.onclick=function(e){e.preventDefault();moveRinFlow(d.deviceId,b.getAttribute('data-dmv'))}});
-    $('dadd').onclick=function(){addRinFlow(d.deviceId)};
-    $('dq').onclick=function(){quotaFlow(d.deviceId)};
-    $('dfeat').onclick=function(){modal({title:'Features',message:'Comma-separated feature flags (for future paid tiers).',input:{label:'Features',value:(d.features||[]).join(','),placeholder:'pdf, merge, priority'},confirmText:'Save'}).then(function(v){if(v!==null)actUser(d.deviceId,'setFeatures',v).then(function(j){if(j.ok){toast('Features saved','ok');loadUsers();loadAudit()}})})};
-    $('dtagsave').onclick=function(){actUser(d.deviceId,'setTags',$('dtags').value).then(function(j){if(j.ok){toast('Tags saved','ok');loadUsers();loadAudit()}})};
-    $('dnotesave').onclick=function(){actUser(d.deviceId,'setNote',$('dnote').value).then(function(j){if(j.ok){toast('Note saved','ok');loadUsers()}})};
-    $('dmsgsend').onclick=function(){var tx=$('dmsg').value.trim();if(!tx){toast('Enter a message','bad');return}actUser(d.deviceId,'setMessage',{text:tx,level:$('dmsglvl').value}).then(function(j){if(j.ok){toast('Message queued — delivered on next check-in','ok');loadUsers();loadAudit()}})};
-    if($('dmsgclear'))$('dmsgclear').onclick=function(){actUser(d.deviceId,'clearMessage').then(function(j){if(j.ok){toast('Message cleared','ok');loadUsers();loadAudit()}})};
-    $('ddel').onclick=function(){modal({title:'Delete '+(d.name||'user')+'?',message:'Removes '+(d.name||'this account')+' ('+(d.email||d.deviceId.slice(0,8))+') and frees the RINs it owns. Recoverable from Tools → Trash for 30 days.',confirmText:'Delete',danger:true}).then(function(v){if(v)actUser(d.deviceId,'delete').then(function(j){if(j.ok){toast('User deleted — recoverable in Tools → Trash for 30 days','ok');closeDetail();loadAll()}})})};
+  var run = function(){ post('/api/client',{rin:rin,action:action}).then(function(j){ if(j.ok){ toast(action==='void'?'RIN voided':'RIN restored','ok'); if(after) after(); loadVoids(); loadAudit(); } }); };
+  if(action==='void') confirmDanger('Void '+rin+'?','Blocks this registration number for every account, including registration. Propagates within about 60s.','Void').then(function(v){ if(v) run(); });
+  else run();
+}
+
+/* ═══ CLIENT DETAIL ═══════════════════════════════════════════════════════ */
+RENDER.client = function(){
+  var back='<button class="back" data-back="clients">&larr; All clients</button>';
+  if(!S.client){
+    return back+'<div class="empty"><span class="mlabel">Client</span><div class="big">'
+      + (S.clientErr ? 'GET /api/client returned '+esc(S.clientErr) : 'Loading '+esc(S.clientRin)+'…')+'</div></div>';
   }
+  var c=S.client.client||{}, u=S.client.user||null, js=S.client.jobs||[];
+  var rin=esc(c.rin||S.clientRin);
+  var docs = js.reduce(function(a,j){ return a + Number(f(j,'docs','rows')||0); },0);
+  var header = '<div class="dhead"><div style="min-width:0">'
+    + '<h2 class="num">'+rin+'</h2>'
+    + '<div class="dsub">'+esc(c.company||'no taxpayer name on file')+'</div>'
+    + '<div class="pills">'+(Number(c.voided)?'<span class="pill bad">VOIDED</span>':'<span class="pill">live</span>')+'</div></div>'
+    + '<div class="acts">'
+      + (Number(c.voided)?'<button class="btn" data-cact="unvoid" data-r="'+rin+'">Un-void</button>':'<button class="btn danger" data-cact="void" data-r="'+rin+'">Void</button>')
+      + '<button class="btn" data-cact="move" data-r="'+rin+'">Move to another user</button>'
+    + '</div></div>';
 
-  function renderReqs(){
-    var query=($('rsearch').value||'').toLowerCase().trim();
-    var rows=reqs.filter(function(r){return rfilter==='all'||r.status===rfilter}).filter(function(r){return !query||[r.name,r.email,r.requestedRin,r.note].join(' ').toLowerCase().indexOf(query)>=0});
-    var h='';rows.forEach(function(r){h+='<tr><td class="usub">'+when(r.at)+'</td><td>'+esc(r.name||'—')+'<div class="usub">'+esc(r.email||'')+'</div></td><td class="mono"><b>'+esc(r.requestedRin)+'</b></td><td class="msg">'+esc(r.note||'')+'</td><td>'+(r.status==='pending'?'<span class="pill warn">pending</span>':'<span class="pill">'+esc(r.status)+'</span>')+'</td><td><div class="act">'+(r.status==='pending'?'<button class="btn tiny primary" data-ap="'+esc(r.id)+'">Approve</button><button class="btn tiny" data-dn="'+esc(r.id)+'">Deny</button>':'<button class="btn tiny danger" data-rdel="'+esc(r.id)+'">Del</button>')+'</div></td></tr>'});
-    $('rbody').innerHTML=h;$('rempty').hidden=rows.length>0;
-    q('#rbody [data-ap]',function(b){b.onclick=function(){if(b.disabled)return;b.disabled=true;post('/api/request',{id:b.getAttribute('data-ap'),action:'approve'}).then(function(j){if(j.ok){toast('Approved — RIN added','ok');loadReqs();loadUsers();loadAudit()}else{b.disabled=false}})}});
-    q('#rbody [data-dn]',function(b){b.onclick=function(){if(b.disabled)return;b.disabled=true;post('/api/request',{id:b.getAttribute('data-dn'),action:'deny'}).then(function(j){if(j.ok){toast('Denied','ok');loadReqs();loadAudit()}else{b.disabled=false}})}});
-    q('#rbody [data-rdel]',function(b){b.onclick=function(){post('/api/request',{id:b.getAttribute('data-rdel'),action:'delete'}).then(function(j){if(j.ok){toast('Removed','ok');loadReqs()}})}});
+  var owner = '<div class="panel"><div class="eyebrow">Managed by</div>'
+    + (u ? '<div class="kv">'
+        + '<span class="k">User</span><span class="v"><a href="#" data-uopen="'+esc(u.email||'')+'">'+esc(u.name||u.email||'—')+'</a></span>'
+        + '<span class="k">Email</span><span class="v mono">'+esc(u.email||'—')+'</span>'
+        + '<span class="k">Company</span><span class="v">'+esc(u.company||'—')+'</span>'
+        + '<span class="k">Plan</span><span class="v"><span class="pill accent">'+esc(u.plan||'free')+'</span></span>'
+        + '<span class="k">Status</span><span class="v">'+userPills(u)+'</span>'
+        + '</div>'
+      : '<div class="callout warn"><span class="cl">Orphan</span><span class="cb">No user owns this registration number. If it came out of the migration it may be one of the reported conflicts — those are left with their existing owner rather than silently reassigned.</span></div>')
+    + '</div>';
+
+  var totals = '<div class="panel"><div class="eyebrow">Export record</div><div class="kv">'
+    + '<span class="k">Jobs</span><span class="v num">'+n(c.jobCount!=null?c.jobCount:js.length)+'</span>'
+    + '<span class="k">Documents</span><span class="v num">'+n(c.docs!=null?c.docs:docs)+'</span>'
+    + '<span class="k">Last export</span><span class="v">'+cairo(c.lastExportAt)+' <span class="usub">'+esc(rel(c.lastExportAt)||'never')+'</span></span>'
+    + '<span class="k">Created</span><span class="v">'+cairo(f(c,'createdAt','created_at'))+'</span>'
+    + '</div></div>';
+
+  var jobs = '<div class="panel flush"><div style="padding:18px 20px 0"><div class="eyebrow">Export history &middot; <b>'+js.length+'</b></div></div>'
+    + (js.length ? '<div class="tablewrap" style="border:none;border-radius:0;box-shadow:none;margin:0"><table><thead><tr>'
+        + '<th>Job</th><th>RIN</th><th>Source</th><th>State</th><th>Progress</th><th>Started</th></tr></thead><tbody>'
+        + js.map(jobRow).join('')+'</tbody></table></div>'
+      : '<div style="padding:4px 20px 18px" class="muted">No export has ever been run against this taxpayer.</div>')
+    + '</div>';
+
+  return back + header + '<div class="grid2">'+owner+totals+'</div>' + jobs;
+};
+WIRE.client = function(){
+  wireCommon();
+  q('#views [data-cact]', function(b){ b.onclick=function(){ clientAction(b.getAttribute('data-cact'), b.getAttribute('data-r'), function(){ loadClient(S.clientRin); }); }; });
+  q('#views [data-uopen]', function(a){ a.onclick=function(e){ e.preventDefault(); openUser(a.getAttribute('data-uopen')); }; });
+};
+
+/* ═══ CHARTS — inline SVG, no libraries ═══════════════════════════════════ */
+function svgBars(data,color){
+  if(!data||!data.length) return '<div class="muted" style="padding:14px 0;font-size:13px">No data yet.</div>';
+  var w=520,rowH=19,gap=9,pad=4;
+  var max=Math.max(1,Math.max.apply(null,data.map(function(d){ return d.value; })));
+  var h=data.length*(rowH+gap)+pad*2;
+  var s='<svg viewBox="0 0 '+w+' '+h+'" preserveAspectRatio="xMinYMin meet" role="img">';
+  data.forEach(function(d,i){
+    var y=pad+i*(rowH+gap), bw=Math.max(2,(w-190)*(d.value/max));
+    s+='<text x="0" y="'+(y+13)+'" class="cl">'+esc(String(d.label).slice(0,16))+'</text>'
+      +'<rect x="130" y="'+y+'" width="'+bw+'" height="'+rowH+'" rx="4" fill="'+(color||'var(--accent)')+'"/>'
+      +'<text x="'+(137+bw)+'" y="'+(y+13)+'" class="cv">'+d.value+'</text>';
+  });
+  return s+'</svg>';
+}
+function svgCols(data,color){
+  if(!data||!data.length) return '<div class="muted" style="padding:14px 0;font-size:13px">No data yet.</div>';
+  var w=560,h=160,pad=24,nn=data.length;
+  var max=Math.max(1,Math.max.apply(null,data.map(function(d){ return d.value; })));
+  var bw=(w-pad*2)/nn;
+  var s='<svg viewBox="0 0 '+w+' '+h+'" preserveAspectRatio="xMinYMin meet" role="img">';
+  data.forEach(function(d,i){
+    var bh=(h-pad*2)*(d.value/max), x=pad+i*bw, y=h-pad-bh;
+    s+='<rect x="'+(x+1)+'" y="'+y+'" width="'+Math.max(1,bw-2)+'" height="'+Math.max(1,bh)+'" rx="2" fill="'+(color||'var(--accent)')+'"><title>'+esc(d.label)+': '+d.value+'</title></rect>';
+  });
+  var step=Math.ceil(nn/6);
+  data.forEach(function(d,i){ if(i%step===0){ var x=pad+i*bw; s+='<text x="'+(x+bw/2)+'" y="'+(h-8)+'" text-anchor="middle" class="axis">'+esc(String(d.label).slice(5))+'</text>'; } });
+  return s+'</svg>';
+}
+function svgSplit(parts){
+  var total=parts.reduce(function(a,p){ return a+p.value; },0)||1, w=520,h=30,x=0;
+  var s='<svg viewBox="0 0 '+w+' '+h+'" preserveAspectRatio="none" role="img">';
+  parts.forEach(function(p){ var pw=w*(p.value/total);
+    s+='<rect x="'+x+'" y="0" width="'+Math.max(0,pw)+'" height="'+h+'" fill="'+p.color+'"><title>'+esc(p.label)+': '+p.value+'</title></rect>'; x+=pw; });
+  return s+'</svg>';
+}
+function legend(parts){ return '<div class="legend">'+parts.map(function(p){ return '<span><i style="background:'+p.color+'"></i>'+esc(p.label)+': '+p.value+'</span>'; }).join('')+'</div>'; }
+function chart(title,hint,inner){ return '<div class="panel chartcard"><div class="eyebrow">'+esc(title)+'</div><p class="hint">'+hint+'</p>'+inner+'</div>'; }
+
+/* ═══ INSIGHTS ════════════════════════════════════════════════════════════ */
+RENDER.insights = function(){
+  if(!S.insights) return '<div class="empty"><span class="mlabel">Insights</span><div class="big">'
+    + (S.insightsDone ? 'No aggregates available' : 'Loading aggregates…') + '</div>'
+    + (S.insightsDone ? '/api/insights answered without a payload. Aggregates are computed from the KV device records.' : '') + '</div>';
+  var I=S.insights, V=I.value||{}, A=I.activity||{};
+  var kpis=[{v:I.total,k:'Registered'},{v:I.checkedIn,k:'Checked in'},{v:A.active7,k:'Active 7d'},{v:A.active30,k:'Active 30d'},
+            {v:A.never,k:'Never seen'},{v:V.totalDocs,k:'Docs exported',c:'info'},{v:V.totalExports,k:'Export runs',c:'moss'}];
+  var strip='<div class="strip">'+kpis.map(function(t){ return '<div class="tile'+(t.c?' '+t.c:'')+'"><div class="v">'+n(t.v)+'</div><div class="k">'+esc(t.k)+'</div></div>'; }).join('')+'</div>';
+
+  var trend;
+  if(!S.snaps.length) trend='<div class="muted" style="font-size:13px">No snapshots yet — the first appears after tonight&#39;s 02:00 UTC cron run.</div>';
+  else {
+    var last=S.snaps[S.snaps.length-1];
+    trend=legend([{label:'Users',value:last.users,color:'var(--accent)'},{label:'Docs exported',value:n(last.totalDocs||0),color:'var(--ok)'},{label:'Active 7d',value:last.active7,color:'var(--muted)'}])
+      + svgCols(S.snaps.map(function(s){ return {label:s.day.slice(5),value:s.users}; }),'var(--accent)')
+      + svgCols(S.snaps.map(function(s){ return {label:s.day.slice(5),value:s.totalDocs||0}; }),'var(--ok)');
   }
-  function renderBugs(){
-    var query=($('bsearch').value||'').toLowerCase().trim();
-    var rows=bugs.filter(function(g){return bfilter==='all'||g.status===bfilter}).filter(function(g){return !query||[g.name,g.email,g.rin,g.message,g.diag&&g.diag.version,g.diag&&(g.diag.log||[]).join(' ')].join(' ').toLowerCase().indexOf(query)>=0});
-    var h='';rows.forEach(function(g){
-      var dg='';
-      if(g.diag){var p=g.diag.plan;var sumr='diagnostics · v'+(g.diag.version||'?')+(p?' · '+(p.source||'')+' '+(p.year||'')+' · '+(p.done|0)+'/'+(p.chunks|0)+' chunks · '+(p.failed|0)+' failed · '+(p.rows|0)+' rows'+(p.pdf?' · pdf':''):'');
-        dg='<details class="usub" style="margin-top:4px"><summary style="cursor:pointer">'+esc(sumr)+'</summary>'+(g.diag.last?'<div class="usub" style="margin-top:4px">last: '+esc(g.diag.last)+'</div>':'')+'<pre class="mono" style="white-space:pre-wrap;max-height:220px;overflow:auto;margin:6px 0 0;font-size:11px">'+esc((g.diag.log||[]).join('\n'))+'</pre></details>'}
-      h+='<tr><td class="usub">'+when(g.at)+'</td><td>'+esc(g.name||'—')+'<div class="usub">'+esc(g.email||'')+'</div></td><td class="mono">'+esc(g.rin||'')+'</td><td class="msg">'+esc(g.message||'')+(g.ua?'<div class="usub" style="margin-top:4px">'+esc(g.ua)+'</div>':'')+dg+'</td><td>'+(g.status==='open'?'<span class="pill warn">open</span>':'<span class="pill">resolved</span>')+'</td><td><div class="act">'+(g.status==='open'?'<button class="btn tiny" data-rs="'+esc(g.id)+'">Resolve</button>':'<button class="btn tiny" data-ro="'+esc(g.id)+'">Reopen</button>')+'<button class="btn tiny danger" data-bd="'+esc(g.id)+'">Del</button></div></td></tr>'});
-    $('bbody').innerHTML=h;$('bempty').hidden=rows.length>0;
-    q('#bbody [data-rs]',function(b){b.onclick=function(){if(b.disabled)return;b.disabled=true;post('/api/bug',{id:b.getAttribute('data-rs'),action:'resolve'}).then(function(j){if(j.ok){toast('Resolved','ok');loadBugs()}else{b.disabled=false}})}});
-    q('#bbody [data-ro]',function(b){b.onclick=function(){if(b.disabled)return;b.disabled=true;post('/api/bug',{id:b.getAttribute('data-ro'),action:'reopen'}).then(function(j){if(j.ok){toast('Reopened','ok');loadBugs()}else{b.disabled=false}})}});
-    q('#bbody [data-bd]',function(b){b.onclick=function(){modal({title:'Delete report?',confirmText:'Delete',danger:true}).then(function(v){if(v)post('/api/bug',{id:b.getAttribute('data-bd'),action:'delete'}).then(function(j){if(j.ok){toast('Deleted','ok');loadBugs()}})})}});
-  }
-  function renderReqChips(){var defs=[['all','All'],['pending','Pending'],['approved','Approved'],['denied','Denied']];$('rchips').innerHTML=defs.map(function(d){return '<button class="chip'+(rfilter===d[0]?' on':'')+'" data-rf="'+d[0]+'">'+d[1]+'</button>'}).join('');q('#rchips .chip',function(b){b.onclick=function(){rfilter=b.getAttribute('data-rf');renderReqChips();renderReqs()}})}
-  function renderBugChips(){var defs=[['all','All'],['open','Open'],['resolved','Resolved']];$('bchips').innerHTML=defs.map(function(d){return '<button class="chip'+(bfilter===d[0]?' on':'')+'" data-bf="'+d[0]+'">'+d[1]+'</button>'}).join('');q('#bchips .chip',function(b){b.onclick=function(){bfilter=b.getAttribute('data-bf');renderBugChips();renderBugs()}})}
+  var act=[{label:'Active 7d',value:A.active7||0,color:'var(--ok)'},{label:'8–30d',value:A.active30||0,color:'var(--run)'},
+           {label:'30d+',value:A.cold||0,color:'var(--warn)'},{label:'Never',value:A.never||0,color:'var(--bad)'}];
+  var lq=I.leadQuality||{corporate:0,freemail:0};
+  var lqp=[{label:'Corporate',value:lq.corporate,color:'var(--ok)'},{label:'Free-mail',value:lq.freemail,color:'var(--muted)'}];
 
-  function renderActivity(){var h='';audit.forEach(function(a){var det=a.detail&&Object.keys(a.detail).length?JSON.stringify(a.detail):'';h+='<tr><td class="usub">'+when(a.at)+'</td><td><span class="pill '+auditPill(a.action)+'">'+esc(a.action)+'</span></td><td class="mono">'+esc((a.target||'').slice(0,8))+'</td><td class="msg usub">'+esc(det)+'</td></tr>'});$('abody').innerHTML=h;$('aempty').hidden=audit.length>0}
-  function auditPill(a){if(/kill|delete|void|deny/.test(a))return 'bad';if(/lock|config/.test(a))return 'warn';if(/super|approve|unvoid|revive|unlock/.test(a))return '';return 'muted'}
-  function renderErrs(){var h='';errs.forEach(function(e){var det=e.detail&&Object.keys(e.detail).length?JSON.stringify(e.detail):'';h+='<tr><td class="usub">'+when(e.at)+'</td><td><span class="pill '+errPill(e.kind)+'">'+esc(e.kind)+'</span></td><td class="mono usub">'+esc(e.path||'')+'</td><td class="mono usub">'+esc((e.deviceId||'').slice(0,8))+'</td><td class="usub">'+esc(e.country||'')+'</td><td class="msg usub">'+esc(det)+'</td></tr>'});$('ebody').innerHTML=h;$('eempty').hidden=errs.length>0}
-  function errPill(k){if(/exception|sig_fail/.test(k))return 'bad';if(/rate_limit/.test(k))return 'warn';return 'muted'}
-  function renderTrash(){var h='';trash.forEach(function(t){h+='<tr><td class="usub">'+when(t.at)+'</td><td>'+esc(t.name||'—')+'<div class="usub">'+esc(t.email||'')+'</div></td><td class="mono usub">'+esc((t.rins||[]).join(', ')||'—')+'</td><td><div class="act"><button class="btn tiny good" data-tres="'+esc(t.deviceId)+'">Restore</button><button class="btn tiny danger" data-tpur="'+esc(t.deviceId)+'">Purge</button></div></td></tr>'});
-    $('tbody-trash').innerHTML=h;$('trashempty').hidden=trash.length>0;
-    q('#tbody-trash [data-tres]',function(b){b.onclick=function(){if(b.disabled)return;b.disabled=true;post('/api/trash',{action:'restore',deviceId:b.getAttribute('data-tres')}).then(function(j){if(j.ok){toast(j.lostRins&&j.lostRins.length?'Restored — but RIN(s) '+j.lostRins.join(', ')+' were claimed by another account meanwhile':'Account restored','ok',j.lostRins&&j.lostRins.length?6000:undefined);loadUsers();loadAudit();loadTrash()}else{toast(j.error||'Restore failed','bad');b.disabled=false}})}});
-    q('#tbody-trash [data-tpur]',function(b){b.onclick=function(){modal({title:'Purge from trash?',message:'Permanently discards this deleted account. This one really cannot be undone.',confirmText:'Purge',danger:true}).then(function(v){if(v)post('/api/trash',{action:'purge',deviceId:b.getAttribute('data-tpur')}).then(function(j){if(j.ok){toast('Purged','ok');loadTrash();loadAudit()}})})}})}
-  function renderTrend(){var el=$('chartTrend');if(!el)return;
-    if(!snaps.length){el.innerHTML='<div class="muted" style="padding:12px">No snapshots yet — the first appears after tonight\'s 02:00 UTC cron run.</div>';return}
-    var u=snaps.map(function(s){return {label:s.day.slice(5),value:s.users}});
-    var dcs=snaps.map(function(s){return {label:s.day.slice(5),value:s.totalDocs||0}});
-    var last=snaps[snaps.length-1];
-    el.innerHTML='<div class="legend" style="margin-bottom:6px"><span><i style="background:var(--gold)"></i>Users: '+last.users+'</span><span><i style="background:var(--good)"></i>Docs exported: '+Number(last.totalDocs||0).toLocaleString()+'</span><span class="muted">active 7d: '+last.active7+'</span></div>'
-      +svgCols(u,'var(--gold)')+svgCols(dcs,'var(--good)')}
+  return strip + '<div class="grid2">'
+    + chart('Trend — 60 days','Users and documents exported, from the daily 02:00 UTC snapshot cron.',trend)
+    + chart('Registrations over time','New sign-ups per day.',svgCols((I.regByDay||[]).slice(-30).map(function(d){ return {label:d.date,value:d.count}; }),'var(--accent)'))
+    + chart('Activity segmentation','By most recent /session check-in.',svgSplit(act)+legend(act))
+    + chart('Version adoption','Installed versions — check this before setting a kill rule.',svgBars((I.versions||[]).map(function(v){ return {label:'v'+v.k,value:v.n}; }),'var(--info)'))
+    + chart('Country breakdown','From Cloudflare geo at registration.',svgBars((I.countries||[]).map(function(c){ return {label:c.k,value:c.n}; }),'var(--moss)'))
+    + chart('Value delivered','Top accounts by documents exported (v0.3.0+ clients).',(V.topDocs&&V.topDocs.length)?svgBars(V.topDocs.map(function(u){ return {label:u.k,value:u.n}; }),'var(--ok)'):'<div class="muted" style="font-size:13px">No export telemetry yet.</div>')
+    + chart('Lead quality','Corporate-domain versus free-mail addresses.',svgSplit(lqp)+legend(lqp))
+    + chart('Top email domains','Where the leads come from.',svgBars((I.domains||[]).map(function(d){ return {label:d.k,value:d.n}; }),'var(--accent2)'))
+    + '</div>';
+};
+WIRE.insights = function(){};
 
-  function renderHealth(){if(!health)return;var H=health;var cards=[
-    {l:'RIN ownership',v:H.locksBound?'Durable Object (atomic)':'KV fallback (racy)',c:H.locksBound?'ok':'warn'},
-    {l:'KV read/write',v:H.kvOk?'OK':'FAILED',c:H.kvOk?'ok':'bad'},
-    {l:'Admin token',v:H.adminTokenSet?'Set':'MISSING',c:H.adminTokenSet?'ok':'bad'},
-    {l:'Global kill switch',v:H.globalKill?'ON — all blocked':'off',c:H.globalKill?'bad':'ok'},
-    {l:'Min version',v:H.minVersion||'—',c:H.minVersion?'warn':'ok'},
-    {l:'Killed versions',v:H.killedVersions?(H.killedVersions+' set'):'none',c:H.killedVersions?'warn':'ok'},
-    {l:'Announcement',v:H.announcementActive?'Live':'none',c:H.announcementActive?'warn':'ok'}];
-    $('healthbox').innerHTML=cards.map(function(c){return '<div class="hc '+c.c+'"><div class="hl">'+esc(c.l)+'</div><div class="hv">'+esc(c.v)+'</div></div>'}).join('')}
-  $('healthref').onclick=function(){loadHealth();toast('Re-checked','ok',1000)};
+/* ═══ REQUESTS ════════════════════════════════════════════════════════════ */
+RENDER.requests = function(){
+  var query=(S._rq||'').toLowerCase().trim();
+  var rows=S.reqs.filter(function(r){ return S.rfilter==='all'||r.status===S.rfilter; })
+    .filter(function(r){ return !query || [r.name,r.email,r.requestedRin,r.note].join(' ').toLowerCase().indexOf(query)>=0; });
+  var head='<div class="toolbar"><input id="rsearch" class="search" placeholder="Search requests…" value="'+esc(S._rq||'')+'">'
+    + '<div class="chips" id="rchips">'+[['all','All'],['pending','Pending'],['approved','Approved'],['denied','Denied']].map(function(d){
+        return '<button class="chip'+(S.rfilter===d[0]?' on':'')+'" data-rf="'+d[0]+'">'+d[1]+'</button>'; }).join('')+'</div>'
+    + '<span class="sp"></span><button class="btn" id="rexport">Requests CSV</button></div>';
+  if(!rows.length) return head+'<div class="empty"><span class="mlabel">RIN requests</span><div class="big">Nothing waiting</div>Requests raised from inside the extension land here.</div>';
+  return head + '<div class="tablewrap"><table class="wide"><thead><tr><th>When</th><th>User</th><th>Requested RIN</th><th>Note</th><th>Status</th><th></th></tr></thead><tbody>'
+    + rows.map(function(r){
+        return '<tr><td class="usub">'+when(r.at)+'</td>'
+          + '<td><div class="uname">'+esc(r.name||'—')+'</div><div class="usub mono">'+esc(r.email||'')+'</div></td>'
+          + '<td class="num"><b>'+esc(r.requestedRin)+'</b></td><td class="msg usub">'+esc(r.note||'')+'</td>'
+          + '<td>'+(r.status==='pending'?'<span class="pill warn">pending</span>':'<span class="pill '+(r.status==='denied'?'bad':'')+'">'+esc(r.status)+'</span>')+'</td>'
+          + '<td><div class="act">'+(r.status==='pending'
+              ? '<button class="btn tiny primary" data-ap="'+esc(r.id)+'">Approve</button><button class="btn tiny" data-dn="'+esc(r.id)+'">Deny</button>'
+              : '<button class="btn tiny danger" data-rdel="'+esc(r.id)+'">Delete</button>')+'</div></td></tr>';
+      }).join('')+'</tbody></table></div>';
+};
+WIRE.requests = function(){
+  if($('rsearch')) $('rsearch').oninput=function(){ S._rq=$('rsearch').value; paint(); var el=$('rsearch'); el.focus(); el.setSelectionRange(el.value.length,el.value.length); };
+  q('#rchips [data-rf]', function(b){ b.onclick=function(){ S.rfilter=b.getAttribute('data-rf'); paint(); }; });
+  if($('rexport')) $('rexport').onclick=function(){ download('/export?type=requests','eta-bulk-requests.csv'); };
+  q('#views [data-ap]', function(b){ b.onclick=function(){ b.disabled=true; post('/api/request',{id:b.getAttribute('data-ap'),action:'approve'}).then(function(j){ if(j.ok){ toast('Approved — RIN added','ok'); loadReqs(); loadUsers(); loadAudit(); } else b.disabled=false; }); }; });
+  q('#views [data-dn]', function(b){ b.onclick=function(){ b.disabled=true; post('/api/request',{id:b.getAttribute('data-dn'),action:'deny'}).then(function(j){ if(j.ok){ toast('Denied','ok'); loadReqs(); loadAudit(); } else b.disabled=false; }); }; });
+  q('#views [data-rdel]', function(b){ b.onclick=function(){ post('/api/request',{id:b.getAttribute('data-rdel'),action:'delete'}).then(function(j){ if(j.ok){ toast('Removed','ok'); loadReqs(); } }); }; });
+};
 
-  function renderAnnouncement(){var a=cfg.announcement;var box=$('annCur');if(a&&a.text){box.className='result show';box.innerHTML='<b>Live banner ('+esc(a.level||'info')+'):</b> '+esc(a.text)+(a.until?'<div class="usub">Expires '+cairo(a.until)+'</div>':'');$('annText').value=a.text;$('annLevel').value=a.level||'info'}else{box.className='result';box.innerHTML='';}}
-  $('annSave').onclick=function(){var text=$('annText').value.trim();if(!text){toast('Enter a message','bad');return}var until=$('annUntil').value?new Date($('annUntil').value).toISOString():'';post('/api/config',{announcement:{text:text,level:$('annLevel').value,until:until}}).then(function(j){if(j.ok){cfg=j.cfg||cfg;syncCfg();toast('Banner published','ok');loadAudit()}})};
-  $('annClear').onclick=function(){post('/api/config',{announcement:null}).then(function(j){if(j.ok){cfg=j.cfg||cfg;$('annText').value='';$('annUntil').value='';syncCfg();toast('Banner cleared','ok');loadAudit()}})};
+/* ═══ BUGS ════════════════════════════════════════════════════════════════ */
+RENDER.bugs = function(){
+  var query=(S._bq||'').toLowerCase().trim();
+  var rows=S.bugs.filter(function(g){ return S.bfilter==='all'||g.status===S.bfilter; })
+    .filter(function(g){ return !query || [g.name,g.email,g.rin,g.message,g.diag&&g.diag.version].join(' ').toLowerCase().indexOf(query)>=0; });
+  var head='<div class="toolbar"><input id="bsearch" class="search" placeholder="Search bug reports…" value="'+esc(S._bq||'')+'">'
+    + '<div class="chips" id="bchips">'+[['all','All'],['open','Open'],['resolved','Resolved']].map(function(d){
+        return '<button class="chip'+(S.bfilter===d[0]?' on':'')+'" data-bf="'+d[0]+'">'+d[1]+'</button>'; }).join('')+'</div>'
+    + '<span class="sp"></span><button class="btn" id="bexport">Bugs CSV</button></div>';
+  if(!rows.length) return head+'<div class="empty"><span class="mlabel">Bug reports</span><div class="big">Nothing reported</div>Reports raised from inside the extension land here with their diagnostics.</div>';
+  return head + '<div class="tablewrap"><table class="wide"><thead><tr><th>When</th><th>User</th><th>RIN</th><th>Report</th><th>Status</th><th></th></tr></thead><tbody>'
+    + rows.map(function(g){
+        var dg='';
+        if(g.diag){
+          var p=g.diag.plan;
+          var sum='diagnostics · v'+(g.diag.version||'?')+(p?' · '+(p.source||'')+' '+(p.year||'')+' · '+(p.done|0)+'/'+(p.chunks|0)+' chunks · '+(p.failed|0)+' failed · '+(p.rows|0)+' rows'+(p.pdf?' · pdf':''):'');
+          dg='<details class="usub" style="margin-top:6px"><summary style="cursor:pointer" class="mono">'+esc(sum)+'</summary>'
+            + (g.diag.last?'<div class="usub" style="margin-top:5px">last: '+esc(g.diag.last)+'</div>':'')
+            + '<pre class="mono" style="white-space:pre-wrap;max-height:220px;overflow:auto;margin:7px 0 0;font-size:11px;background:var(--well);padding:10px;border-radius:8px">'+esc((g.diag.log||[]).join('\n'))+'</pre></details>';
+        }
+        return '<tr><td class="usub">'+when(g.at)+'</td>'
+          + '<td><div class="uname">'+esc(g.name||'—')+'</div><div class="usub mono">'+esc(g.email||'')+'</div></td>'
+          + '<td class="num">'+esc(g.rin||'')+'</td>'
+          + '<td class="msg">'+esc(g.message||'')+(g.ua?'<div class="usub" style="margin-top:5px">'+esc(g.ua)+'</div>':'')+dg+'</td>'
+          + '<td>'+(g.status==='open'?'<span class="pill warn">open</span>':'<span class="pill">resolved</span>')+'</td>'
+          + '<td><div class="act">'+(g.status==='open'?'<button class="btn tiny" data-rs="'+esc(g.id)+'">Resolve</button>':'<button class="btn tiny" data-ro="'+esc(g.id)+'">Reopen</button>')
+          + '<button class="btn tiny danger" data-bd="'+esc(g.id)+'">Delete</button></div></td></tr>';
+      }).join('')+'</tbody></table></div>';
+};
+WIRE.bugs = function(){
+  if($('bsearch')) $('bsearch').oninput=function(){ S._bq=$('bsearch').value; paint(); var el=$('bsearch'); el.focus(); el.setSelectionRange(el.value.length,el.value.length); };
+  q('#bchips [data-bf]', function(b){ b.onclick=function(){ S.bfilter=b.getAttribute('data-bf'); paint(); }; });
+  if($('bexport')) $('bexport').onclick=function(){ download('/export?type=bugs','eta-bulk-bugs.csv'); };
+  q('#views [data-rs]', function(b){ b.onclick=function(){ b.disabled=true; post('/api/bug',{id:b.getAttribute('data-rs'),action:'resolve'}).then(function(j){ if(j.ok){ toast('Resolved','ok'); loadBugs(); } else b.disabled=false; }); }; });
+  q('#views [data-ro]', function(b){ b.onclick=function(){ b.disabled=true; post('/api/bug',{id:b.getAttribute('data-ro'),action:'reopen'}).then(function(j){ if(j.ok){ toast('Reopened','ok'); loadBugs(); } else b.disabled=false; }); }; });
+  q('#views [data-bd]', function(b){ b.onclick=function(){ confirmDanger('Delete report?','','Delete').then(function(v){ if(v) post('/api/bug',{id:b.getAttribute('data-bd'),action:'delete'}).then(function(j){ if(j.ok){ toast('Deleted','ok'); loadBugs(); } }); }); }; });
+};
 
-  // ---- inline SVG charts (no libraries) ----
-  function svgBars(data,color){if(!data.length)return '<div class="muted" style="padding:16px">No data yet.</div>';var w=520,rowH=20,gap=9,pad=4;var max=Math.max(1,Math.max.apply(null,data.map(function(d){return d.value})));var h=data.length*(rowH+gap)+pad*2;var s='<svg viewBox="0 0 '+w+' '+h+'" preserveAspectRatio="xMinYMin meet">';data.forEach(function(d,i){var y=pad+i*(rowH+gap);var bw=Math.max(2,(w-190)*(d.value/max));s+='<text x="0" y="'+(y+14)+'" class="cl">'+esc(String(d.label).slice(0,16))+'</text>';s+='<rect x="130" y="'+y+'" width="'+bw+'" height="'+rowH+'" rx="4" fill="'+(color||'var(--gold)')+'"/>';s+='<text x="'+(136+bw)+'" y="'+(y+14)+'" class="cv">'+d.value+'</text>'});return s+'</svg>'}
-  function svgCols(data,color){if(!data.length)return '<div class="muted" style="padding:16px">No data yet.</div>';var w=560,h=160,pad=24;var n=data.length;var max=Math.max(1,Math.max.apply(null,data.map(function(d){return d.value})));var bw=(w-pad*2)/n;var s='<svg viewBox="0 0 '+w+' '+h+'" preserveAspectRatio="xMinYMin meet">';data.forEach(function(d,i){var bh=(h-pad*2)*(d.value/max);var x=pad+i*bw;var y=h-pad-bh;s+='<rect x="'+(x+1)+'" y="'+y+'" width="'+Math.max(1,bw-2)+'" height="'+Math.max(1,bh)+'" rx="2" fill="'+(color||'var(--gold)')+'"><title>'+esc(d.label)+': '+d.value+'</title></rect>'});
-    var step=Math.ceil(n/6);data.forEach(function(d,i){if(i%step===0){var x=pad+i*bw;s+='<text x="'+(x+bw/2)+'" y="'+(h-8)+'" text-anchor="middle" class="axis">'+esc(String(d.label).slice(5))+'</text>'}});return s+'</svg>'}
-  function svgSplit(parts){var total=parts.reduce(function(a,p){return a+p.value},0)||1;var w=520,h=34;var x=0;var s='<svg viewBox="0 0 '+w+' '+h+'" preserveAspectRatio="none">';parts.forEach(function(p){var pw=w*(p.value/total);s+='<rect x="'+x+'" y="0" width="'+Math.max(0,pw)+'" height="'+h+'" fill="'+p.color+'"><title>'+esc(p.label)+': '+p.value+'</title></rect>';x+=pw});return s+'</svg>'}
-  function legend(parts){return '<div class="legend">'+parts.map(function(p){return '<span><i style="background:'+p.color+'"></i>'+esc(p.label)+': '+p.value+'</span>'}).join('')+'</div>'}
-  function renderInsights(){if(!insights)return;var I=insights;
-    var V=I.value||{};
-    $('funnel').innerHTML=[
-      {n:I.total,l:'Registered'},{n:I.checkedIn,l:'Checked in'},{n:I.activity.active7,l:'Active (7d)'},{n:I.activity.active30,l:'Active (30d)'},{n:I.activity.never,l:'Never seen'},
-      {n:Number(V.totalDocs||0).toLocaleString(),l:'Docs exported'},{n:Number(V.totalExports||0).toLocaleString(),l:'Export runs'}
-    ].map(function(k){return '<div class="kpi"><div class="n">'+k.n+'</div><div class="l">'+k.l+'</div></div>'}).join('');
-    $('chartValue').innerHTML=(V.topDocs&&V.topDocs.length)?svgBars(V.topDocs.map(function(u){return {label:u.k,value:u.n}}),'var(--good)'):'<div class="muted" style="padding:12px">No export telemetry yet — appears as v0.3.0 clients check in.</div>';
-    $('chartReg').innerHTML=svgCols((I.regByDay||[]).slice(-30).map(function(d){return {label:d.date,value:d.count}}),'var(--gold)');
-    var act=[{label:'Active 7d',value:I.activity.active7,color:'var(--good)'},{label:'8-30d',value:I.activity.active30,color:'var(--gold)'},{label:'30d+',value:I.activity.cold,color:'var(--warn)'},{label:'Never',value:I.activity.never,color:'var(--bad)'}];
-    $('chartAct').innerHTML=svgSplit(act)+legend(act);
-    $('chartVer').innerHTML=svgBars((I.versions||[]).map(function(v){return {label:'v'+v.k,value:v.n}}),'var(--info)');
-    $('chartCountry').innerHTML=svgBars((I.countries||[]).map(function(c){return {label:c.k,value:c.n}}),'var(--super)');
-    var lq=I.leadQuality||{corporate:0,freemail:0};var lqp=[{label:'Corporate',value:lq.corporate,color:'var(--good)'},{label:'Free-mail',value:lq.freemail,color:'var(--muted)'}];
-    $('chartLead').innerHTML=svgSplit(lqp)+legend(lqp);
-    $('chartDom').innerHTML=svgBars((I.domains||[]).map(function(d){return {label:d.k,value:d.n}}),'var(--gold2)');
-    // version spread in Tools
-    $('verspread').innerHTML=(I.versions||[]).map(function(v){return '<span><i style="background:var(--info)"></i>v'+esc(v.k)+': '+v.n+'</span>'}).join('')||'<span class="muted">no version data</span>';
-  }
+/* ═══ ACTIVITY ════════════════════════════════════════════════════════════ */
+function auditPill(a){ if(/kill|delete|void|deny/.test(a)) return 'bad'; if(/lock|config/.test(a)) return 'warn'; if(/super|approve|unvoid|revive|unlock|move/.test(a)) return ''; return 'muted'; }
+function errPill(k){ if(/exception|sig_fail/.test(k)) return 'bad'; if(/rate_limit/.test(k)) return 'warn'; return 'muted'; }
+RENDER.activity = function(){
+  var a1='<div class="panel"><div class="eyebrow">Admin action log</div>'
+    + '<p class="hint">Every lock, kill, void, quota change, delete, RIN move, config edit and request decision — newest first, kept 180 days. Each entry carries the actor that made it.</p></div>'
+    + (S.audit.length
+      ? '<div class="tablewrap"><table class="wide"><thead><tr><th>When</th><th>Action</th><th>Actor</th><th>Target</th><th>Detail</th></tr></thead><tbody>'
+        + S.audit.map(function(a){
+            var det=a.detail&&Object.keys(a.detail).length?JSON.stringify(a.detail):'';
+            return '<tr><td class="usub">'+when(a.at)+'</td><td><span class="pill '+auditPill(a.action||'')+'">'+esc(a.action)+'</span></td>'
+              + '<td class="mono usub">'+esc(a.actor||'token')+'</td><td class="mono usub">'+esc(String(a.target||'').slice(0,24))+'</td>'
+              + '<td class="msg usub mono">'+esc(det)+'</td></tr>';
+          }).join('')+'</tbody></table></div>'
+      : '<div class="empty"><span class="mlabel">Audit</span><div class="big">No admin actions recorded yet</div></div>');
+  var a2='<div class="panel" style="margin-top:24px"><div class="eyebrow">Extension-facing errors</div>'
+    + '<p class="hint">Failures the extensions hit against this server — signature failures, rate limits, register rejections, unhandled exceptions. Kept 30 days, write-budgeted.</p></div>'
+    + (S.errs.length
+      ? '<div class="tablewrap"><table class="wide"><thead><tr><th>When</th><th>Kind</th><th>Path</th><th>Device</th><th>Geo</th><th>Detail</th></tr></thead><tbody>'
+        + S.errs.map(function(e){
+            var det=e.detail&&Object.keys(e.detail).length?JSON.stringify(e.detail):'';
+            return '<tr><td class="usub">'+when(e.at)+'</td><td><span class="pill '+errPill(e.kind||'')+'">'+esc(e.kind)+'</span></td>'
+              + '<td class="mono usub">'+esc(e.path||'')+'</td><td class="mono usub">'+esc(String(e.deviceId||'').slice(0,8))+'</td>'
+              + '<td class="usub">'+esc(e.country||'')+'</td><td class="msg usub mono">'+esc(det)+'</td></tr>';
+          }).join('')+'</tbody></table></div>'
+      : '<div class="empty"><span class="mlabel">Errors</span><div class="big">Clean</div>No extension-facing errors in the last 30 days.</div>');
+  return a1+a2;
+};
+WIRE.activity = function(){};
 
-  function renderVoidList(){$('voidlist').innerHTML=voids.length?('<span class="usub" style="width:100%">Voided:</span>'+voids.map(function(r){return '<span class="pill bad mono">'+esc(r)+'</span>'}).join('')):''}
-  function doCheck(){var r=$('voidrin').value.trim();if(!r){toast('Enter a RIN','bad');return}
-    api('/api/rin?rin='+encodeURIComponent(r)).then(function(j){var box=$('checkout');box.classList.add('show');
-      if(!j.ok){box.innerHTML='<span class="pill bad">'+esc(j.error||'error')+'</span>';return}
-      var html='<b class="mono">'+esc(j.rin)+'</b> '+(j.voided?'<span class="pill bad">VOIDED</span>':'<span class="pill">not voided</span>')+'<br>';
-      html+=j.owner?('Primary owner: <b>'+esc(j.owner.name||'—')+'</b> <span class="usub">'+esc(j.owner.email||'')+(j.owner.company?' · '+esc(j.owner.company):'')+'</span>'):'<span class="usub">No primary owner registered.</span>';
-      if(j.bound&&j.bound.length){html+='<br><span class="usub">On '+j.bound.length+' account(s): </span>'+j.bound.map(function(u){return esc(u.name||u.email||u.deviceId)+(u.superadmin?' (super)':'')}).join(', ')}
-      box.innerHTML=html})}
-  function doVoid(act){var r=$('voidrin').value.trim();if(!r){toast('Enter a RIN','bad');return}
-    if(act==='void'){modal({title:'Void this RIN?',message:'Blocks '+r+' for every account, including registration. Superadmins are exempt.',confirmText:'Void',danger:true}).then(function(v){if(v)post('/api/void',{rin:r,action:'void'}).then(function(j){if(j.ok){toast('RIN voided','ok');loadVoids();loadUsers();loadAudit();doCheck()}})})}
-    else post('/api/void',{rin:r,action:'unvoid'}).then(function(j){if(j.ok){toast('RIN un-voided','ok');loadVoids();loadUsers();loadAudit();doCheck()}})}
+/* ═══ TOOLS ═══════════════════════════════════════════════════════════════ */
+RENDER.tools = function(){
+  var c=S.cfg||{}, ann=c.announcement||{};
+  var H=S.health;
+  var healthCards = H ? [
+    {l:'RIN ownership', v:H.locksBound?'Durable Object (atomic)':'KV fallback (racy)', c:H.locksBound?'ok':'warn'},
+    {l:'KV read/write',  v:H.kvOk?'OK':'FAILED', c:H.kvOk?'ok':'bad'},
+    {l:'Admin token',    v:H.adminTokenSet?'Set':'MISSING', c:H.adminTokenSet?'ok':'bad'},
+    {l:'Global kill',    v:H.globalKill?'ON — all blocked':'off', c:H.globalKill?'bad':'ok'},
+    {l:'Min version',    v:H.minVersion||'—', c:H.minVersion?'warn':'ok'},
+    {l:'Killed versions',v:H.killedVersions?(H.killedVersions+' set'):'none', c:H.killedVersions?'warn':'ok'},
+    {l:'Announcement',   v:H.announcementActive?'Live':'none', c:H.announcementActive?'warn':'ok'}
+  ] : [];
 
-  q('nav.tabs button',function(b){b.onclick=function(){tab(b.getAttribute('data-tab'))}});
-  q('th.sortable',function(th){th.onclick=function(){var k=th.getAttribute('data-sort');sort=(sort.key===k)?{key:k,dir:-sort.dir}:{key:k,dir:k==='name'?1:-1};renderUsers()}});
-  $('go').onclick=attemptLogin;
-  $('token').addEventListener('keydown',function(e){if(e.key==='Enter')attemptLogin()});
-  $('peek').onclick=function(){var t=$('token');t.type=t.type==='password'?'text':'password'};
-  $('logout').onclick=logout;
-  var stmr=null;$('search').addEventListener('input',function(){page=1;if(stmr)clearTimeout(stmr);stmr=setTimeout(renderUsers,150)});
-  $('rsearch').addEventListener('input',renderReqs);$('bsearch').addEventListener('input',renderBugs);
-  $('refresh').onclick=function(){loadAll();toast('Refreshed','ok',1200)};
-  $('exportUsers').onclick=function(){download('/export?type=users','eta-bulk-users.csv')};
-  $('exportReqs').onclick=function(){download('/export?type=requests','eta-bulk-requests.csv')};
-  $('exportBugs').onclick=function(){download('/export?type=bugs','eta-bulk-bugs.csv')};
-  $('csv').onclick=function(){download('/export?type=users','eta-bulk-users.csv')};
-  $('csvReq').onclick=function(){download('/export?type=requests','eta-bulk-requests.csv')};
-  $('csvBug').onclick=function(){download('/export?type=bugs','eta-bulk-bugs.csv')};
-  $('backup').onclick=function(){download('/backup','eta-bulk-backup.json')};
-  $('killsw').onchange=function(){post('/api/config',{globalKill:$('killsw').checked}).then(function(j){if(j.ok){cfg=j.cfg||cfg;syncCfg();toast('Saved','ok');loadAudit()}})};
-  $('defq').onchange=function(){post('/api/config',{defaultQuota:parseInt($('defq').value,10)||0}).then(function(j){if(j.ok){cfg=j.cfg||cfg;syncCfg();toast('Saved','ok')}})};
-  $('saveVer').onclick=function(){var mv=$('minver').value.trim();var kv=$('killver').value.split(',').map(function(s){return s.trim()}).filter(Boolean);post('/api/config',{minVersion:mv,killedVersions:kv}).then(function(j){if(j.ok){cfg=j.cfg||cfg;syncCfg();toast('Version rules saved','ok');loadAudit()}})};
-  $('docheck').onclick=doCheck;$('dovoid').onclick=function(){doVoid('void')};$('dounvoid').onclick=function(){doVoid('unvoid')};
-  $('auto').onclick=function(){if(autoTimer){clearInterval(autoTimer);autoTimer=null;$('auto').classList.remove('on');$('autotxt').hidden=true;toast('Auto-refresh off','ok',1000)}else{autoTimer=setInterval(function(){loadReqs();loadBugs();loadUsers()},30000);$('auto').classList.add('on');$('autotxt').hidden=false;$('autotxt').textContent='auto 30s';toast('Auto-refresh on','ok',1000)}};
-  document.addEventListener('keydown',function(e){if($('app').hidden)return;if(e.target&&/INPUT|TEXTAREA|SELECT/.test(e.target.tagName))return;if(e.key==='/'){e.preventDefault();tab('users');$('search').focus()}else if(e.key==='r'){loadAll();toast('Refreshed','ok',1000)}else if(e.key==='Escape'){if(!$('udrawer').hidden)closeDetail()}});
-  renderChips();renderReqChips();renderBugChips();
-  try{var saved=sessionStorage.getItem('at');if(saved){token=saved;api('/api/stats').then(function(j){if(j.ok){setConn(true);openApp()}else if(j.error==='unauthorized'){token='';setConn(false);try{sessionStorage.removeItem('at')}catch(e){}}else{setConn(false);openApp()}})}}catch(e){}
+  var settings='<div class="panel"><div class="eyebrow">Global settings</div>'
+    + '<p class="hint">Account-wide controls. The kill switch blocks every account immediately.</p>'
+    + '<div class="field"><label>Emergency kill switch</label>'
+    + '<label class="switch"><input type="checkbox" id="killsw"'+(c.globalKill?' checked':'')+'><span class="swtrack"></span>'
+    + '<span class="'+(c.globalKill?'':'muted')+'" id="killtxt" style="font-size:13px">'+(c.globalKill?'On — everyone blocked':'Off')+'</span></label></div>'
+    + '<div class="field"><label>Default quota for new registrations</label>'
+    + '<input id="defq" type="number" min="0" style="max-width:120px" value="'+esc(c.defaultQuota==null?1:c.defaultQuota)+'"></div></div>';
+
+  var health='<div class="panel"><div class="eyebrow">Health &amp; self-check</div>'
+    + '<p class="hint">Which mode is production actually running in?</p>'
+    + (healthCards.length ? '<div class="health">'+healthCards.map(function(x){ return '<div class="hc '+x.c+'"><div class="hl">'+esc(x.l)+'</div><div class="hv">'+esc(x.v)+'</div></div>'; }).join('')+'</div>'
+      : '<div class="muted" style="font-size:13px">Checking…</div>')
+    + '<button id="healthref" class="btn tiny" style="margin-top:14px">Re-check</button></div>';
+
+  var migrate='<div class="panel"><div class="eyebrow">Migration &middot; <b>KV &rarr; D1</b></div>'
+    + '<p class="hint">Folds every <span class="mono">dev:</span> record into one user per email. Quota becomes the <b>MAX</b> of the group, never the sum — the sum would bless the licensing hole this migration exists to close. A RIN found under two emails is <b>reported as a conflict and left where it is</b>, never silently reassigned. Idempotent: running it twice changes nothing.</p>'
+    + '<div class="inline"><button class="btn primary" id="domigrate">Run migration</button>'
+    + '<span class="mlabel">POST /api/migrate</span></div>'
+    + '<div class="result" id="migout"></div></div>';
+
+  var annBox='<div class="panel"><div class="eyebrow">Announcement banner</div>'
+    + '<p class="hint">Pushed to every extension on its next check-in — a soft channel that is not the kill switch. Empty text clears it.</p>'
+    + (ann&&ann.text ? '<div class="callout '+(ann.level==='alert'?'bad':ann.level==='warn'?'warn':'info')+'"><span class="cl">'+esc(ann.level||'info')+'</span>'
+        + '<span class="cb">'+esc(ann.text)+(ann.until?'<div class="ref">expires '+esc(cairo(ann.until))+'</div>':'')+'</span></div>' : '')
+    + '<div class="grid2" style="margin-top:14px">'
+    + '<div class="field"><label>Message</label><textarea id="annText" maxlength="400" placeholder="e.g. Maintenance tonight 22:00 Cairo — exports may pause briefly.">'+esc(ann.text||'')+'</textarea></div>'
+    + '<div><div class="field"><label>Level</label><select id="annLevel">'
+      + ['info','warn','alert'].map(function(l){ return '<option value="'+l+'"'+((ann.level||'info')===l?' selected':'')+'>'+l+'</option>'; }).join('')+'</select></div>'
+    + '<div class="field"><label>Auto-expire (optional)</label><input id="annUntil" type="datetime-local"></div></div></div>'
+    + '<div class="inline"><button id="annSave" class="btn primary">Publish banner</button><button id="annClear" class="btn danger">Clear banner</button></div></div>';
+
+  var rinBox='<div class="panel"><div class="eyebrow">RIN lookup &amp; void</div>'
+    + '<p class="hint">Void a registration number (blocks it everywhere within ~60s) or look up which account owns it. The Clients section answers the same question for the whole estate at once.</p>'
+    + '<div class="field"><label>Registration number</label><div class="inline">'
+    + '<input id="voidrin" placeholder="e.g. 123456789" class="mono" style="flex:1;min-width:160px">'
+    + '<button id="docheck" class="btn">Check</button><button id="dovoid" class="btn danger">Void</button><button id="dounvoid" class="btn">Un-void</button></div></div>'
+    + '<div class="result" id="checkout"></div>'
+    + (S.voids.length ? '<div style="margin-top:14px"><div class="mlabel" style="margin-bottom:8px">Voided &middot; '+S.voids.length+'</div><div class="rins">'
+        + S.voids.map(function(r){ return '<span class="pill bad">'+esc(r)+'</span>'; }).join(' ')+'</div></div>' : '')
+    + '</div>';
+
+  var spread=(S.insights&&S.insights.versions)||[];
+  var verBox='<div class="panel"><div class="eyebrow">Version control &middot; kill switch</div>'
+    + '<p class="hint">Force users onto a newer build, or block specific versions. Applies to every account, superadmins included.</p>'
+    + (spread.length ? '<div class="legend" style="margin-bottom:14px">'+spread.map(function(v){ return '<span><i style="background:var(--info)"></i>v'+esc(v.k)+': '+v.n+'</span>'; }).join('')+'</div>' : '')
+    + '<div class="grid2"><div class="field"><label>Minimum allowed version</label><input id="minver" placeholder="e.g. 0.2.0" class="mono" value="'+esc(c.minVersion||'')+'"></div>'
+    + '<div class="field"><label>Killed versions — comma separated</label><input id="killver" placeholder="e.g. 0.1.0, 0.1.3" class="mono" value="'+esc((c.killedVersions||[]).join(', '))+'"></div></div>'
+    + '<button id="saveVer" class="btn primary">Save version rules</button></div>';
+
+  var exportBox='<div class="panel"><div class="eyebrow">Export &amp; backup</div>'
+    + '<p class="hint">CSV is UTF-8 (Excel and Arabic safe). The JSON backup is the only export that can restore the namespace — it includes device keys, RIN bindings, requests, bugs, voids and config.</p>'
+    + '<div class="inline"><button id="csvU" class="btn">Users CSV</button><button id="csvR" class="btn">Requests CSV</button>'
+    + '<button id="csvB" class="btn">Bugs CSV</button><button id="backup" class="btn primary">Full JSON backup</button></div></div>';
+
+  var trashBox='<div class="panel flush"><div style="padding:20px 22px 0"><div class="eyebrow">Trash</div>'
+    + '<p class="hint">Deleted accounts are recoverable for 30 days. RINs are re-claimed on restore — ones taken by another account meanwhile are reported, not stolen.</p></div>'
+    + (S.trash.length
+      ? '<div class="tablewrap" style="border:none;border-radius:0;box-shadow:none;margin:0"><table><thead><tr><th>Deleted</th><th>User</th><th>RINs</th><th></th></tr></thead><tbody>'
+        + S.trash.map(function(t){
+            return '<tr><td class="usub">'+when(t.at)+'</td><td><div class="uname">'+esc(t.name||'—')+'</div><div class="usub mono">'+esc(t.email||'')+'</div></td>'
+              + '<td class="mono usub">'+esc((t.rins||[]).join(', ')||'—')+'</td>'
+              + '<td><div class="act"><button class="btn tiny good" data-tres="'+esc(t.deviceId)+'">Restore</button>'
+              + '<button class="btn tiny danger" data-tpur="'+esc(t.deviceId)+'">Purge</button></div></td></tr>';
+          }).join('')+'</tbody></table></div>'
+      : '<div class="muted" style="padding:0 22px 20px;font-size:13px">Trash is empty.</div>')
+    + '</div>';
+
+  return '<div class="grid2">'+settings+health+'</div>' + migrate + annBox + rinBox + verBox + exportBox + trashBox;
+};
+WIRE.tools = function(){
+  var reloadCfg=function(j){ if(j.ok){ S.cfg=j.cfg||S.cfg; toast('Saved','ok'); loadAudit(); loadHealth(); paint(); } };
+  if($('killsw')) $('killsw').onchange=function(){ post('/api/config',{globalKill:$('killsw').checked}).then(reloadCfg); };
+  if($('defq')) $('defq').onchange=function(){ post('/api/config',{defaultQuota:parseInt($('defq').value,10)||0}).then(reloadCfg); };
+  if($('healthref')) $('healthref').onclick=function(){ loadHealth(); toast('Re-checked','ok',1100); };
+  if($('annSave')) $('annSave').onclick=function(){
+    var text=$('annText').value.trim(); if(!text){ toast('Enter a message','bad'); return; }
+    var until=$('annUntil').value?new Date($('annUntil').value).toISOString():'';
+    post('/api/config',{announcement:{text:text,level:$('annLevel').value,until:until}}).then(reloadCfg); };
+  if($('annClear')) $('annClear').onclick=function(){ post('/api/config',{announcement:null}).then(reloadCfg); };
+  if($('saveVer')) $('saveVer').onclick=function(){
+    var mv=$('minver').value.trim(), kv=$('killver').value.split(',').map(function(s){ return s.trim(); }).filter(Boolean);
+    post('/api/config',{minVersion:mv,killedVersions:kv}).then(reloadCfg); };
+  if($('docheck')) $('docheck').onclick=rinCheck;
+  if($('dovoid')) $('dovoid').onclick=function(){ var r=$('voidrin').value.trim(); if(!r){ toast('Enter a RIN','bad'); return; } clientVoidLegacy(r,'void'); };
+  if($('dounvoid')) $('dounvoid').onclick=function(){ var r=$('voidrin').value.trim(); if(!r){ toast('Enter a RIN','bad'); return; } clientVoidLegacy(r,'unvoid'); };
+  if($('csvU')) $('csvU').onclick=function(){ download('/export?type=users','eta-bulk-users.csv'); };
+  if($('csvR')) $('csvR').onclick=function(){ download('/export?type=requests','eta-bulk-requests.csv'); };
+  if($('csvB')) $('csvB').onclick=function(){ download('/export?type=bugs','eta-bulk-bugs.csv'); };
+  if($('backup')) $('backup').onclick=function(){ download('/backup','eta-bulk-backup.json'); };
+  if($('domigrate')) $('domigrate').onclick=function(){
+    confirmDanger('Run the KV → D1 migration?','Idempotent and re-runnable. KV records are left in place; the extension API keeps reading them until slice 3.','Run migration')
+      .then(function(v){ if(!v) return;
+        var b=$('domigrate'); b.disabled=true; b.textContent='Migrating…';
+        post('/api/migrate',{}).then(function(j){
+          b.disabled=false; b.textContent='Run migration';
+          var box=$('migout'); if(!box) return; box.classList.add('show');
+          if(!j.ok){ box.innerHTML='<span class="pill bad">'+esc(j.error||'failed')+'</span>'; return; }
+          box.innerHTML='<b>Migrated.</b> '+n(j.users)+' users · '+n(j.clients)+' clients · '+n(j.devices)+' devices.'
+            + ((j.conflicts&&j.conflicts.length)
+              ? '<div style="margin-top:10px"><div class="mlabel" style="margin-bottom:6px">'+j.conflicts.length+' conflict(s) — left with their current owner</div>'
+                + j.conflicts.map(function(x){ return '<div class="callout warn"><span class="cl">RIN</span><span class="cb">'+esc(typeof x==='string'?x:JSON.stringify(x))+'</span></div>'; }).join('')+'</div>'
+              : '<div class="mlabel" style="margin-top:8px">No conflicts</div>');
+          loadAll();
+        }); }); };
+  q('#views [data-tres]', function(b){ b.onclick=function(){ b.disabled=true;
+    post('/api/trash',{action:'restore',deviceId:b.getAttribute('data-tres')}).then(function(j){
+      if(j.ok){ toast(j.lostRins&&j.lostRins.length?'Restored — RIN(s) '+j.lostRins.join(', ')+' were claimed by another account meanwhile':'Account restored','ok',j.lostRins&&j.lostRins.length?6000:undefined);
+        loadUsers(); loadTrash(); loadAudit(); } else b.disabled=false; }); }; });
+  q('#views [data-tpur]', function(b){ b.onclick=function(){
+    confirmDanger('Purge from trash?','Permanently discards this deleted account. This one really cannot be undone.','Purge').then(function(v){
+      if(v) post('/api/trash',{action:'purge',deviceId:b.getAttribute('data-tpur')}).then(function(j){ if(j.ok){ toast('Purged','ok'); loadTrash(); loadAudit(); } }); }); }; });
+};
+function rinCheck(){
+  var r=$('voidrin').value.trim(); if(!r){ toast('Enter a RIN','bad'); return; }
+  api('/api/rin?rin='+encodeURIComponent(r)).then(function(j){
+    var box=$('checkout'); if(!box) return; box.classList.add('show');
+    if(!j.ok){ box.innerHTML='<span class="pill bad">'+esc(j.error||'error')+'</span>'; return; }
+    var h='<b class="mono">'+esc(j.rin)+'</b> '+(j.voided?'<span class="pill bad">VOIDED</span>':'<span class="pill">not voided</span>')+'<br>';
+    h += j.owner ? ('Primary owner: <b>'+esc(j.owner.name||'—')+'</b> <span class="usub">'+esc(j.owner.email||'')+(j.owner.company?' · '+esc(j.owner.company):'')+'</span>')
+                 : '<span class="usub">No primary owner registered.</span>';
+    if(j.bound&&j.bound.length) h+='<br><span class="usub">On '+j.bound.length+' account(s): </span>'+j.bound.map(function(u){ return esc(u.name||u.email||u.deviceId)+(u.superadmin?' (super)':''); }).join(', ');
+    box.innerHTML=h;
+  });
+}
+function clientVoidLegacy(rin,action){
+  var run=function(){ post('/api/void',{rin:rin,action:action}).then(function(j){ if(j.ok){ toast(action==='void'?'RIN voided':'RIN un-voided','ok'); loadVoids(); loadClients(); loadAudit(); rinCheck(); } }); };
+  if(action==='void') confirmDanger('Void this RIN?','Blocks '+rin+' for every account, including registration. Superadmins are exempt.','Void').then(function(v){ if(v) run(); });
+  else run();
+}
+
+/* ═══ CHROME: theme, density, auto-refresh, shortcuts, boot ═══════════════ */
+$('theme').onclick=function(){
+  var cur=document.documentElement.getAttribute('data-theme'), next=cur==='light'?'dark':'light';
+  document.documentElement.setAttribute('data-theme',next);
+  try{ localStorage.setItem('eta_admin_theme',next); }catch(e){}
+};
+$('dense').onclick=function(){
+  var on=document.documentElement.getAttribute('data-dense')==='1';
+  document.documentElement.setAttribute('data-dense',on?'0':'1');
+  $('dense').classList.toggle('on',!on);
+  try{ localStorage.setItem('eta_admin_dense',on?'0':'1'); }catch(e){}
+};
+if(document.documentElement.getAttribute('data-dense')==='1') $('dense').classList.add('on');
+$('auto').onclick=function(){
+  if(S.autoTimer){ clearInterval(S.autoTimer); S.autoTimer=null; $('auto').classList.remove('on'); toast('Auto-refresh off','n',1200); }
+  else { S.autoTimer=setInterval(loadLive,30000); $('auto').classList.add('on'); toast('Auto-refresh on — every 30s','ok',1200); }
+};
+$('logout').onclick=logout;
+$('refresh').onclick=function(){ loadAll(); toast('Refreshed','ok',1200); };
+$('go').onclick=attemptLogin;
+$('token').addEventListener('keydown',function(e){ if(e.key==='Enter') attemptLogin(); });
+$('peek').onclick=function(){ var t=$('token'); t.type = t.type==='password'?'text':'password'; };
+
+document.addEventListener('keydown',function(e){
+  if($('shell').hidden) return;
+  if(!$('modal-root').hidden) return;
+  if(e.target && /INPUT|TEXTAREA|SELECT/.test(e.target.tagName)){ if(e.key==='Escape') e.target.blur(); return; }
+  var KEYS={d:'dashboard',u:'users',c:'clients',i:'insights',q:'requests',b:'bugs',a:'activity',t:'tools'};
+  if(e.key==='/'){ e.preventDefault(); if(S.section!=='users'&&S.section!=='clients') go('users');
+    setTimeout(function(){ var s=$('usearch')||$('csearch'); if(s) s.focus(); },30); return; }
+  if(e.key==='r'){ loadAll(); toast('Refreshed','ok',1100); return; }
+  if(e.key==='Escape'){ if(DETAIL[S.section]) go(DETAIL[S.section].parent); return; }
+  if(KEYS[e.key]) go(KEYS[e.key]);
+});
+
+/* ── demo fixtures: shapes copied verbatim from the SPEC-017 contract ─────── */
+function demoGet(p){
+  var now=Date.now(), iso=function(m){ return new Date(now-m*60000).toISOString(); };
+  if(p.indexOf('/api/dashboard')===0) return {ok:true,
+    stats:{users:38,clients:64,devices:52,activeJobs:2,jobsToday:17,docsToday:24193,openBugs:3,pendingRequests:2,expiringSoon:4},
+    active:[{jobId:'job_8f21ac93',user:'Hala Mansour',rin:'204918377',source:'Sales',state:'running',done:1840,total:4200,updatedAt:iso(1)},
+            {jobId:'job_11c4de07',user:'Karim Adel',rin:'318772041',source:'Purchases',state:'running',done:390,total:1500,updatedAt:iso(4)}],
+    recent:[{at:iso(3),kind:'job.done',text:'Nour Fahmy finished Sales export for 552019887',ref:'job_44ae'},
+            {at:iso(12),kind:'user.locked',text:'Adel Sabry locked by token',ref:'adel@sabry.eg'},
+            {at:iso(31),kind:'client.move',text:'RIN 204918377 moved to hala@mansour.co',ref:'204918377'},
+            {at:iso(64),kind:'bug.open',text:'New bug report from Karim Adel',ref:'bug_9912'},
+            {at:iso(140),kind:'job.failed',text:'Purchases run failed after 3 chunk retries',ref:'job_7b02'}],
+    alerts:[{level:'danger',text:'job_7b02 has not advanced in 46 minutes',ref:'job_7b02'},
+            {level:'warning',text:'4 plans expire within 14 days',ref:'plan'},
+            {level:'warning',text:'sig_fail rate is 7x the 24h baseline',ref:'/session'}]};
+  if(p.indexOf('/api/users')===0) return {ok:true,total:3,users:[
+    {email:'hala@mansour.co',name:'Hala Mansour',company:'Mansour & Co',plan:'pro',quota:5,clientCount:4,deviceCount:2,jobCount:61,docs:184220,status:'active',validUntil:'2026-09-01',lastSeen:iso(6),tags:['priority']},
+    {email:'karim@adel.eg',name:'Karim Adel',company:'Adel Accounting',plan:'free',quota:1,clientCount:1,deviceCount:1,jobCount:8,docs:9120,status:'active',validUntil:'2026-08-18',lastSeen:iso(220),tags:[]},
+    {email:'adel@sabry.eg',name:'Adel Sabry',company:'Sabry Audit',plan:'team',quota:12,clientCount:12,deviceCount:5,jobCount:214,docs:912004,status:'locked',validUntil:'2027-01-01',lastSeen:iso(2900),tags:['watch']}]};
+  if(p.indexOf('/api/user?')===0) return {ok:true,
+    user:{email:'hala@mansour.co',name:'Hala Mansour',company:'Mansour & Co',phone:'+20 100 555 0110',plan:'pro',quota:5,clientCount:4,deviceCount:2,jobCount:61,docs:184220,status:'active',superadmin:0,validUntil:'2026-09-01',country:'EG',note:'',tags:['priority'],features:['auto-reject'],createdAt:'2026-02-11T09:12:00Z',lastSeen:iso(6)},
+    clients:[{rin:'204918377',company:'Nile Foods',voided:0,jobCount:31,docs:98220,lastExportAt:iso(6)},
+             {rin:'552019887',company:'Delta Textiles',voided:0,jobCount:22,docs:71110,lastExportAt:iso(400)},
+             {rin:'318772041',company:'Cairo Print',voided:1,jobCount:8,docs:14890,lastExportAt:iso(9000)}],
+    devices:[{deviceId:'dev_9a71c0e4f2',version:'0.4.1',country:'EG',lastRin:'204918377',exports:44,docs:140100,lastSeen:iso(6)},
+             {deviceId:'dev_3b02aa1177',version:'0.3.9',country:'EG',lastRin:'552019887',exports:17,docs:44120,lastSeen:iso(1400)}],
+    jobs:[{jobId:'job_8f21ac93',rin:'204918377',source:'Sales',state:'running',done:1840,total:4200,createdAt:iso(20)},
+          {jobId:'job_44ae0031',rin:'552019887',source:'Purchases',state:'done',done:2100,total:2100,createdAt:iso(400)}],
+    bugs:[{id:'bug_1',status:'open',at:iso(600),rin:'204918377',message:'Merge stalled at chunk 12 of 40.'}],
+    audit:[{at:iso(31),action:'client.move',actor:'token',detail:{rin:'204918377'}},
+           {at:iso(900),action:'setQuota',actor:'token',detail:{from:3,to:5}}]};
+  if(p.indexOf('/api/clients')===0) return {ok:true,total:3,clients:[
+    {rin:'204918377',company:'Nile Foods',userEmail:'hala@mansour.co',userName:'Hala Mansour',voided:0,jobCount:31,docs:98220,lastExportAt:iso(6)},
+    {rin:'552019887',company:'Delta Textiles',userEmail:'hala@mansour.co',userName:'Hala Mansour',voided:0,jobCount:22,docs:71110,lastExportAt:iso(400)},
+    {rin:'318772041',company:'Cairo Print',userEmail:'karim@adel.eg',userName:'Karim Adel',voided:1,jobCount:8,docs:14890,lastExportAt:iso(9000)}]};
+  if(p.indexOf('/api/client?')===0) return {ok:true,
+    client:{rin:'204918377',company:'Nile Foods',voided:0,jobCount:31,docs:98220,lastExportAt:iso(6),createdAt:'2026-03-02T10:00:00Z'},
+    user:{email:'hala@mansour.co',name:'Hala Mansour',company:'Mansour & Co',plan:'pro',status:'active',validUntil:'2026-09-01',lastSeen:iso(6)},
+    jobs:[{jobId:'job_8f21ac93',rin:'204918377',source:'Sales',state:'running',done:1840,total:4200,createdAt:iso(20)},
+          {jobId:'job_2c99f180',rin:'204918377',source:'Sales',state:'done',done:3300,total:3300,createdAt:iso(2800)}]};
+  if(p.indexOf('/api/stats')===0) return {ok:true,stats:{},cfg:{defaultQuota:1,globalKill:false,minVersion:'',killedVersions:[]}};
+  if(p.indexOf('/api/health')===0) return {ok:true,health:{locksBound:true,kvOk:true,adminTokenSet:true,globalKill:false,minVersion:'',killedVersions:0,announcementActive:false}};
+  return {ok:true,requests:[],bugs:[],voids:[],audit:[],errors:[],trash:[],snaps:[]};
+}
+
+/* ── boot ─────────────────────────────────────────────────────────────────── */
+renderNav();
+if(DEMO){ S.token='demo'; openApp(); }
+else {
+  try{
+    var saved=sessionStorage.getItem('at');
+    if(saved){ S.token=saved; api('/api/stats').then(function(j){
+      if(j.ok){ setConn('on'); openApp(); }
+      else if(j.error==='unauthorized'){ S.token=''; setConn('off'); try{ sessionStorage.removeItem('at'); }catch(e){} }
+      else { setConn('off'); openApp(); }
+    }); }
+  }catch(e){}
+  setTimeout(function(){ if($('shell').hidden) $('token').focus(); },60);
+}
 })();
 </script></body></html>

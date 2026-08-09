@@ -18,6 +18,11 @@
 //   POST /api/bug                  { id, action:'resolve'|'reopen'|'delete' }
 //   POST /api/void                 { rin, action:'void'|'unvoid' }
 //   POST /api/config               { globalKill?, defaultQuota?, minVersion?, killedVersions? }
+// Admin portal v2 (SPEC-017, src/routes/portal.js — D1-backed, same bearer token):
+//   GET  /api/dashboard            counters, live runs, alerts, recent events
+//   GET  /api/users|user?email=    people (not devices) · POST /api/user { email, action, value }
+//   GET  /api/clients|client?rin=  one row per TRN · POST /api/client { rin, action, value }
+//   POST /api/migrate              rebuild users/clients/devices from the KV dev: records (idempotent)
 //
 // Version kill switch: the extension sends its `version` in /register and /session; if it is below
 // cfg.minVersion or listed in cfg.killedVersions, /session returns allowed:false, reason:'update_required'
@@ -43,6 +48,7 @@ import { errlog } from './src/lib/audit.js';
 import { makeAdminCheck } from './src/lib/auth.js';
 import { extensionRoutes } from './src/routes/extension.js';
 import { planRoutes } from './src/routes/plan.js';
+import { portalRoutes } from './src/routes/portal.js';
 import { adminRoutes } from './src/routes/admin.js';
 
 export { Locks } from './src/locks.js';
@@ -87,6 +93,11 @@ async function handle(request, env) {
     if (ext) return ext;
     const plan = await planRoutes(request, env, url, path);
     if (plan) return plan;
+    // BEFORE adminRoutes on purpose: /api/users and /api/user are shared paths. portalRoutes serves
+    // the SPEC-017 contract and returns null for a legacy `{ deviceId, … }` /api/user body, which
+    // then falls through to the KV dashboard's handler with its request body still unread.
+    const portal = await portalRoutes(request, env, url, path, admin);
+    if (portal) return portal;
     const adm = await adminRoutes(request, env, url, path, admin);
     if (adm) return adm;
 
