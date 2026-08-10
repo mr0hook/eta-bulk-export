@@ -150,11 +150,16 @@ export function createOrchestrator(hooks = {}) {
   // 'done' here means the FETCH finished, which is not the same as the job being done: the output
   // does not exist until merge has run, so the job sits at 'merging' and stays resumable until then.
   const JOB_STATE = { planned: 'planned', running: 'running', paused: 'paused', auth_expired: 'paused', halted: 'halted', incomplete: 'incomplete', done: 'merging' };
-  async function mark(p, status) {
+  // `runningId` is the chunk in flight, if any — it is what puts a live square on the admin timeline.
+  async function mark(p, status, runningId = null) {
     await store.writeProgress(dirHandle, p, status);
     if (!p || !p.jobId) return;
     try {
-      await jobCheckpoint({ jobId: p.jobId, state: JOB_STATE[status] || 'running', done: (p.doneIds || []).length, failed: (p.failedIds || []).length });
+      await jobCheckpoint({
+        jobId: p.jobId, state: JOB_STATE[status] || 'running',
+        done: (p.doneIds || []).length, failed: (p.failedIds || []).length,
+        chunkStates: store.chunkStates(p, runningId),
+      });
     } catch {}
   }
 
@@ -214,6 +219,12 @@ export function createOrchestrator(hooks = {}) {
         if (flags.paused) { onStatus(t('orch.pausedAt', { i: i + 1, n: plan.chunks.length }), { level: 'wait', terminal: true }); await mark(plan, 'paused'); return; }
         const c = plan.chunks[i];
         if (done.has(c.id)) { onProgress(done.size, failed.size, plan.chunks.length - done.size); continue; }
+        // Checkpoint BEFORE the work, not only after it. Until this existed the first checkpoint of a
+        // run landed when its first chunk finished, so a resumed export left the portal showing the
+        // state the run was interrupted in — "paused" for however long that chunk took — and the
+        // stuck detector had a stale updated_at to judge it by. It is also the only place a chunk is
+        // reported as 'running', which is what the admin timeline needs to point at where a run is.
+        await mark(plan, 'running', c.id);
         const tk = tokenStatus(); onToken(tk);
         // A near-expiry token is NOT a problem (the portal renews it silently; every request reads the
         // current one) — only an actually missing/expired token stops us, and even then we wait for
@@ -228,7 +239,7 @@ export function createOrchestrator(hooks = {}) {
             flags.paused = true; await mark(plan, 'auth_expired'); return;
           }
           onToken(fresh); onStatus(t('orch.tokenRenewed'), { level: 'run' });
-          await mark(plan, 'running');
+          await mark(plan, 'running', c.id);
         }
         // verify the logged-in taxpayer still matches the registered one — never export another entity's data
         if (!(await guard())) { onStatus(t('orch.rinMismatch'), { level: 'err', terminal: true }); flags.halted = true; await mark(plan, 'halted'); return; }
@@ -320,7 +331,7 @@ export function createOrchestrator(hooks = {}) {
                 flags.paused = true; await mark(plan, 'auth_expired'); return;
               }
               onToken(fresh); onStatus(t('orch.tokenRenewedRetry'), { level: 'run' });
-              await mark(plan, 'running');
+              await mark(plan, 'running', c.id);
               attempt--; continue;
             }
             // Pause/Halt aborts the in-flight request → STOPPED. Emit an authoritative status here (the immediate
@@ -352,7 +363,11 @@ export function createOrchestrator(hooks = {}) {
       const dropMsg = droppedTotal ? t('orch.dropTail', { n: droppedTotal }) : '';
       const pdfMsg = pdfDropped ? t('orch.pdfTail', { n: pdfDropped }) : '';
       onStatus(t('orch.doneSummary', { word: t(complete ? 'orch.doneOk' : 'orch.doneIncomplete'), done: done.size, n: plan.chunks.length, failed: failed.size, drops: dropMsg, pdfs: pdfMsg }), { level: complete && !failed.size ? 'ok' : 'warn', terminal: true, kind: 'done' });   // kind:'done' + level:'ok' = clean finish (drawer zeroes the timer & closes the persisted log)
-      await store.writeProgress(dirHandle, plan, complete ? 'done' : 'incomplete');
+      // mark(), not writeProgress(): every other terminal path checkpoints and this one did not, so
+      // a run that fetched cleanly stayed 'running' on the portal until the user got around to
+      // merging — long enough to trip the stuck detector on a job that had in fact finished.
+      // JOB_STATE maps this to 'merging', which is the honest state: the output does not exist yet.
+      await mark(plan, complete ? 'done' : 'incomplete');
     } finally {
       running = false; keepalive.stop(); session.stop();
       // Every terminal path returns from inside the loop, so the last lines — including the halt or
@@ -380,7 +395,10 @@ export function createOrchestrator(hooks = {}) {
     if (!prog?.chunks) { onStatus(t('orch.noProgress'), { level: 'warn' }); return null; }
     const SRC = SOURCES[prog.source] || SOURCES.invoices;
     const p = {
-      v: 1, key: prog.key, source: prog.source, year: prog.year, dir: prog.dir, dateField: prog.field, downloadDetails: true,
+      // jobId comes back off the progress file. A resume driven by the drawer overwrites it with the
+      // server's own answer (/job/plan), but this path is also reachable on its own — and without it
+      // mark() sees no jobId and the resumed run never checkpoints again.
+      v: 1, key: prog.key, jobId: prog.jobId || '', source: prog.source, year: prog.year, dir: prog.dir, dateField: prog.field, downloadDetails: true,
       statuses: prog.statuses, from: prog.from, to: prog.to, cap: SRC.cap, totalRows: prog.totalRows,
       chunks: prog.chunks, doneIds: prog.doneIds || [], failedIds: prog.failedIds || [],
       excludeColumns: prog.excludeColumns || [], downloadPdf: !!prog.downloadPdf,

@@ -49,7 +49,10 @@ CREATE TABLE IF NOT EXISTS job_chunks (
   label     TEXT,
   count     INTEGER,
   warn      TEXT,
-  state     TEXT DEFAULT 'pending',  -- pending|done|failed
+  -- Rewritten in bulk by jobs.js checkpoint() from the client's per-chunk snapshot, so the admin
+  -- timeline shows where a live run actually is. No migration needed for an existing D1: the column
+  -- was always here, nothing had ever written to it but the INSERT above.
+  state     TEXT DEFAULT 'pending',  -- pending|running|done|failed
   PRIMARY KEY (job_id, idx)
 );
 

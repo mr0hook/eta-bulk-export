@@ -14,7 +14,7 @@ import { computeVerdict } from '../lib/verdict.js';
 import { errlog } from '../lib/audit.js';
 import { cursorKey, seal, unseal } from '../cursor.js';
 import { startPlan, advance } from '../planner.js';
-import { createJob, getJob, getChunks, finishPlan, checkpoint, listResumable, hasJobs, appendEvents, EVENTS_CAP } from '../jobs.js';
+import { createJob, getJob, getChunks, finishPlan, checkpoint, listResumable, hasJobs, appendEvents, EVENTS_CAP, CHUNK_STATES_MAX } from '../jobs.js';
 import { stampJobs } from '../users.js';
 
 // Mirrors SOURCES in the extension (src/api/sources.js). Held server-side so a client cannot raise
@@ -133,7 +133,12 @@ export async function planRoutes(request, env, url, path) {
     const id = String(b.jobId || '');
     const job = await getJob(env, id, dev.deviceId);
     if (!job) return json({ ok: false, error: 'no such job' }, 404);
-    await checkpoint(env, id, dev.deviceId, { state: String(b.state || 'running'), done: b.done, failed: b.failed });
+    // chunkStates is the timeline half (one char per chunk, idx order) — see jobs.js. Clipped here
+    // rather than trusted: it is the only field on this route whose length a client chooses.
+    await checkpoint(env, id, dev.deviceId, {
+      state: String(b.state || 'running'), done: b.done, failed: b.failed,
+      chunkStates: String(b.chunkStates || '').slice(0, CHUNK_STATES_MAX),
+    });
     return json({ ok: true });
   }
 

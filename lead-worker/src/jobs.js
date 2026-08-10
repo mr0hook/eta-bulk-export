@@ -78,8 +78,20 @@ export async function getChunks(env, id) {
   return (r && r.results) || [];
 }
 
+// One character per chunk, in idx order: d=done, f=failed, r=running, anything else pending.
+// Deliberately a SNAPSHOT of the whole run rather than a delta: checkpoints are best-effort and the
+// client drops any it cannot deliver, so a delta scheme would leave a square permanently wrong
+// after one dropped call. Restating everything makes the next checkpoint self-healing.
+export const CHUNK_STATES = /^[dfrp]*$/;
+export const CHUNK_STATES_MAX = 4096;   // a 4096-chunk plan is ~40M documents; far past anything real
+
 /**
- * Progress checkpoint from a running export. Counts only.
+ * Progress checkpoint from a running export: the counters, and optionally where each chunk stands.
+ *
+ * `chunkStates` is applied with substr() against each row's own idx rather than an IN-list of ids,
+ * because D1 caps bound parameters per statement (~100) and a real plan runs to hundreds of chunks.
+ * One statement, two parameters, any plan size — and it rides in the same batch as the counters so
+ * the timeline and the totals can never disagree.
  *
  * On successful completion the per-chunk rows are dropped and the jobs row is kept: the history of
  * WHAT was exported survives, the range-by-range working detail does not. That is a deliberate
@@ -94,9 +106,22 @@ export async function checkpoint(env, id, deviceId, p) {
   if (!hasJobs(env)) return false;
   const now = new Date().toISOString();
   const state = ['running', 'merging', 'done', 'incomplete', 'halted', 'paused', 'abandoned'].includes(p.state) ? p.state : 'running';
-  await env.JOBS.prepare(
+  const stmts = [env.JOBS.prepare(
     `UPDATE jobs SET state=?, done_count=?, failed_count=?, updated_at=? WHERE id=? AND device_id=?`,
-  ).bind(state, p.done | 0, p.failed | 0, now, id, deviceId).run();
+  ).bind(state, p.done | 0, p.failed | 0, now, id, deviceId)];
+  // An unparseable map is ignored rather than rejected: the counters are the load-bearing half and
+  // must land even from a client whose timeline half is malformed or from an older build.
+  const map = (typeof p.chunkStates === 'string' && p.chunkStates.length <= CHUNK_STATES_MAX && CHUNK_STATES.test(p.chunkStates)) ? p.chunkStates : '';
+  if (map) {
+    stmts.push(env.JOBS.prepare(
+      `UPDATE job_chunks
+          SET state = CASE substr(?, idx + 1, 1)
+                        WHEN 'd' THEN 'done' WHEN 'f' THEN 'failed' WHEN 'r' THEN 'running'
+                        ELSE 'pending' END
+        WHERE job_id = ? AND EXISTS (SELECT 1 FROM jobs WHERE id = ? AND device_id = ?)`,
+    ).bind(map, id, id, deviceId));
+  }
+  await env.JOBS.batch(stmts);
   // SPEC-018: the shipped run log follows the chunks exactly — same trigger, same retention rule.
   // Both are working detail about one taxpayer's activity; neither is the history of what ran.
   if (state === 'done') { await purgeChunks(env, id, deviceId); await purgeEvents(env, id, deviceId); }

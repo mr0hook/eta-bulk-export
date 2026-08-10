@@ -27,10 +27,15 @@ up in `git status` (manifest.json changes) and `package-ext.mjs` refuses to zip 
   to retarget production. Needs the portal login, so only you can do it.
 
 Then, in order:
-  (1) Promote the worker to production (`npm run deploy:prod`). Low risk — A0 verified byte-identical
-      on 29 routes, everything since only ADDS routes. Required before the extension can ship at all:
-      production has no /plan/* and the extension now needs it. LOOK FIRST at the one production
-      account holding four devices — after slice 3 its quota binds on the person.
+  (1) Promote the worker to production (`npm run deploy:prod` — NEVER a bare `wrangler deploy`: the
+      top-level config carries the same worker name with no d1_databases block, so it would overwrite
+      production and silently strip the JOBS binding, which the planner routes treat as "unavailable"
+      rather than an error). Low risk — A0 verified byte-identical on 29 routes, everything since only
+      ADDS routes. Required before the extension can ship at all: production has no /plan/* and the
+      extension now needs it. Also carries /export/mapping (SPEC-021) and the /job/checkpoint
+      chunkStates field — both additive, so deploy order against the extension does not matter.
+      LOOK FIRST at the one production account holding four devices — after slice 3 its quota binds
+      on the person.
   (2) Run the staging migration (Migration card in /admin — one click, keeps the token out of a
       transcript).
   (3) Slice 4: bugs joined to users/jobs, audit trail with real admin identity (Cloudflare Access).
@@ -38,7 +43,7 @@ Then, in order:
 
 Parked (extension milestone, unchanged): USER SMOKE TEST of v0.4.1 — F-10..F-15 have still never
 met real portal data. The run above covers much of it if the folder used is the big one that
-used to fail. (built + packaged: dist-package/eta-bulk-export-v0.4.1.zip). F-10..F-15 are all code-complete and unit-green (252/252)
+used to fail. (built + packaged: dist-package/eta-bulk-export-v0.5.0.zip). F-10..F-15 are all code-complete and unit-green (252/252)
 but NONE has been exercised against real portal data. Load the rebuilt extension and, in one
 session: (1) Merge the big folder that used to fail — confirm it completes and leaves no .jsonl;
 (2) Merge again immediately — must say "Already up to date" and write nothing; (3) sync a day, merge
@@ -111,6 +116,24 @@ because every other phase adds code to the file it breaks up.
 - (resolved) refreshLicense ungated-branch rj-scan gap — fixed in F-06.
 
 ## Session log
+- 2026-08-10 · Run visibility: the backend's picture of a live run was blind in four places, all one
+  root cause — the server was only told about a run at a few late transition points. (1) job_chunks
+  .state was written once as the literal 'pending' by finishPlan and never updated by anything, so
+  four of the admin timeline's five legend colours were unreachable and its "the chunk still in
+  running is where it stopped" callout promised a diagnosis the data could not give. The client now
+  ships a per-chunk snapshot (one char per chunk, idx order) and checkpoint() applies it with
+  substr(?, idx+1, 1) — an IN-list would have blown D1's ~100 bound-parameter ceiling on a real
+  plan. A snapshot, not a delta: checkpoints are best-effort and a dropped one must not leave a
+  square permanently wrong. No migration — the column was always in the schema. (2) The first
+  checkpoint of a run landed only when its first CHUNK finished, so a resumed export sat on the
+  portal in the state it was interrupted in (user-reported: "resume and it still says paused") with
+  a stale updated_at for the 30-minute stuck detector to judge it by. mark() now leads the work at
+  every chunk, including ones a resume skips. (3) The end of a clean fetch called writeProgress
+  directly instead of mark(), so a finished run stayed 'running' until the user got round to
+  merging — long enough to trip the stuck alert on a job that had in fact finished. (4) writeProgress
+  never persisted jobId, so orchestrator.resume() on its own could never check point again; the
+  drawer's /job/plan answer had been covering for it. Suite 343/343, smoke OK (+4 worker checks,
+  +5 extension tests). v0.5.0 packaged. The dashboard needed no change: .ck.run was already there.
 - 2026-08-09 · A0 DEPLOYED TO STAGING and verified live. Staging has its own KV namespace, its own
   worker name and its own ADMIN_TOKEN — nothing shared with production. seed-staging.mjs (npm run
   seed:staging) populates it through the real extension endpoints and doubles as the Durable Object

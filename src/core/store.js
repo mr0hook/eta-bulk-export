@@ -16,6 +16,24 @@ const planSig = (plan) => hash8(`${plan.dateField || ''}|${[...(plan.statuses ||
 export const chunkFile = (plan, chunk) => `${filePrefix(plan)}_${plan.year}_${plan.dir}_${planSig(plan)}_${safeName(chunk.label || chunk.id)}_${hash8(chunk.id)}.xlsx`;
 const progressName = (plan) => `eta_progress_${safeName(plan.key)}.json`;
 
+/**
+ * The run's per-chunk state as one character per chunk, in plan order: d=done, f=failed, r=running,
+ * p=not started. This is what /job/checkpoint ships so the admin timeline can show where a live run
+ * actually is; the plan rows in D1 stay immutable and this rewrites only their state column.
+ *
+ * Precedence matches flow.js chunkMap exactly, and for the same reasons: done beats running so a
+ * resumed run's skipped chunks read as finished, and running beats failed so a chunk being retried
+ * does not flash red while it is in flight.
+ */
+export function chunkStates(plan, runningId = null) {
+  if (!plan || !Array.isArray(plan.chunks)) return '';
+  const done = new Set(plan.doneIds || []);
+  const failed = new Set(plan.failedIds || []);
+  return plan.chunks.map((c) => (
+    done.has(c.id) ? 'd' : (runningId != null && c.id === runningId) ? 'r' : failed.has(c.id) ? 'f' : 'p'
+  )).join('');
+}
+
 export function saveState(s) { try { localStorage.setItem(PREFIX + s.key, JSON.stringify(s)); } catch {} }
 export function loadState(key) { try { return JSON.parse(localStorage.getItem(PREFIX + key) || 'null'); } catch { return null; } }
 export function allStates() { const o = []; for (let i = 0; i < localStorage.length; i++) { const k = localStorage.key(i); if (k && k.startsWith(PREFIX)) { try { o.push(JSON.parse(localStorage.getItem(k))); } catch {} } } return o.filter(Boolean); }
@@ -25,7 +43,10 @@ export async function writeProgress(dir, plan, status) {
   const done = new Set(plan.doneIds || []);
   const doneChunks = plan.chunks.filter((c) => done.has(c.id));
   const p = {
-    key: plan.key, source: plan.source, status, updatedAt: new Date().toISOString(),
+    // jobId travels with the progress file so a folder-only resume (orchestrator.resume() without
+    // the server's /job/plan answer) can still check point against the job it belongs to. Without
+    // it, mark() bails on `!p.jobId` and the run goes dark to the backend for its whole life.
+    key: plan.key, jobId: plan.jobId || '', source: plan.source, status, updatedAt: new Date().toISOString(),
     year: plan.year, dir: plan.dir, field: plan.dateField, from: plan.from, to: plan.to, statuses: plan.statuses,
     totalChunks: plan.chunks.length, totalRows: plan.totalRows, excludeColumns: plan.excludeColumns || [], downloadPdf: !!plan.downloadPdf,
     doneChunks: doneChunks.length, remainingChunks: plan.chunks.length - doneChunks.length,

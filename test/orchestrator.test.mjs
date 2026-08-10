@@ -86,6 +86,45 @@ test('happy path: all details succeed → one xlsx, no failures log, chunk done'
   assert.ok(!msgs.at(-1).includes('⚠️'), 'no drop warning');
 });
 
+// The run used to report itself to the backend only AFTER a chunk finished, so a resumed export sat
+// on the portal in the state it was interrupted in — "paused" for as long as the first chunk took,
+// with a stale updated_at for the stuck detector to judge it by. The checkpoint now leads the work.
+// (What it ships — the per-chunk snapshot — is covered by store.chunkStates; this is the ordering.)
+test('a run reports itself running BEFORE it fetches, not after the first chunk lands', async () => {
+  setTokenMinutes(120);
+  const dir = fakeDir();
+  let atFirstFetch = 'never fetched';
+  const realFetch = (() => { stubFetch(); return globalThis.fetch; })();
+  globalThis.fetch = async (url) => {
+    if (String(url).includes('/search') && atFirstFetch === 'never fetched') {
+      atFirstFetch = progress(dir)?.status ?? 'no progress file yet';
+    }
+    return realFetch(url);
+  };
+  await run(dir, makePlan());
+  assert.equal(atFirstFetch, 'running', 'the folder — and so the checkpoint — said running before a byte moved');
+});
+
+test('a resumed run checkpoints at the chunk it picks up, not once that chunk completes', async () => {
+  setTokenMinutes(120);
+  const dir = fakeDir();
+  const CHUNK2 = { id: 'c2', label: '2025-02', count: 5, fromISO: '2025-02-01T00:00:00Z', toISO: '2025-02-28T23:59:59Z' };
+  // c1 already done, as a resume hands it over: the loop skips it with `continue` and must still
+  // report before working c2 — skipping a chunk is not progress the backend can see.
+  const plan = makePlan({ chunks: [CHUNK, CHUNK2], doneIds: ['c1'], totalRows: 10 });
+  let atFirstFetch = 'never fetched';
+  const realFetch = (() => { stubFetch(); return globalThis.fetch; })();
+  globalThis.fetch = async (url) => {
+    if (String(url).includes('/search') && atFirstFetch === 'never fetched') atFirstFetch = progress(dir)?.status ?? 'no progress file yet';
+    return realFetch(url);
+  };
+  await run(dir, plan);
+  assert.equal(atFirstFetch, 'running', 'reported before the resumed chunk was worked');
+  const p = progress(dir);
+  assert.equal(p.status, 'done');
+  assert.deepEqual([...p.doneIds].sort(), ['c1', 'c2'], 'the skipped chunk stays done');
+});
+
 test('partial drop: 1 detail fails → xlsx written, UUID durably logged, chunk still done', async () => {
   setTokenMinutes(120); stubFetch({ failUuids: new Set(['U2']) });
   const dir = fakeDir();

@@ -40,6 +40,13 @@ function makeD1() {
     if (sql.includes('INSERT OR REPLACE INTO job_chunks')) { chunks.push({ job_id: a[0], idx: a[1], chunk_id: a[2], from_iso: a[3], to_iso: a[4], sub_f: a[5], sub_t: a[6], label: a[7], count: a[8], warn: a[9], state: 'pending' }); return { success: true }; }
     if (sql.includes("SET state='planned'")) { const j = jobs.get(a[4]); if (j) Object.assign(j, { state: 'planned', total_chunks: a[0], total_rows: a[1], probes: a[2], updated_at: a[3] }); return { success: true }; }
     if (sql.includes('SET state=?, done_count=?')) { const j = jobs.get(a[4]); if (j && j.device_id === a[5]) Object.assign(j, { state: a[0], done_count: a[1], failed_count: a[2], updated_at: a[3] }); return { success: true }; }
+    // The timeline half of a checkpoint: substr(map, idx+1, 1) per row, device-scoped through jobs.
+    if (sql.includes('UPDATE job_chunks')) {
+      const map = String(a[0]), j = jobs.get(a[2]);
+      const WORD = { d: 'done', f: 'failed', r: 'running' };
+      if (j && j.device_id === a[3]) for (const c of chunks) if (c.job_id === a[1]) c.state = WORD[map[c.idx]] || 'pending';
+      return { success: true };
+    }
     // The portal's purge is NOT device-scoped (admin token is the authority) — matched first, since
     // the device-scoped delete below shares its opening clause.
     if (sql.includes('/* admin */ DELETE FROM job_chunks')) { for (let i = chunks.length - 1; i >= 0; i--) if (chunks[i].job_id === a[0]) chunks.splice(i, 1); return { success: true }; }
@@ -399,6 +406,22 @@ try {
 
   const cp = await signed('/job/checkpoint', { jobId: s0.jobId, state: 'running', done: 1, failed: 0 }, PK, PD);
   check('checkpoint records progress', cp.status === 200 && jobRow.done_count === 1 && jobRow.state === 'running');
+
+  // ── the chunk timeline (one char per chunk, idx order) ────────────────────────────────────────
+  // Without this the admin timeline could only ever show 'pending': the plan wrote the rows and
+  // nothing on the server ever touched their state again.
+  const chunkStateOf = (j) => JOBS._chunks.filter((c) => c.job_id === j).sort((x, y) => x.idx - y.idx).map((c) => c.state);
+  await signed('/job/checkpoint', { jobId: s0.jobId, state: 'running', done: 1, failed: 0, chunkStates: 'dr' }, PK, PD);
+  check('a checkpoint paints the chunk timeline', String(chunkStateOf(s0.jobId)) === 'done,running');
+  // A snapshot, not a delta: a later checkpoint that demotes a square must be obeyed, because that
+  // is what a retried chunk looks like.
+  await signed('/job/checkpoint', { jobId: s0.jobId, state: 'running', done: 1, failed: 1, chunkStates: 'df' }, PK, PD);
+  check('the timeline is a snapshot — a retried chunk can move back', String(chunkStateOf(s0.jobId)) === 'done,failed');
+  // Garbage in the timeline half must not cost the counters, which are the load-bearing half.
+  const junk = await signed('/job/checkpoint', { jobId: s0.jobId, state: 'running', done: 2, failed: 0, chunkStates: 'd<script>' }, PK, PD);
+  check('a malformed timeline is ignored, counters still land', junk.status === 200 && jobRow.done_count === 2 && String(chunkStateOf(s0.jobId)) === 'done,failed');
+  const foreign = await signed('/job/checkpoint', { jobId: s0.jobId, state: 'running', done: 2, failed: 0, chunkStates: 'ff' }, reg.clientKey, 'dev-1');
+  check("another device cannot repaint this job's timeline", foreign.ok !== true && String(chunkStateOf(s0.jobId)) === 'done,failed');
 
   // Retention: an unfinished job KEEPS its chunks — they are what a resume reads.
   await signed('/job/checkpoint', { jobId: s0.jobId, state: 'incomplete', done: 1, failed: 1 }, PK, PD);

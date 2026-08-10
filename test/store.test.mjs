@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { fakeDir } from './fakefs.mjs';
-import { runKey, filePrefix, chunkFile, writeProgress, readProgress, scanDoneFromFolder } from '../src/core/store.js';
+import { runKey, filePrefix, chunkFile, writeProgress, readProgress, scanDoneFromFolder, chunkStates } from '../src/core/store.js';
 import { appendText } from '../src/core/fs.js';
 
 // store.js mirrors to localStorage too (saveState); stub it so imports/side-effects don't throw.
@@ -53,6 +53,32 @@ test('writeProgress → readProgress: done/remaining/doneRows computed from done
   assert.equal(back.remainingChunks, 1);
   assert.equal(back.doneRows, 100, 'sums counts of DONE chunks only (c1=100)');
   assert.deepEqual(back.doneIds, ['c1']);
+});
+
+test('writeProgress: carries the jobId, so a folder-only resume can still checkpoint', async () => {
+  const dir = fakeDir();
+  await writeProgress(dir, { ...plan(), jobId: 'abc123' }, 'running');
+  assert.equal((await readProgress(dir)).jobId, 'abc123');
+  // A plan minted before this field existed must still write a file, not throw or emit undefined.
+  const dir2 = fakeDir();
+  await writeProgress(dir2, plan(), 'running');
+  assert.equal((await readProgress(dir2)).jobId, '');
+});
+
+test('chunkStates: one char per chunk in plan order, done > running > failed', () => {
+  const p = { chunks: [{ id: 'a' }, { id: 'b' }, { id: 'c' }, { id: 'd' }], doneIds: ['a'], failedIds: ['c'] };
+  assert.equal(chunkStates(p, 'b'), 'drfp');
+  assert.equal(chunkStates(p), 'dpfp', 'no chunk in flight → nothing reads as running');
+  // A resumed run skips its finished chunks without re-running them; they must stay 'd'.
+  assert.equal(chunkStates({ ...p, doneIds: ['a', 'b'] }, 'b'), 'ddfp', 'done beats running');
+  // A failed chunk being retried is in flight, not red — same precedence flow.js chunkMap uses.
+  assert.equal(chunkStates({ ...p, failedIds: ['b'] }, 'b'), 'drpp', 'running beats failed');
+});
+
+test('chunkStates: degrades to an empty string rather than throwing on a shapeless plan', () => {
+  assert.equal(chunkStates(null), '');
+  assert.equal(chunkStates({}), '');
+  assert.equal(chunkStates({ chunks: [{ id: 'a' }] }), 'p', 'missing doneIds/failedIds → all pending');
 });
 
 test('scanDoneFromFolder: reconstructs done ids from present .xlsx files only', async () => {
