@@ -19,7 +19,16 @@ single origin bg.js is allowed to fetch, and manifest.json's host_permissions. A
 up in `git status` (manifest.json changes) and `package-ext.mjs` refuses to zip one.
 
 ## NEXT ACTION
-→ DEPLOY THE WORKER TO PRODUCTION — it now carries TWO things: the cursor stack-overflow fix
+→ 2026-08-19 03:00: v0.6.3 committed after the live 4M-doc run surfaced the PROFILE-SWITCH class
+  of failure (one login, several taxpayer profiles sharing a TaxRin; any cold portal load can flip
+  the active profile for every tab → empty searches + per-doc 403s). Run defenses: empty-chunk
+  guard (T-237), file-truth resume heal (T-238), profile-stamp pause (T-239), 403 = drop-row not
+  AUTH. User must: reload the unpacked extension (v0.6.3), confirm the portal shows the intended
+  company, then Resume the Sales run — chunks 1..192 (empty-marked) refetch automatically.
+  RULE FOR AGENTS: never open invoicing.eta.gov.eg in the user's browser — a cold load
+  re-authenticates and flips their active taxpayer profile mid-run.
+
+→ THEN: DEPLOY THE WORKER TO PRODUCTION — it now carries TWO things: the cursor stack-overflow fix
   (80d615a) and SPEC-022's /plan/uuids route (without it, the new By-list export gets
   'not found' from the backend and refuses to run):
       cd lead-worker && npx wrangler deploy --env production
