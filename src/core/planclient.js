@@ -7,7 +7,7 @@
 //
 // chunker.js stays in the repo as the reference implementation the equivalence tests drive against
 // the server's step machine; it is simply no longer imported by anything that ships.
-import { planStart, planStep } from './registration.js';
+import { planStart, planStep, planUuids } from './registration.js';
 import { t } from './i18n.js';
 
 /** The server answered, and its answer was no. Retrying will not help; the drawer explains instead. */
@@ -94,4 +94,31 @@ export async function planViaServer(req, deps) {
   // The server ended the conversation without a plan. Treated as a refusal rather than an empty
   // plan: an empty chunk list downstream would look like "nothing to export" and quietly succeed.
   throw new PlanDenied({ error: 'no plan returned' });
+}
+
+/**
+ * SPEC-022 — plan a UUID-list export. No conversation and no probes: the server is sent the COUNT
+ * (never the identifiers), applies the same entitlement gate as /plan/start, and answers with a
+ * jobId and its chosen batching. The chunks returned here carry each batch's slice of the actual
+ * list under `uuids`, so the progress file — and therefore resume — holds them without any extra
+ * plumbing; the same offline policy applies (network failure retries, a refusal is final).
+ */
+export async function planUuidList(uuids, req, deps = {}) {
+  const { onStatus = () => {}, stopped = () => false, wait, call = planUuids } = deps;
+  const io = { onStatus, stopped, wait: wait || sleep };
+  onStatus(t('plan.contacting'), { level: 'run', kind: 'plan' });
+  const res = await insist(() => call({ count: uuids.length, rin: req.rin, version: req.version }), io);
+  const batches = Array.isArray(res.batches) ? res.batches : [];
+  const total = batches.reduce((s, b) => s + (b.count | 0), 0);
+  // A batching that does not cover the list exactly would silently drop documents — refuse it.
+  if (!res.jobId || total !== uuids.length || batches.some((b) => (b.count | 0) < 1)) {
+    throw new PlanDenied({ error: 'bad batches' });
+  }
+  let at = 0;
+  const chunks = batches.map((b, i) => {
+    const slice = uuids.slice(at, at + (b.count | 0)); at += b.count | 0;
+    return { id: String(b.id || 'uuids_' + i), label: String(b.label || `UUIDs ${i + 1}`), count: b.count | 0, uuids: slice };
+  });
+  onStatus(t('plan.ready', { n: chunks.length }), { level: 'ok', kind: 'plan' });
+  return { jobId: res.jobId, chunks };
 }

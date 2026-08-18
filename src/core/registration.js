@@ -164,6 +164,8 @@ export async function session() {
 // a date range: it probes the portal and reports counts, the server decides where to cut.
 export function planStart(body) { return signedPost('/plan/start', body); }
 export function planStep(body) { return signedPost('/plan/step', body); }
+// SPEC-022: the gate for a list-driven export. Carries a COUNT — the UUIDs never leave the device.
+export function planUuids(body) { return signedPost('/plan/uuids', body); }
 export function jobCheckpoint(body) { return signedPost('/job/checkpoint', body); }
 // SPEC-018 Part B — a batch of run-log lines for a job. Status lines only (counts and progress,
 // never document content), batched and coalesced by logship.js before they get here. Best-effort:
