@@ -59,6 +59,29 @@ test('T-146 the step number survives sealing, so a stale step is detectable', as
   assert.notEqual(t1, t2, 'a fresh IV each time — identical states must not seal identically');
 });
 
+test('T-148 sealing survives the state a big live plan actually reaches (regression: 2026-08-18 stress test)', async () => {
+  // The shipped /plan/step route seals the FULL machine state — accepted chunks ride in st.out
+  // (unlike the stripped copy T-147 seals). A ~2M-invoice range crossed ~1,000 probes, st.out held
+  // hundreds of chunks, and b64url's `String.fromCharCode(...bytes)` spread every ciphertext byte
+  // onto the call stack → RangeError('Maximum call stack size exceeded') → an opaque 'server error'
+  // at the client. Sealing must be O(1) stack whatever the state size.
+  const key = await makeKey();
+  const chunk = (i) => ({
+    id: `2025-01-01T00:00:00.000Z_2025-01-01T23:59:59.999Z_${i}`,
+    fromISO: '2025-01-01T00:00:00.000Z', toISO: '2025-01-01T23:59:59.999Z',
+    subF: null, subT: null, label: `1 Jan 2025 · part ${i}`, count: 4000 + i, warn: null,
+  });
+  const st = {
+    cap: 10000, granular: true, subSplit: true, field: 'Issue',
+    stack: Array.from({ length: 40 }, (_, d) => ({ t: 'split', fromISO: 'x', toISO: 'y', depth: d })),
+    out: Array.from({ length: 4096 }, (_, i) => chunk(i)),   // CHUNK_STATES_MAX — the biggest plan the backend accepts
+    pending: null, probes: 9000, step: 9000,
+  };
+  const token = await seal(key, 'job-big', st);
+  assert.ok(token.length > 100000, `a state this size must produce a big token, got ${token.length}`);
+  assert.deepEqual(await unseal(key, 'job-big', token), st, 'round-trip must be lossless at any size');
+});
+
 test('T-147 the cursor stays small on a plan that accepts hundreds of chunks', async () => {
   // The stack holds at most one pending frame per level (depth capped at 80) and accepted chunks do
   // NOT ride along — they are written to D1 as they are decided. So cursor size must be a function

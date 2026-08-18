@@ -13,7 +13,13 @@ import { randHex } from './lib/util.js';
 const enc = new TextEncoder();
 const dec = new TextDecoder();
 
-const b64url = (bytes) => btoa(String.fromCharCode(...bytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+// Converted in 32KB slices: spreading the whole array as arguments overflows the call stack once
+// the sealed state passes ~100KB, which a plan over a few million documents reaches mid-flight.
+const b64url = (bytes) => {
+  let s = '';
+  for (let i = 0; i < bytes.length; i += 0x8000) s += String.fromCharCode.apply(null, bytes.subarray(i, i + 0x8000));
+  return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+};
 const unb64url = (s) => {
   const b = atob(String(s).replace(/-/g, '+').replace(/_/g, '/'));
   const out = new Uint8Array(b.length);
