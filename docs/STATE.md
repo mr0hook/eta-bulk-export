@@ -29,6 +29,11 @@ up in `git status` (manifest.json changes) and `package-ext.mjs` refuses to zip 
   company, then Resume the Sales run — chunks 1..192 (empty-marked) refetch automatically.
   RULE FOR AGENTS: never open invoicing.eta.gov.eg in the user's browser — a cold load
   re-authenticates and flips their active taxpayer profile mid-run.
+  2026-08-19 ~04:30, USER-VALIDATED: the entity selection is server-side PER LOGIN — switching in
+  Edge flipped Chrome (different browser, no shared cookies), and SPEC-023's pinning (v0.7.0) was
+  observed reverting it live. Corollary: the run's restore also yanks OTHER sessions back; a
+  colleague actively working another entity on the same login ends in the 3-restore pause by
+  design. Long-term advice given: separate ETA user accounts per person/entity.
 
 → THEN: DEPLOY THE WORKER TO PRODUCTION — it now carries TWO things: the cursor stack-overflow fix
   (80d615a) and SPEC-022's /plan/uuids route (without it, the new By-list export gets
