@@ -117,9 +117,13 @@ export function createOrchestrator(hooks = {}) {
     const sp = statusPlan(sel.statuses, SRC);
     flags.paused = false; flags.halted = false;
     currentCtrl = new AbortController();
-    const probe = (f, t, subF, subT) => probeCount(SRC, f, t, sel.dir, sel.field, sp.statusParam, subF, subT, { signal: currentCtrl.signal, onRate: rate });
+    // SPEC-022b: with exactly ONE RIN the portal's own Query param narrows the search server-side,
+    // so probes count only that party's documents and the plan collapses to their real volume.
+    // Multiple RINs keep the plain plan (the portal takes one query) and filter client-side.
+    const rinQuery = (sel.rinFilter || []).length === 1 ? String(sel.rinFilter[0]) : null;
+    const probe = (f, t, subF, subT) => probeCount(SRC, f, t, sel.dir, sel.field, sp.statusParam, subF, subT, { signal: currentCtrl.signal, onRate: rate, query: rinQuery });
     const detectMaxSub = async (issF, issT) => {
-      try { const j = await apiGet(buildUrl(SRC, issF, issT, sel.dir, sel.field, 1, 1, sp.statusParam, null, null, true), { signal: currentCtrl.signal, onRate: rate }); return (j[SRC.resultKey] || [])[0]?.source?.submissionDate || null; } catch { return null; }
+      try { const j = await apiGet(buildUrl(SRC, issF, issT, sel.dir, sel.field, 1, 1, sp.statusParam, null, null, true, rinQuery), { signal: currentCtrl.signal, onRate: rate }); return (j[SRC.resultKey] || [])[0]?.source?.submissionDate || null; } catch { return null; }
     };
     onStatus(t('orch.probing', { label: SRC.label }), { level: 'run' });
     // SPEC-016: the extension probes; the SERVER decides where to cut and mints the job. There is no
@@ -224,6 +228,10 @@ export function createOrchestrator(hooks = {}) {
     // PDF fetches, so a filtered run costs details only for matches. Correctness never depends on
     // any server-side narrowing (there is none in v1); this predicate is the filter.
     const rinPred = (!isUuids && plan.rinFilter?.length) ? rinMatch(plan.rinFilter) : null;
+    // Single RIN → the same server-side Query the plan's probes used, so the pages fetched are the
+    // pages counted. The client-side rinPred still runs: Query matches fragments across several
+    // fields, so it can over-match — never under-match a full exact RIN (portal-documented).
+    const rinQuery = (!isUuids && plan.rinFilter?.length === 1) ? String(plan.rinFilter[0]) : null;
     const opts = { columns: Object.fromEntries((plan.excludeColumns || []).map((k) => [k, false])), combineAll: true, taxColumns: true, discountColumns: true, negativeCredit: true, validOnly: false };   // SPEC-007: credit notes always export negative — no UI switch
     // SPEC-008: run-level uuid→invoice-number cache for credit/debit note references. Shared across
     // chunks on purpose — one original is resolved once however many notes point at it.
@@ -298,7 +306,7 @@ export function createOrchestrator(hooks = {}) {
             let rows = isUuids
               ? c.uuids.map((u) => ({ source: { uuid: u } }))
               : await fetchAllRows(SRC, c, plan.dir, plan.dateField, sp.statusParam, sp.filterSet,
-                { signal: currentCtrl.signal, onRate: rate, onPage: (g, tt) => { onStatus(t('orch.chunkFetch', { i: i + 1, n: plan.chunks.length, g, t: tt }), { level: 'run', kind: 'page' }); onCount(rowsFetched + g, plan.totalRows); onChunk({ i: i + 1, n: plan.chunks.length, phase: 'search', cur: g, max: tt }); } });
+                { signal: currentCtrl.signal, onRate: rate, query: rinQuery, onPage: (g, tt) => { onStatus(t('orch.chunkFetch', { i: i + 1, n: plan.chunks.length, g, t: tt }), { level: 'run', kind: 'page' }); onCount(rowsFetched + g, plan.totalRows); onChunk({ i: i + 1, n: plan.chunks.length, phase: 'search', cur: g, max: tt }); } });
             if (rinPred && rows.length) {
               // If NO row in the chunk carries a recognisable counterparty id, the portal's search
               // shape has drifted from what rinIdsOf() knows. Filtering would drop everything and

@@ -18,10 +18,18 @@
 
 **NOT in this spec**: receipts by UUID (extension point: `SOURCES.receipts` already carries
 `detailsBase`; the run path is written source-generic but only `invoices` is offered in the UI);
-RIN filter for receipts (seller/buyer field mapping unverified); server-side RIN narrowing of the
-search query (`Query=`/`FreeText=` params — worth a live probe later, but correctness must never
-depend on it, so v1 ships without); client-rendered PDFs (user chose official printouts);
-any change to the planner conversation or to `MAX_STEPS`/`CHUNK_STATES_MAX`.
+RIN filter for receipts (seller/buyer field mapping unverified); client-rendered PDFs (user chose
+official printouts); any change to the planner conversation or to `MAX_STEPS`/`CHUNK_STATES_MAX`.
+
+**Amendment (2026-08-19, v0.6.1 — T-236)**: server-side RIN narrowing IS in scope for a
+single-RIN list. Verified live against the portal: `/api/v1/documents/search` accepts `Query=`,
+documented on the Documents page as matching Receiver ID/Name and Issuer ID/Name (exact or
+fragment), and it composes with the date filters. With one RIN, probes and page fetches both
+carry `Query=<rin>`, so the plan sizes to that party's real volume instead of the whole account's
+— a standalone one-party export costs a handful of probes, not thousands. The client-side
+`rinMatch` still runs on every row (Query can over-match across fields; it cannot under-match a
+full exact RIN). Multiple RINs keep the un-narrowed plan + client filter (the portal takes one
+query per request).
 
 ## Decisions (made with the user, 2026-08-18)
 

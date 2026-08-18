@@ -117,3 +117,27 @@ test('T-232 rows with NO recognisable counterparty ids fail the chunk loudly —
   assert.notEqual(progress(dir).status, 'done', 'the run does not claim success');
   assert.ok(msgs.some((m) => /counterparty ids|refusing to filter/i.test(m)), 'the reason is named');
 });
+
+test('T-236 a single-RIN run narrows server-side: probe and page URLs carry Query=<rin>', async () => {
+  setToken();
+  const urls = [];
+  const realFetch = (() => { stubFetch(); return globalThis.fetch; })();
+  globalThis.fetch = async (url) => { if (String(url).includes('/search')) urls.push(String(url)); return realFetch(url); };
+
+  // probe path: a planner that actually uses deps.probe, as the real one does
+  const orch = createOrchestrator({ onStatus: () => {}, planner: async (req, deps) => { await deps.probe('2025-01-01T00:00:00Z', '2025-01-31T23:59:59Z'); return { jobId: 'j', chunks: [CHUNK] }; } });
+  await orch.plan({ source: 'invoices', field: 'Issue', dir: 'Sent', year: '2025', rinFilter: ['555000111'] });
+  assert.ok(urls.length >= 1 && urls[0].includes('Query=555000111'), `probe carries Query, got ${urls[0]}`);
+
+  // fetch path
+  urls.length = 0;
+  const dir = fakeDir();
+  await run(dir, makePlan({ rinFilter: ['555000111'] }));
+  assert.ok(urls.length >= 1 && urls.every((u) => u.includes('Query=555000111')), 'every page fetch carries Query');
+
+  // two RINs → no server query (the portal takes one), client filter only
+  urls.length = 0;
+  const dir2 = fakeDir();
+  await run(dir2, makePlan({ rinFilter: ['555000111', '111000111'] }));
+  assert.ok(urls.length >= 1 && urls.every((u) => !u.includes('Query=')), 'multi-RIN stays un-narrowed');
+});

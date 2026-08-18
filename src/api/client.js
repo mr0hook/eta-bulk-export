@@ -11,10 +11,16 @@ const sleep = (ms, signal) => new Promise((resolve, reject) => {
   signal?.addEventListener?.('abort', () => { clearTimeout(t); reject(coded('STOPPED')); }, { once: true });
 });
 
-export function buildUrl(SRC, fromISO, toISO, dir, field, page, size, statusParam, subF, subT, sortDesc) {
+export function buildUrl(SRC, fromISO, toISO, dir, field, page, size, statusParam, subF, subT, sortDesc, query) {
   const p = new URLSearchParams();
   if (dir && dir !== SRC.dirOmit) p.set(SRC.dirParam, dir);
   if (statusParam && SRC.statusServer) p.set('Status', statusParam);
+  // SPEC-022b: the portal's own free-text search param. Documented on the Documents page as
+  // matching Receiver ID/Name and Issuer ID/Name (exact or fragment) and verified live
+  // (2026-08-19) to compose with the date filters — so a single-RIN export narrows SERVER-side
+  // and probes count only that party's documents. Over-matching is fine: the orchestrator's
+  // rinMatch() re-filters rows precisely.
+  if (query) p.set('Query', query);
   p.set(SRC.dateName(field, 'From'), fromISO);
   p.set(SRC.dateName(field, 'To'), toISO);
   if (subF && subT) { p.set('SubmissionDateFrom', subF); p.set('SubmissionDateTo', subT); } // invoice sub-split
@@ -54,21 +60,21 @@ export async function apiGet(url, { attempts = 7, signal, onRate } = {}) {
 
 export async function probeCount(SRC, fromISO, toISO, dir, field, statusParam, subF, subT, opts) {
   try {
-    const j = await apiGet(buildUrl(SRC, fromISO, toISO, dir, field, 1, 10, statusParam, subF, subT), opts);
+    const j = await apiGet(buildUrl(SRC, fromISO, toISO, dir, field, 1, 10, statusParam, subF, subT, false, opts?.query), opts);
     const n = j?.metadata?.totalCount;
     if (typeof n !== 'number' || !Number.isFinite(n)) throw coded('BAD_COUNT');   // missing/garbled count must NOT be read as a genuine 0
     return n;
   } catch (e) { if (e.code === 'NOT_FOUND') return 0; throw e; }
 }
 
-export async function fetchAllRows(SRC, chunk, dir, field, statusParam, filterSet, { onPage, signal, onRate, pagePause = 250 } = {}) {
+export async function fetchAllRows(SRC, chunk, dir, field, statusParam, filterSet, { onPage, signal, onRate, pagePause = 250, query } = {}) {
   const ps = SRC.pageSize, maxPage = Math.ceil(SRC.cap / ps) + 5;
   const expected = Math.min(chunk.count || 0, SRC.cap);
   let rows = [], page = 1;
   for (;;) {
     if (signal?.aborted) break;
     let j;
-    try { j = await apiGet(buildUrl(SRC, chunk.fromISO, chunk.toISO, dir, field, page, ps, statusParam, chunk.subF, chunk.subT), { signal, onRate }); }
+    try { j = await apiGet(buildUrl(SRC, chunk.fromISO, chunk.toISO, dir, field, page, ps, statusParam, chunk.subF, chunk.subT, false, query), { signal, onRate }); }
     catch (e) { if (e.code === 'NOT_FOUND') { if (page > 1) throw e; break; } throw e; }   // 404 after real pages ≠ clean end → fail the chunk
     const r = (j && j[SRC.resultKey]) || [];
     rows.push(...r); onPage?.(rows.length, Math.max(expected, rows.length));
