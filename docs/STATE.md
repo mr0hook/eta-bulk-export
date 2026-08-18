@@ -19,7 +19,19 @@ single origin bg.js is allowed to fetch, and manifest.json's host_permissions. A
 up in `git status` (manifest.json changes) and `package-ext.mjs` refuses to zip one.
 
 ## NEXT ACTION
-→ DEPLOY THE CURSOR FIX TO PRODUCTION, then re-run the big stress test.
+→ DEPLOY THE WORKER TO PRODUCTION — it now carries TWO things: the cursor stack-overflow fix
+  (80d615a) and SPEC-022's /plan/uuids route (without it, the new By-list export gets
+  'not found' from the backend and refuses to run):
+      cd lead-worker && npx wrangler deploy --env production
+  Then: (1) re-run the 2M-invoice stress test (should plan clean past probe ~1036), and
+  (2) reload the unpacked extension (dist/ is rebuilt) and try the new By-list box:
+  paste UUIDs → exact export with optional official PDFs; paste RINs → filtered range export.
+
+SPEC-022 (F-22 uuid-list export, F-23 RIN filter) is BUILT and green: T-219..T-234 across
+smoke-worker + listinput/uuidplan/uuidrun/rinrun/merge/sync suites; 367 extension tests + smoke
+all pass; production build clean. Not yet validated against the live portal (needs your login).
+
+Previous stress-test context:
   2026-08-18: a real stress run (~2M invoices) crashed /plan/step at probe ~1036 —
   `Maximum call stack size exceeded` in cursor.js b64url (byte spread), confirmed in production
   err: KV records. Fixed in 80d615a (T-148 regression test). The fix is committed but NOT deployed:
