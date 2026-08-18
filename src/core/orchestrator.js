@@ -4,7 +4,7 @@ import { SOURCES, ALL_STATUSES } from '../api/sources.js';
 import { tokenStatus } from './token.js';
 import { buildUrl, apiGet, probeCount, fetchAllRows, fetchDetails, fetchPdf, mapLimit } from '../api/client.js';
 import { planViaServer, planUuidList } from './planclient.js';   // SPEC-016: the server decides where to cut; chunker.js is now test-only
-import { listKey } from './listinput.js';   // SPEC-022: pasted-list runs
+import { listKey, rinMatch, rinIdsOf } from './listinput.js';   // SPEC-022: pasted-list runs
 import { safeName } from './time.js';
 import { renderWorkbook, XLSX_MIME } from '../export/xlsx.js';
 import { refreshMapping } from '../export/mapsync.js';   // SPEC-021: column mapping served by the worker, bundled fallback
@@ -109,8 +109,11 @@ export function createOrchestrator(hooks = {}) {
 
   async function plan(sel) {
     const SRC = SOURCES[sel.source] || SOURCES.invoices;
-    const from = sel.from || (sel.year === '2020' ? '2020-11-15' : `${sel.year}-01-01`);
-    const to = sel.to || `${sel.year}-12-31`;
+    // SPEC-022b: a standalone RIN export spans the whole e-invoicing era — the mandate's first
+    // rollout date to today — because the user gave identities, not dates.
+    const from = sel.era ? '2020-11-15' : sel.from || (sel.year === '2020' ? '2020-11-15' : `${sel.year}-01-01`);
+    const to = sel.era ? new Date().toISOString().slice(0, 10) : sel.to || `${sel.year}-12-31`;
+    const rins = (sel.rinFilter || []).map(String).filter(Boolean);
     const sp = statusPlan(sel.statuses, SRC);
     flags.paused = false; flags.halted = false;
     currentCtrl = new AbortController();
@@ -136,8 +139,12 @@ export function createOrchestrator(hooks = {}) {
     const totalRows = chunks.reduce((s, c) => s + c.count, 0);
     const biggest = chunks.reduce((m, c) => Math.max(m, c.count), 0);
     const p = {
-      v: 1, jobId, key: store.runKey(sel.source, sel.year, sel.dir, sel.field, from, to), source: sel.source, createdAt: new Date().toISOString(),
-      year: sel.year, dir: sel.dir, dateField: sel.field, downloadDetails: sel.downloadDetails !== false, statuses: sel.statuses || ALL_STATUSES,
+      // A RIN-filtered run keys (and so files, progress, resume) separately from the unfiltered
+      // run over the same range — its chunk files hold a SUBSET and must never masquerade as done
+      // chunks of a full export.
+      v: 1, jobId, key: store.runKey(sel.source, sel.era ? 'era' : sel.year, sel.dir, sel.field, from, to) + (rins.length ? `_rin${listKey(rins)}` : ''), source: sel.source, createdAt: new Date().toISOString(),
+      year: sel.era ? 'era' : sel.year, dir: sel.dir, dateField: sel.field, downloadDetails: sel.downloadDetails !== false, statuses: sel.statuses || ALL_STATUSES,
+      rinFilter: rins,
       from, to, cap: SRC.cap, totalRows, biggest, chunks, doneIds: [], failedIds: [], excludeColumns: sel.excludeColumns || [], downloadPdf: !!sel.downloadPdf,
     };
     store.saveState(p);
@@ -213,6 +220,10 @@ export function createOrchestrator(hooks = {}) {
     const SRC = SOURCES[plan.source] || SOURCES.invoices;
     const sp = statusPlan(plan.statuses, SRC);
     const isUuids = plan.mode === 'uuids';
+    // SPEC-022b: counterparty filter, applied to SEARCH rows — before the expensive /details and
+    // PDF fetches, so a filtered run costs details only for matches. Correctness never depends on
+    // any server-side narrowing (there is none in v1); this predicate is the filter.
+    const rinPred = (!isUuids && plan.rinFilter?.length) ? rinMatch(plan.rinFilter) : null;
     const opts = { columns: Object.fromEntries((plan.excludeColumns || []).map((k) => [k, false])), combineAll: true, taxColumns: true, discountColumns: true, negativeCredit: true, validOnly: false };   // SPEC-007: credit notes always export negative — no UI switch
     // SPEC-008: run-level uuid→invoice-number cache for credit/debit note references. Shared across
     // chunks on purpose — one original is resolved once however many notes point at it.
@@ -284,10 +295,20 @@ export function createOrchestrator(hooks = {}) {
             // SPEC-022 uuid mode: the batch IS the row list — no search. A synthetic row carries
             // only the uuid; every exported column renders from /details (xlsx.js reads invoices
             // from `detail` alone), and rowUuid()/rowSearch() read the synthetic shape natively.
-            const rows = isUuids
+            let rows = isUuids
               ? c.uuids.map((u) => ({ source: { uuid: u } }))
               : await fetchAllRows(SRC, c, plan.dir, plan.dateField, sp.statusParam, sp.filterSet,
                 { signal: currentCtrl.signal, onRate: rate, onPage: (g, tt) => { onStatus(t('orch.chunkFetch', { i: i + 1, n: plan.chunks.length, g, t: tt }), { level: 'run', kind: 'page' }); onCount(rowsFetched + g, plan.totalRows); onChunk({ i: i + 1, n: plan.chunks.length, phase: 'search', cur: g, max: tt }); } });
+            if (rinPred && rows.length) {
+              // If NO row in the chunk carries a recognisable counterparty id, the portal's search
+              // shape has drifted from what rinIdsOf() knows. Filtering would drop everything and
+              // the run would end looking like "this counterparty has no documents" — the one
+              // failure mode this feature must never have. Fail the chunk loudly instead.
+              if (!rows.some((r) => rinIdsOf(SRC.rowSearch(r)).length)) throw new Error(t('orch.rinIdsMissing'));
+              const seen = rows.length;
+              rows = rows.filter((r) => rinPred(SRC.rowSearch(r)));
+              onStatus(t('orch.rinMatched', { kept: rows.length, seen, i: i + 1, n: plan.chunks.length }), { level: 'run' });
+            }
             if (!rows.length) { ok = true; break; }
             if (c.warn) {   // this span holds ≥ cap documents and can't be split finer → surplus beyond cap is unreachable
               onStatus(t('orch.overCap', { i: i + 1, cap: SRC.cap, got: rows.length }), { level: 'warn' });
