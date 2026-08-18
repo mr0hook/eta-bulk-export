@@ -1,8 +1,8 @@
 // The run loop. Ties chunker + API + export + folder together. UI-agnostic (emits via hooks).
 // Own run loop — no dependency on the base extension's builders, subscription gate, or capture hooks.
 import { SOURCES, ALL_STATUSES } from '../api/sources.js';
-import { tokenStatus, profileStamp } from './token.js';
-import { buildUrl, apiGet, probeCount, fetchAllRows, fetchDetails, fetchPdf, mapLimit } from '../api/client.js';
+import { tokenStatus, profileStamp, profileInfo } from './token.js';
+import { buildUrl, apiGet, probeCount, fetchAllRows, fetchDetails, fetchPdf, mapLimit, switchTaxpayer } from '../api/client.js';
 import { planViaServer, planUuidList } from './planclient.js';   // SPEC-016: the server decides where to cut; chunker.js is now test-only
 import { listKey, rinMatch, rinIdsOf } from './listinput.js';   // SPEC-022: pasted-list runs
 import { safeName } from './time.js';
@@ -248,7 +248,8 @@ export function createOrchestrator(hooks = {}) {
     onCount(rowsFetched, plan.totalRows);   // seed from already-completed chunks (resume-aware)
     const rowsAtStart = rowsFetched;        // usage counters count only THIS session's new rows (resumes never double-count)
     flags.paused = false; flags.halted = false; let consec = 0;
-    const prof0 = profileStamp();   // the taxpayer profile this run belongs to — see token.js
+    const prof0 = profileInfo();   // the entity this run belongs to — stamp + TaxId, see token.js
+    let restores = 0;              // SPEC-023: auto-restores this run; past 3 a human is fighting us — pause
     const droppedByChunk = new Map();   // chunkId → count; per-chunk so a chunk retry overwrites, never double-counts
     let pdfDropped = 0;   // official-PDF fetch failures (supplementary, best-effort — never fails the chunk)
     let pdfSaved = 0;     // PDFs actually written this session (usage counter)
@@ -300,11 +301,28 @@ export function createOrchestrator(hooks = {}) {
         // …and that the ACTIVE IDENTITY is still the one the run started under. The guard above
         // only asks whether the logged-in RIN is one the device is ENTITLED to — an account
         // holding several entities passes it after a switch to any of them, and the portal then
-        // answers for the wrong entity: empty searches and per-document 403s, not errors. Pause,
-        // don't halt: the user switches the portal back and resumes exactly where the run stopped.
-        if (profileStamp() !== prof0) {
-          onStatus(t('orch.profileSwitched'), { level: 'err', terminal: true });
-          flags.paused = true; await mark(plan, 'paused'); return;
+        // answers for the wrong entity: empty searches and per-document 403s, not errors.
+        // SPEC-023: our OWN session renewal (SPEC-009, every ~30 min) is the usual cause of the
+        // flip on a multi-entity account, so first try to switch BACK with the portal's own
+        // endpoint and re-mint the token; only when that fails does the run pause — the user
+        // switches the portal back and resumes exactly where the run stopped.
+        if (profileStamp() !== prof0.stamp) {
+          let restored = false;
+          if (++restores <= 3 && prof0.taxId) {
+            onStatus(t('orch.profileRestoring'), { level: 'wait' });
+            if (await switchTaxpayer(prof0.taxId)) {
+              await session.renewNow();   // the mechanism that flips is also what mints the corrected token
+              for (let w = 0; w < 30 && !flags.paused && !flags.halted; w++) {
+                if (profileStamp() === prof0.stamp) { restored = true; break; }
+                await sleep(2000);
+              }
+            }
+          }
+          if (restored) { onStatus(t('orch.profileRestored'), { level: 'ok' }); }
+          else {
+            onStatus(t('orch.profileSwitched'), { level: 'err', terminal: true });
+            flags.paused = true; await mark(plan, 'paused'); return;
+          }
         }
         currentCtrl = new AbortController();
         let ok = false, lastErr = null, authRetries = 0;

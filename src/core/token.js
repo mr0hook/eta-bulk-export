@@ -19,6 +19,15 @@ export function profileStamp() {
   } catch { return ':'; }
 }
 
+// SPEC-023: everything a run needs to PIN its entity — the stamp to detect a switch, and the
+// numeric TaxId the portal's own switchtaxpayer endpoint takes to switch back.
+export function profileInfo() {
+  try {
+    const p = JSON.parse(localStorage.getItem('USER_DATA') || '{}').profile || {};
+    return { stamp: `${p.TaxRin || ''}:${p.ProfId || ''}`, taxId: p.TaxId || '' };
+  } catch { return { stamp: ':', taxId: '' }; }
+}
+
 export function tokenStatus() {
   const t = getToken();
   if (!t) return { ok: false, label: tr('tok.notFound') };

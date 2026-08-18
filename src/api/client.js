@@ -149,6 +149,30 @@ export async function apiGetBlob(url, { attempts = 5, signal, onRate, timeoutMs 
 }
 export function fetchPdf(SRC, uuid, opts) { return apiGetBlob(`${SRC.detailsBase}/${uuid}/pdf`, opts); }
 
+// SPEC-023 — the portal's own entity switcher, discovered in its public bundle: the company
+// picker PUTs { taxpayerId } here and the next silent auth mints a token for that entity. Used
+// by the orchestrator to switch BACK after a renewal flipped the active entity mid-run. Same
+// origin guard and token as every other call; a refusal resolves false (the caller's fallback is
+// the pause guard, never an error state of its own).
+export async function switchTaxpayer(taxId, { signal, timeoutMs = REQ_TIMEOUT_MS } = {}) {
+  const url = `${API_ORIGIN}/Api/v1/users/current/switchtaxpayer`;
+  const tok = getToken(); if (!tok) return false;
+  const id = Number(taxId);
+  if (!Number.isFinite(id) || id <= 0) return false;
+  try {
+    const r = await fetch(url, {
+      method: 'PUT',
+      headers: { Authorization: `Bearer ${tok}`, 'Content-Type': 'application/json-patch+json', Accept: 'text/plain' },
+      body: JSON.stringify({ taxpayerId: id }),
+      signal: deadline(signal, timeoutMs),
+    });
+    if (r.redirected && new URL(r.url).origin !== API_ORIGIN) return false;
+    if (!r.ok) return false;
+    let j = null; try { j = await r.json(); } catch {}
+    return !j || j.isSuccess !== false;   // some gateways answer 200 with an empty body
+  } catch { return false; }
+}
+
 // bounded-concurrency map (for per-row /details fetches)
 export async function mapLimit(items, limit, fn) {
   const out = new Array(items.length); let i = 0;
