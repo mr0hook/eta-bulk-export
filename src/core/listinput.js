@@ -58,8 +58,14 @@ export function listKey(items) {
  */
 export function rinIdsOf(row) {
   const s = row || {};
-  return [s.issuerId, s.receiverId, s.issuer?.id, s.receiver?.id]
-    .map((v) => String(v == null ? '' : v).trim()).filter(Boolean);
+  return [
+    // Portal BFF search rows, verified live 2026-08-19: recipientId is the receiver's RIN (the
+    // number the Documents page shows), submitterId the issuer's, and issuerUserId is
+    // '<issuerRIN>:<uuid>'. NOTE issuerTaxPayerId/recipientTaxPayerId are INTERNAL ids, not RINs.
+    s.recipientId, s.submitterId, String(s.issuerUserId || '').split(':')[0],
+    // ERP-documented / detail-object spellings, kept for synthetic rows and future shapes.
+    s.issuerId, s.receiverId, s.issuer?.id, s.receiver?.id,
+  ].map((v) => String(v == null ? '' : v).trim()).filter(Boolean);
 }
 export function rinMatch(rins) {
   const set = new Set((rins || []).map((r) => String(r).trim()));
