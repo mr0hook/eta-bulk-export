@@ -5,6 +5,18 @@ export function getToken() {
   try { return JSON.parse(localStorage.getItem('USER_DATA') || '{}').access_token || null; } catch { return null; }
 }
 
+// The ACTIVE taxpayer identity, not just the RIN. One login can hold several profiles that share
+// a TaxRin and differ only in ProfId — and the portal's document visibility follows the profile.
+// 2026-08-19 incident: a profile switch mid-run (another portal tab is enough) made every search
+// return empty and /details return 403 while the RIN-based guard saw nothing wrong. The run
+// snapshots this at start and pauses the moment it changes.
+export function profileStamp() {
+  try {
+    const p = JSON.parse(localStorage.getItem('USER_DATA') || '{}').profile || {};
+    return `${p.TaxRin || ''}:${p.ProfId || ''}`;
+  } catch { return ':'; }
+}
+
 export function tokenStatus() {
   const t = getToken();
   if (!t) return { ok: false, label: tr('tok.notFound') };

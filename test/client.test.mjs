@@ -22,11 +22,19 @@ test('apiGet: origin guard rejects foreign hosts (token never leaks off-origin)'
   assert.equal(called, false, 'must not fetch a non-ETA origin');
 });
 
-test('apiGet: 401/403 → AUTH, 404 → NOT_FOUND', async () => {
+test('apiGet: 401 → AUTH, 403 → one retry then FORBIDDEN (never AUTH), 404 → NOT_FOUND', async () => {
   stubFetch(() => resp(401, {}));
   await assert.rejects(() => apiGet(API_ORIGIN + '/a'), (e) => e.code === 'AUTH');
-  stubFetch(() => resp(403, {}));
-  await assert.rejects(() => apiGet(API_ORIGIN + '/a'), (e) => e.code === 'AUTH');
+  // 2026-08-19: per-document AccessDenied 403s (and WAF blips) must not masquerade as a dead
+  // session — as AUTH they sent the run into token-renewal loops. One retry, then FORBIDDEN,
+  // which callers treat as a dropped ROW, not a dropped session.
+  let n403 = 0;
+  stubFetch(() => { n403++; return resp(403, {}); });
+  await assert.rejects(() => apiGet(API_ORIGIN + '/a'), (e) => e.code === 'FORBIDDEN');
+  assert.equal(n403, 2, 'exactly one retry before giving up on a 403');
+  n403 = 0;
+  stubFetch(() => resp(n403++ === 0 ? 403 : 200, { okey: 1 }));
+  assert.deepEqual(await apiGet(API_ORIGIN + '/a'), { okey: 1 }, 'a transient 403 recovers on the retry');
   stubFetch(() => resp(404, {}));
   await assert.rejects(() => apiGet(API_ORIGIN + '/a'), (e) => e.code === 'NOT_FOUND');
 });

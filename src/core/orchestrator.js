@@ -1,7 +1,7 @@
 // The run loop. Ties chunker + API + export + folder together. UI-agnostic (emits via hooks).
 // Own run loop — no dependency on the base extension's builders, subscription gate, or capture hooks.
 import { SOURCES, ALL_STATUSES } from '../api/sources.js';
-import { tokenStatus } from './token.js';
+import { tokenStatus, profileStamp } from './token.js';
 import { buildUrl, apiGet, probeCount, fetchAllRows, fetchDetails, fetchPdf, mapLimit } from '../api/client.js';
 import { planViaServer, planUuidList } from './planclient.js';   // SPEC-016: the server decides where to cut; chunker.js is now test-only
 import { listKey, rinMatch, rinIdsOf } from './listinput.js';   // SPEC-022: pasted-list runs
@@ -248,6 +248,7 @@ export function createOrchestrator(hooks = {}) {
     onCount(rowsFetched, plan.totalRows);   // seed from already-completed chunks (resume-aware)
     const rowsAtStart = rowsFetched;        // usage counters count only THIS session's new rows (resumes never double-count)
     flags.paused = false; flags.halted = false; let consec = 0;
+    const prof0 = profileStamp();   // the taxpayer profile this run belongs to — see token.js
     const droppedByChunk = new Map();   // chunkId → count; per-chunk so a chunk retry overwrites, never double-counts
     let pdfDropped = 0;   // official-PDF fetch failures (supplementary, best-effort — never fails the chunk)
     let pdfSaved = 0;     // PDFs actually written this session (usage counter)
@@ -296,6 +297,14 @@ export function createOrchestrator(hooks = {}) {
         }
         // verify the logged-in taxpayer still matches the registered one — never export another entity's data
         if (!(await guard())) { onStatus(t('orch.rinMismatch'), { level: 'err', terminal: true }); flags.halted = true; await mark(plan, 'halted'); return; }
+        // …and that the ACTIVE PROFILE is still the one the run started under. Profiles can share
+        // a TaxRin, so the guard above passes while the portal now answers for a different
+        // taxpayer — empty searches and per-document 403s, not errors. Pause, don't halt: the
+        // user switches the portal back and resumes exactly where the run stopped.
+        if (profileStamp() !== prof0) {
+          onStatus(t('orch.profileSwitched'), { level: 'err', terminal: true });
+          flags.paused = true; await mark(plan, 'paused'); return;
+        }
         currentCtrl = new AbortController();
         let ok = false, lastErr = null, authRetries = 0;
         for (let attempt = 0; attempt < 3 && !ok && !flags.paused && !flags.halted; attempt++) {
@@ -307,6 +316,18 @@ export function createOrchestrator(hooks = {}) {
               ? c.uuids.map((u) => ({ source: { uuid: u } }))
               : await fetchAllRows(SRC, c, plan.dir, plan.dateField, sp.statusParam, sp.filterSet,
                 { signal: currentCtrl.signal, onRate: rate, query: rinQuery, onPage: (g, tt) => { onStatus(t('orch.chunkFetch', { i: i + 1, n: plan.chunks.length, g, t: tt }), { level: 'run', kind: 'page' }); onCount(rowsFetched + g, plan.totalRows); onChunk({ i: i + 1, n: plan.chunks.length, phase: 'search', cur: g, max: tt }); } });
+            // 2026-08-19 incident guard: a live run marked 192 chunks "done" with ZERO rows and no
+            // files — the portal answered 200 with an empty result for every page while probes
+            // (and manual requests) returned data. An unfiltered chunk was PLANNED because its
+            // window probed >0 documents; fetching none is a contradiction, never a completion.
+            // Fail the chunk (resume retries it) and re-probe the window once so the log shows
+            // whether the portal currently claims 0 (data visibility) or still claims the count
+            // (response-shape / request problem). Filtered runs are exempt: their empties are legit.
+            if (!isUuids && !sp.filterSet && !rinPred && !rows.length && (c.count | 0) > 0) {
+              let re = '?';
+              try { re = String(await probeCount(SRC, c.fromISO, c.toISO, plan.dir, plan.dateField, sp.statusParam, c.subF, c.subT, { signal: currentCtrl.signal, onRate: rate })); } catch {}
+              throw new Error(t('orch.emptyChunk', { i: i + 1, count: c.count, re }));
+            }
             if (rinPred && rows.length) {
               // If NO row in the chunk carries a recognisable counterparty id, the portal's search
               // shape has drifted from what rinIdsOf() knows. Filtering would drop everything and
@@ -486,7 +507,16 @@ export function createOrchestrator(hooks = {}) {
       chunks: prog.chunks, doneIds: prog.doneIds || [], failedIds: prog.failedIds || [],
       excludeColumns: prog.excludeColumns || [], downloadPdf: !!prog.downloadPdf,
     };
-    try { const fileDone = await store.scanDoneFromFolder(dirHandle, p); p.doneIds = [...new Set([...p.doneIds, ...fileDone])]; } catch {}
+    try {
+      const fileDone = await store.scanDoneFromFolder(dirHandle, p);
+      // For an UNFILTERED range run the chunk file is the ground truth: every done chunk had
+      // count>0 and no client-side filter, so completion always produced a file. Progress-file
+      // doneIds that have no file behind them are the residue of the 2026-08-19 empty-page
+      // incident (chunks marked done with zero rows) — drop them so resume re-fetches the data.
+      // Filtered runs and uuid runs keep the union: their legitimately-empty chunks have no file.
+      const filtered = (Array.isArray(p.statuses) && p.statuses.length > 0 && p.statuses.length < ALL_STATUSES.length) || (p.rinFilter && p.rinFilter.length);
+      p.doneIds = (p.mode !== 'uuids' && !filtered) ? fileDone : [...new Set([...p.doneIds, ...fileDone])];
+    } catch {}
     store.saveState(p); onPlan(p);
     onStatus(t('orch.resumed', { done: p.doneIds.length, n: p.chunks.length }), { level: 'info' });
     return p;

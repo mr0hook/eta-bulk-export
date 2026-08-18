@@ -32,14 +32,25 @@ export function buildUrl(SRC, fromISO, toISO, dir, field, page, size, statusPara
 
 export async function apiGet(url, { attempts = 7, signal, onRate } = {}) {
   try { if (new URL(url).origin !== API_ORIGIN) throw coded('BAD_URL'); } catch { throw coded('BAD_URL'); }
-  let lastErr;
+  let lastErr, saw403 = false;
   for (let i = 0; i < attempts; i++) {
     if (signal?.aborted) throw coded('STOPPED');
     const tok = getToken(); if (!tok) throw coded('AUTH');
     try {
       const r = await fetch(url, { headers: { Authorization: `Bearer ${tok}`, Accept: 'application/json', 'Accept-Language': 'ar' }, signal });
       if (r.redirected && new URL(r.url).origin !== API_ORIGIN) throw coded('BAD_URL');   // never trust a response redirected off the ETA origin
-      if (r.status === 401 || r.status === 403) throw coded('AUTH');
+      if (r.status === 401) throw coded('AUTH');
+      // 403 is deliberately NOT auth (2026-08-19, portal build 72): /details returns
+      // AccessDenied for specific documents the account's own range search LISTS but is not
+      // authorized to read (uuid-search can't see them and the portal page says not found —
+      // likely intermediary/marketplace submissions). As AUTH it sent the run into token-renewal
+      // loops it can't win. One retry rides out a transient WAF refusal; a second 403 is the
+      // document's answer, and the caller records that one row as dropped. A dead session is 401.
+      if (r.status === 403) {
+        if (saw403) throw coded('FORBIDDEN');
+        saw403 = true; lastErr = coded('FORBIDDEN');
+        await sleep(1500 + Math.floor(Math.random() * 500), signal); continue;
+      }
       if (r.status === 404) throw coded('NOT_FOUND');   // receipts: empty date range
       if (r.status === 429) {                            // honor Retry-After; add jitter so N concurrent fetches don't retry in lockstep
         const ra = parseInt(r.headers?.get?.('Retry-After') || '', 10);
@@ -51,7 +62,7 @@ export async function apiGet(url, { attempts = 7, signal, onRate } = {}) {
       return await r.json();
     } catch (e) {
       if (e.name === 'AbortError' || signal?.aborted) throw coded('STOPPED');   // aborts are not retryable rate-limits
-      if (['AUTH', 'NOT_FOUND', 'STOPPED', 'BAD_URL', 'NOT_PDF'].includes(e.code)) throw e;
+      if (['AUTH', 'FORBIDDEN', 'NOT_FOUND', 'STOPPED', 'BAD_URL', 'NOT_PDF'].includes(e.code)) throw e;
       lastErr = e; const w = Math.min(5000 * 2 ** i, MAX_BACKOFF) + Math.floor(Math.random() * 1000); onRate?.(w); await sleep(w, signal);
     }
   }
@@ -102,7 +113,7 @@ export async function apiGetBlob(url, { attempts = 5, signal, onRate } = {}) {
     try {
       const r = await fetch(url, { headers: { Authorization: `Bearer ${tok}`, Accept: 'application/pdf', 'Accept-Language': 'ar' }, signal });
       if (r.redirected && new URL(r.url).origin !== API_ORIGIN) throw coded('BAD_URL');   // never trust a response redirected off the ETA origin
-      if (r.status === 401 || r.status === 403) throw coded('AUTH');
+      if (r.status === 401) throw coded('AUTH');   // 403 falls to the generic retry — see apiGet
       if (r.status === 404) throw coded('NOT_FOUND');
       if (r.status === 429) {
         const ra = parseInt(r.headers?.get?.('Retry-After') || '', 10);

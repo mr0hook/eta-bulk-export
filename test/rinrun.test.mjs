@@ -141,3 +141,62 @@ test('T-236 a single-RIN run narrows server-side: probe and page URLs carry Quer
   await run(dir2, makePlan({ rinFilter: ['555000111', '111000111'] }));
   assert.ok(urls.length >= 1 && urls.every((u) => !u.includes('Query=')), 'multi-RIN stays un-narrowed');
 });
+
+// ── 2026-08-19 incident: the portal served 200 + correct totalCount + EMPTY result pages for
+// ~7 minutes; 192 chunks were marked done with zero rows and no files. T-237/T-238 are the fix.
+test('T-237 an unfiltered chunk that fetches ZERO rows against a >0 plan count FAILS, never completes', async () => {
+  setToken();
+  const calls = stubFetch([]);                       // every search page: 200, result []
+  const dir = fakeDir();
+  const msgs = await run(dir, makePlan());           // all 4 statuses, no RIN → unfiltered
+  assert.equal(calls.details.length, 0);
+  assert.ok(![...dir.files.keys()].some((n) => n.endsWith('.xlsx')), 'no file written');
+  const p = progress(dir);
+  assert.notEqual(p.status, 'done', 'the run must not claim success');
+  assert.deepEqual(p.doneIds, [], 'the empty chunk is NOT recorded as done');
+  assert.ok(msgs.some((m) => /empty page|re-probe/i.test(m)), 'the contradiction is named, with the re-probe count');
+});
+
+test('T-238 resume trusts only files for an unfiltered run — poisoned doneIds are dropped', async () => {
+  setToken(); stubFetch();
+  const dir = fakeDir();
+  const orch = createOrchestrator({ onStatus: () => {} });
+  orch.setFolder(dir);
+  // a progress file poisoned exactly as the incident left it: chunks done, zero files in the folder
+  const { writeProgress } = await import('../src/core/store.js');
+  const poisoned = { ...makePlan(), doneIds: ['c1'], jobId: 'j-x' };
+  await writeProgress(dir, poisoned, 'paused');
+  const p = await orch.resume();
+  assert.deepEqual(p.doneIds, [], 'file-less done chunks are retried, not skipped');
+
+  // but a FILTERED run keeps its progress-file dones (legitimately-empty chunks have no file)
+  const filtered = { ...makePlan(), key: 'rin_other', statuses: ['Valid'], rinFilter: ['555000111'], doneIds: ['c1'], jobId: 'j-y' };
+  await writeProgress(dir, filtered, 'paused');
+  const p2 = await orch.resume();
+  assert.deepEqual(p2.doneIds, ['c1'], 'a filtered run keeps its recorded dones');
+});
+
+test('T-239 a mid-run taxpayer-PROFILE switch pauses the run before the next chunk', async () => {
+  // Profiles can share a TaxRin and differ only in ProfId — the RIN guard sees nothing while the
+  // portal answers for a different taxpayer. The run snapshots TaxRin:ProfId at start and pauses
+  // (not halts) the moment it changes, so switching back + Resume continues exactly where it was.
+  const mkUD = (prof) => JSON.stringify({ access_token: jwt(Math.floor(Date.now() / 1000) + 7200), profile: { TaxRin: TEST_RIN, ProfId: prof } });
+  lsBag.set('USER_DATA', mkUD('P-1'));
+  const calls = stubFetch();
+  const dir = fakeDir();
+  const CHUNK2 = { id: 'c2', label: '2025-02', count: 5, fromISO: '2025-02-01T00:00:00Z', toISO: '2025-02-28T23:59:59Z' };
+  const plan = makePlan({ chunks: [CHUNK, CHUNK2], totalRows: 10 });
+  const msgs = [];
+  const orch = createOrchestrator({
+    onStatus: (m) => msgs.push(m),
+    // flip the ACTIVE PROFILE (same TaxRin!) once the first chunk reports progress
+    onProgress: () => lsBag.set('USER_DATA', mkUD('P-2')),
+  });
+  orch.setFolder(dir);
+  await orch.start(plan);
+  const p = progress(dir);
+  assert.equal(p.status, 'paused', 'paused, not halted — switch back and Resume');
+  assert.deepEqual(p.doneIds, ['c1'], 'the finished chunk stays finished');
+  assert.ok([...calls.details].every((u) => ['U1','U2','U3','U4','U5'].includes(u)), 'chunk 2 was never fetched');
+  assert.ok(msgs.some((m) => /profile changed|الملف الضريبى/.test(m)), 'the reason is named');
+});
