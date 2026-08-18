@@ -26,6 +26,7 @@ const SOURCES = {
 
 const YMD = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_STEPS = 20000;   // backstop: the depth caps bound a plan long before this
+const UUIDS_MAX = 10000;   // SPEC-022: one pasted list, at most the invoice search cap
 
 export async function planRoutes(request, env, url, path) {
   if (!path.startsWith('/plan/') && !path.startsWith('/job/')) return null;
@@ -80,6 +81,46 @@ export async function planRoutes(request, env, url, path) {
     const r = advance(st);
     const key = await cursorKey(env);
     return json({ ok: true, jobId: id, cursor: await seal(key, id, st), ...trim(r) });
+  }
+
+  // ── uuids (SPEC-022) ──────────────────────────────────────────────────────────────────────────
+  // The gate for a list-driven export. The client sends a COUNT — never the UUIDs, which stay in
+  // the user's own export folder — and the server decides the batching and mints a real job, so
+  // entitlement, the resume list and the admin timeline all work exactly as for date ranges.
+  // No cursor and no conversation: the list length is the entire planning problem.
+  if (path === '/plan/uuids') {
+    if (!(await deviceRate(env, 'plan', dev.deviceId, 60, 3600000))) {   // shared budget with /plan/start
+      await errlog(env, request, 'rate_limit', { tag: 'plan_uuids' });
+      return json({ ok: false, error: 'Too many plans from this device — please try again later.' }, 429);
+    }
+    const rin = cleanRin(b.rin);
+    const version = String(b.version || '').slice(0, 24);
+    const cfg = await getCfg(env);
+    const v = await computeVerdict(env, dev, { rin, version, cfg });
+    if (!v.allowed) return json({ ok: false, error: 'not allowed', reason: v.reason, ...v }, 403);
+
+    const count = b.count;
+    if (!Number.isInteger(count) || count < 1 || count > UUIDS_MAX) return json({ ok: false, error: 'bad count' }, 400);
+
+    // ≤25 batches of ≤500, sized evenly so the last batch is never a remainder of 1.
+    const nBatches = Math.ceil(count / 500);
+    const size = Math.ceil(count / nBatches);
+    const batches = [];
+    for (let i = 0, at = 0; i < nBatches; i++) {
+      const n = Math.min(size, count - at);
+      batches.push({ id: 'uuids_' + i, idx: i, label: `UUIDs ${at + 1}-${at + n}`, count: n });
+      at += n;
+    }
+
+    const today = new Date().toISOString().slice(0, 10);
+    const id = randHex(12);
+    await createJob(env, {
+      id, deviceId: dev.deviceId, rin, source: 'invoices', dateField: 'Uuid',
+      dir: 'uuids', fromIso: today, toIso: today, statuses: [], version,
+    });
+    try { await stampJobs(env, dev.deviceId, dev.email); } catch {}
+    await finishPlan(env, id, batches.map((c) => ({ id: c.id, fromISO: today, toISO: today, label: c.label, count: c.count })), 0);
+    return json({ ok: true, jobId: id, batches });
   }
 
   // ── step ──────────────────────────────────────────────────────────────────────────────────────

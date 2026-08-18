@@ -435,6 +435,61 @@ try {
   const otherPlan = await (await signed('/job/plan', { jobId: s0.jobId }, reg.clientKey, 'dev-1')).json();
   check("another device cannot read this job's plan", otherPlan.ok !== true);
 
+  // ── SPEC-022: /plan/uuids — the gate for list-driven exports ──────────────────────────────────
+  // The client sends a COUNT, never the UUIDs: the server decides the batching and mints a real
+  // job (dir 'uuids'), so the entitlement gate and the admin timeline work exactly as for ranges,
+  // while the backend learns nothing about which documents were asked for.
+  const uReg = await (await call('/register', {
+    method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ regId: 'ru', name: 'Uuid Dev', email: 'uuiddev@gmail.com', registrationNumber: '900000002', deviceId: 'dev-uuid', consent: true, version: '9.9.9' }),
+  })).json();
+  check('T-222 uuid-list device registered', uReg.ok && uReg.boundRins.includes('900000002'));
+  const UK = uReg.clientKey, UD = 'dev-uuid';
+  const uBody = { count: 1234, rin: '900000002', version: '9.9.9' };
+
+  const unsignedU = await call('/plan/uuids', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(uBody) });
+  check('T-223 plan/uuids unsigned → 401', unsignedU.status === 401);
+
+  const wrongRin = await signed('/plan/uuids', { ...uBody, rin: '111111111' }, UK, UD);
+  check('T-223 plan/uuids with a RIN the device does not hold → 403', wrongRin.status === 403);
+
+  for (const bad of [0, -3, 10001, 'NaN', null]) {
+    const r = await signed('/plan/uuids', { ...uBody, count: bad }, UK, UD);
+    check('T-223 plan/uuids rejects count=' + bad, r.status === 400, 'got ' + r.status);
+  }
+
+  // The happy path — with a decoy uuid list attached, which the server must NOT persist anywhere.
+  const MARKER = 'MARKERUUID00000000000ZZZZZ';
+  const uRes = await signed('/plan/uuids', { ...uBody, uuids: [MARKER] }, UK, UD);
+  const u0 = await uRes.json();
+  const uSum = (u0.batches || []).reduce((s, b) => s + b.count, 0);
+  check('T-222 plan/uuids mints a job and server-chosen batches summing to the count',
+    uRes.status === 200 && u0.ok && !!u0.jobId && Array.isArray(u0.batches) && u0.batches.length > 1
+    && u0.batches.length <= 25 && u0.batches.every((b) => b.count >= 1 && b.count <= 500) && uSum === 1234,
+    'status=' + uRes.status + ' batches=' + (u0.batches || []).length + ' sum=' + uSum);
+  const uJob = JOBS._jobs.get(u0.jobId);
+  const uChunks = JOBS._chunks.filter((c) => c.job_id === u0.jobId);
+  check('T-222 uuid job row: planned, dir uuids, totals match',
+    uJob && uJob.state === 'planned' && uJob.dir === 'uuids' && uJob.total_rows === 1234 && uJob.total_chunks === u0.batches.length);
+  check('T-222 uuid chunk rows land in D1 in batch order',
+    uChunks.length === u0.batches.length && uChunks.every((c, i) => c.idx === i && c.count === u0.batches[i].count));
+  const persisted = JSON.stringify([...store.entries()]) + JSON.stringify([...JOBS._jobs.values()]) + JSON.stringify(JOBS._chunks);
+  check('T-222 no document identifier is persisted anywhere (count only)', !persisted.includes(MARKER));
+
+  // Same per-device budget as /plan/start: the two routes share the 'plan' rate bucket.
+  let uLimited = null;
+  for (let n = 0; n < 70; n++) {
+    const r = await signed('/plan/uuids', { ...uBody, count: 1 }, UK, UD);
+    if (r.status === 429) { uLimited = { at: n, r }; break; }
+  }
+  check('T-223 plan/uuids shares the plan rate budget (429 before 70 calls)', !!uLimited);
+
+  // Cleanup: the assertions above minted ~60 throwaway jobs into the fake D1. Later sections
+  // assert exact dashboard/job-list counts, so remove every uuid-route job before moving on —
+  // the same direct store surgery the trash tests above already perform.
+  for (const [jid, row] of [...JOBS._jobs]) if (row.dir === 'uuids') JOBS._jobs.delete(jid);
+  for (let i = JOBS._chunks.length - 1; i >= 0; i--) if (String(JOBS._chunks[i].chunk_id || '').startsWith('uuids_')) JOBS._chunks.splice(i, 1);
+
   // ── SPEC-018 Part B: the run log ships to the portal ──────────────────────────────────────────
   // Status lines only — counts and progress, the strings the drawer already displays. The client
   // (src/core/logship.js) batches and coalesces before it gets here; these assertions are the
@@ -627,9 +682,9 @@ try {
   const uPage2 = await (await admin('/api/users?page=2')).json();
   const uSearch = await (await admin('/api/users?q=fouad')).json();
   check('T-157 /api/users paginates and filters by status and plan',
-    uAll.total === 4 && uLocked.total === 1 && uLocked.users[0].email === 'shared@example.com'
+    uAll.total === 5 && uLocked.total === 1 && uLocked.users[0].email === 'shared@example.com'   // 5th user: dev-uuid (SPEC-022 section above)
     && uPro.total === 1 && uPro.users[0].email === 'other@example.com'
-    && uPage2.total === 4 && uPage2.users.length === 0 && uSearch.total === 1);
+    && uPage2.total === 5 && uPage2.users.length === 0 && uSearch.total === 1);
 
   const uPlan = await (await admin('/api/user?email=planner@gmail.com')).json();
   check('T-158 /api/user returns clients, devices and jobs for that email only',
