@@ -19,6 +19,22 @@ single origin bg.js is allowed to fetch, and manifest.json's host_permissions. A
 up in `git status` (manifest.json changes) and `package-ext.mjs` refuses to zip one.
 
 ## NEXT ACTION
+→ DEPLOY THE CURSOR FIX TO PRODUCTION, then re-run the big stress test.
+  2026-08-18: a real stress run (~2M invoices) crashed /plan/step at probe ~1036 —
+  `Maximum call stack size exceeded` in cursor.js b64url (byte spread), confirmed in production
+  err: KV records. Fixed in 80d615a (T-148 regression test). The fix is committed but NOT deployed:
+      cd lead-worker && npx wrangler deploy --env production
+  Production bundle was verified to be exactly at 24ee843 before the fix, so this deploy ships the
+  one-line fix and nothing else.
+  KNOWN CEILINGS the same stress test will hit next, by design (decide before raising):
+  - Receipts at 42M docs ≈ 14k chunks (cap 3000) ≈ ~28k probes > MAX_STEPS 20000 → clean
+    'plan too large' refusal (routes/plan.js). CHUNK_STATES_MAX 4096 also exceeded.
+  - The cursor carries accepted chunks (st.out), contradicting T-147's stated design
+    ("chunks go to D1 as they are decided" — never implemented). A 14k-chunk plan would ride
+    ~3MB per step. Real fix: persist chunks incrementally, seal only the stack.
+  - finishPlan writes the whole plan as ONE D1 batch (1 stmt/chunk) — untested past ~700 chunks.
+
+Previous next action (still pending, now second):
 → ONE REAL RUN AGAINST STAGING. Everything built since 2026-08-09 is verified only by tests and
   synthetic probes; no real ETA data has ever passed through the server planner or the new flow.
   `npm run build:staging`, reload the unpacked extension, press Download → folder → Sales → current
