@@ -5,11 +5,13 @@ export function getToken() {
   try { return JSON.parse(localStorage.getItem('USER_DATA') || '{}').access_token || null; } catch { return null; }
 }
 
-// The ACTIVE taxpayer identity, not just the RIN. One login can hold several profiles that share
-// a TaxRin and differ only in ProfId — and the portal's document visibility follows the profile.
-// 2026-08-19 incident: a profile switch mid-run (another portal tab is enough) made every search
-// return empty and /details return 403 while the RIN-based guard saw nothing wrong. The run
-// snapshots this at start and pauses the moment it changes.
+// The ACTIVE taxpayer identity: RIN + profile id together. One login can hold several ENTITIES
+// (each with its own TaxRin) and the portal's document visibility follows the active one.
+// 2026-08-19 incident: a cold portal load re-authenticated and flipped the active entity mid-run —
+// every search went empty and /details returned 403 — and the per-chunk RIN guard saw nothing
+// wrong, because it asks "is this RIN one the device is ENTITLED to?" and the switched-to entity
+// was also registered on the account. The run therefore snapshots this stamp at start and pauses
+// the moment it changes: a run belongs to the exact identity it started under, entitled or not.
 export function profileStamp() {
   try {
     const p = JSON.parse(localStorage.getItem('USER_DATA') || '{}').profile || {};

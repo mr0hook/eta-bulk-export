@@ -297,10 +297,11 @@ export function createOrchestrator(hooks = {}) {
         }
         // verify the logged-in taxpayer still matches the registered one — never export another entity's data
         if (!(await guard())) { onStatus(t('orch.rinMismatch'), { level: 'err', terminal: true }); flags.halted = true; await mark(plan, 'halted'); return; }
-        // …and that the ACTIVE PROFILE is still the one the run started under. Profiles can share
-        // a TaxRin, so the guard above passes while the portal now answers for a different
-        // taxpayer — empty searches and per-document 403s, not errors. Pause, don't halt: the
-        // user switches the portal back and resumes exactly where the run stopped.
+        // …and that the ACTIVE IDENTITY is still the one the run started under. The guard above
+        // only asks whether the logged-in RIN is one the device is ENTITLED to — an account
+        // holding several entities passes it after a switch to any of them, and the portal then
+        // answers for the wrong entity: empty searches and per-document 403s, not errors. Pause,
+        // don't halt: the user switches the portal back and resumes exactly where the run stopped.
         if (profileStamp() !== prof0) {
           onStatus(t('orch.profileSwitched'), { level: 'err', terminal: true });
           flags.paused = true; await mark(plan, 'paused'); return;

@@ -19,9 +19,11 @@ single origin bg.js is allowed to fetch, and manifest.json's host_permissions. A
 up in `git status` (manifest.json changes) and `package-ext.mjs` refuses to zip one.
 
 ## NEXT ACTION
-→ 2026-08-19 03:00: v0.6.3 committed after the live 4M-doc run surfaced the PROFILE-SWITCH class
-  of failure (one login, several taxpayer profiles sharing a TaxRin; any cold portal load can flip
-  the active profile for every tab → empty searches + per-doc 403s). Run defenses: empty-chunk
+→ 2026-08-19 03:00: v0.6.3 committed after the live 4M-doc run surfaced the ENTITY-SWITCH class
+  of failure (one login, several entities EACH WITH ITS OWN RIN; a cold portal load re-auths and
+  can flip the active entity for every tab → empty searches + per-doc 403s. The per-chunk RIN
+  guard passed because the switched-to entity was ALSO registered on the account — it checked
+  entitlement, not run identity). Run defenses: empty-chunk
   guard (T-237), file-truth resume heal (T-238), profile-stamp pause (T-239), 403 = drop-row not
   AUTH. User must: reload the unpacked extension (v0.6.3), confirm the portal shows the intended
   company, then Resume the Sales run — chunks 1..192 (empty-marked) refetch automatically.
