@@ -3,7 +3,8 @@
 import { SOURCES, ALL_STATUSES } from '../api/sources.js';
 import { tokenStatus } from './token.js';
 import { buildUrl, apiGet, probeCount, fetchAllRows, fetchDetails, fetchPdf, mapLimit } from '../api/client.js';
-import { planViaServer } from './planclient.js';   // SPEC-016: the server decides where to cut; chunker.js is now test-only
+import { planViaServer, planUuidList } from './planclient.js';   // SPEC-016: the server decides where to cut; chunker.js is now test-only
+import { listKey } from './listinput.js';   // SPEC-022: pasted-list runs
 import { safeName } from './time.js';
 import { renderWorkbook, XLSX_MIME } from '../export/xlsx.js';
 import { refreshMapping } from '../export/mapsync.js';   // SPEC-021: column mapping served by the worker, bundled fallback
@@ -145,6 +146,31 @@ export function createOrchestrator(hooks = {}) {
     return p;
   }
 
+  // SPEC-022 — plan a pasted-UUID-list export. No probing: the server is sent the COUNT, gates it
+  // exactly like /plan/start, and answers with its batching; each chunk here carries its slice of
+  // the actual list, which then lives ONLY in this device's progress file (the server never sees a
+  // document identifier). Shaped like plan()'s result so start()/resume()/merge run unchanged.
+  async function planUuids(sel) {
+    const uuids = sel.uuids || [];
+    flags.paused = false; flags.halted = false;
+    currentCtrl = new AbortController();
+    const { jobId, chunks } = await planUuidList(uuids, { rin: taxpayerId(), version: EXT_VERSION }, {
+      onStatus, stopped: () => flags.paused || flags.halted,
+    });
+    ship.setJob(jobId);
+    const p = {
+      v: 1, mode: 'uuids', jobId, key: 'uuids_' + listKey(uuids), source: 'invoices', createdAt: new Date().toISOString(),
+      year: String(new Date().getFullYear()), dir: 'uuids', dateField: 'Uuid', downloadDetails: true, statuses: ALL_STATUSES,
+      from: '', to: '', cap: SOURCES.invoices.cap, totalRows: uuids.length,
+      biggest: chunks.reduce((m, c) => Math.max(m, c.count), 0), chunks, doneIds: [], failedIds: [],
+      excludeColumns: sel.excludeColumns || [], downloadPdf: !!sel.downloadPdf,
+    };
+    store.saveState(p);
+    if (dirHandle && await folderAllowed()) await store.writeProgress(dirHandle, p, 'planned');
+    onPlan(p);
+    return p;
+  }
+
   // Local run status → job state. The folder file stays the resume source of truth; the server
   // checkpoint is best-effort and must never fail a run — a backend blip should not stop an export.
   // 'done' here means the FETCH finished, which is not the same as the job being done: the output
@@ -169,6 +195,13 @@ export function createOrchestrator(hooks = {}) {
     if (!dirHandle) { onStatus(t('orch.pickFolder'), { level: 'warn' }); return; }
     if (!(await fs.ensurePermission(dirHandle))) { onStatus(t('orch.permLost'), { level: 'err' }); return; }
     if (!(await folderAllowed())) return;   // SPEC-010: never write into another taxpayer's folder
+    // SPEC-022: a uuid job's list exists ONLY in its folder's progress file (the server holds a
+    // count). A plan that arrived without it — e.g. adopted from /job/plan alone — must refuse
+    // loudly rather than run zero-row chunks that would look like a clean, empty export.
+    if (plan.mode === 'uuids' && plan.chunks.some((c) => !Array.isArray(c.uuids) || c.uuids.length !== c.count)) {
+      onStatus(t('orch.uuidListMissing'), { level: 'err', terminal: true });
+      return;
+    }
     // SPEC-011: start the folder log only once the folder is known AND allowed, so a refused folder
     // never gets written to. rotate() keeps one generation back for last-night/tonight comparisons.
     fLog = createFolderLog(dirHandle, plan.key);
@@ -179,6 +212,7 @@ export function createOrchestrator(hooks = {}) {
     running = true; keepalive.start(); session.start();
     const SRC = SOURCES[plan.source] || SOURCES.invoices;
     const sp = statusPlan(plan.statuses, SRC);
+    const isUuids = plan.mode === 'uuids';
     const opts = { columns: Object.fromEntries((plan.excludeColumns || []).map((k) => [k, false])), combineAll: true, taxColumns: true, discountColumns: true, negativeCredit: true, validOnly: false };   // SPEC-007: credit notes always export negative — no UI switch
     // SPEC-008: run-level uuid→invoice-number cache for credit/debit note references. Shared across
     // chunks on purpose — one original is resolved once however many notes point at it.
@@ -247,8 +281,13 @@ export function createOrchestrator(hooks = {}) {
         let ok = false, lastErr = null, authRetries = 0;
         for (let attempt = 0; attempt < 3 && !ok && !flags.paused && !flags.halted; attempt++) {
           try {
-            const rows = await fetchAllRows(SRC, c, plan.dir, plan.dateField, sp.statusParam, sp.filterSet,
-              { signal: currentCtrl.signal, onRate: rate, onPage: (g, tt) => { onStatus(t('orch.chunkFetch', { i: i + 1, n: plan.chunks.length, g, t: tt }), { level: 'run', kind: 'page' }); onCount(rowsFetched + g, plan.totalRows); onChunk({ i: i + 1, n: plan.chunks.length, phase: 'search', cur: g, max: tt }); } });
+            // SPEC-022 uuid mode: the batch IS the row list — no search. A synthetic row carries
+            // only the uuid; every exported column renders from /details (xlsx.js reads invoices
+            // from `detail` alone), and rowUuid()/rowSearch() read the synthetic shape natively.
+            const rows = isUuids
+              ? c.uuids.map((u) => ({ source: { uuid: u } }))
+              : await fetchAllRows(SRC, c, plan.dir, plan.dateField, sp.statusParam, sp.filterSet,
+                { signal: currentCtrl.signal, onRate: rate, onPage: (g, tt) => { onStatus(t('orch.chunkFetch', { i: i + 1, n: plan.chunks.length, g, t: tt }), { level: 'run', kind: 'page' }); onCount(rowsFetched + g, plan.totalRows); onChunk({ i: i + 1, n: plan.chunks.length, phase: 'search', cur: g, max: tt }); } });
             if (!rows.length) { ok = true; break; }
             if (c.warn) {   // this span holds ≥ cap documents and can't be split finer → surplus beyond cap is unreachable
               onStatus(t('orch.overCap', { i: i + 1, cap: SRC.cap, got: rows.length }), { level: 'warn' });
@@ -270,8 +309,12 @@ export function createOrchestrator(hooks = {}) {
               records = records.concat(outcomes.filter((o) => o.ok).map((o) => o.ok));
               failedRows = outcomes.filter((o) => o.fail).map((o) => o.fail);
             }
-            // Never silently drop: a total failure fails the whole chunk (so resume retries it, no empty file).
-            if (failedRows.length && !records.length) throw new Error(t('orch.allDetailsFailed', { count: rows.length, i: i + 1 }));
+            // Never silently drop: a total failure fails the whole chunk (so resume retries it, no
+            // empty file). Uuid-mode exception: NOT_FOUND is a conclusive answer about a pasted id
+            // (mistyped, deleted, or another taxpayer's) — a batch of all-missing uuids is a valid
+            // outcome that lands on the Missed sheet, while any OTHER kind of total failure (API
+            // down, auth flapping) still fails the chunk so resume retries it.
+            if (failedRows.length && !records.length && (!isUuids || failedRows.some((f) => f.err !== 'NOT_FOUND'))) throw new Error(t('orch.allDetailsFailed', { count: rows.length, i: i + 1 }));
             if (plan.downloadPdf) {   // official signed PDFs FIRST — before the xlsx exists, so an interrupted PDF
               // phase (Pause/token-expiry) leaves no chunk file and resume re-runs the whole chunk incl. its PDFs.
               onStatus(t('orch.chunkPdfs', { i: i + 1, n: plan.chunks.length, count: rows.length }), { level: 'run' });
@@ -300,6 +343,15 @@ export function createOrchestrator(hooks = {}) {
             });
             onStatus(t('orch.chunkXlsx', { i: i + 1, n: plan.chunks.length, count: records.length }), { level: 'run' });
             const r = renderWorkbook(window.ExcelJS, records, plan.source, opts);
+            // SPEC-022: a pasted uuid that could not be fetched must be VISIBLE in the deliverable,
+            // not only in eta_failures.jsonl — a third sheet, which merge (worksheets[0]/[1]) and
+            // scanDoneFromFolder both ignore by construction.
+            if (isUuids && failedRows.length) {
+              const ws = r.workbook.addWorksheet('Missed');
+              ws.addRow(['UUID', 'Error']);
+              failedRows.forEach((f) => ws.addRow([f.uuid, f.err]));
+              ws.getColumn(1).width = 30; ws.getColumn(2).width = 44;
+            }
             const buf = await r.workbook.xlsx.writeBuffer();
             const chunkName = store.chunkFile(plan, c);
             await fs.writeBlob(dirHandle, chunkName, new Blob([buf], { type: XLSX_MIME }));
@@ -360,7 +412,7 @@ export function createOrchestrator(hooks = {}) {
       const complete = done.size === plan.chunks.length;
       try { bumpStats({ runs: 1, docs: rowsFetched - rowsAtStart, pdfs: pdfSaved }); } catch {}   // only the run-finished path — paused/halted returns don't bump
       const droppedTotal = [...droppedByChunk.values()].reduce((a, b) => a + b, 0);
-      const dropMsg = droppedTotal ? t('orch.dropTail', { n: droppedTotal }) : '';
+      const dropMsg = droppedTotal ? t(isUuids ? 'orch.uuidMissedTail' : 'orch.dropTail', { n: droppedTotal }) : '';
       const pdfMsg = pdfDropped ? t('orch.pdfTail', { n: pdfDropped }) : '';
       onStatus(t('orch.doneSummary', { word: t(complete ? 'orch.doneOk' : 'orch.doneIncomplete'), done: done.size, n: plan.chunks.length, failed: failed.size, drops: dropMsg, pdfs: pdfMsg }), { level: complete && !failed.size ? 'ok' : 'warn', terminal: true, kind: 'done' });   // kind:'done' + level:'ok' = clean finish (drawer zeroes the timer & closes the persisted log)
       // mark(), not writeProgress(): every other terminal path checkpoints and this one did not, so
@@ -399,6 +451,8 @@ export function createOrchestrator(hooks = {}) {
       // server's own answer (/job/plan), but this path is also reachable on its own — and without it
       // mark() sees no jobId and the resumed run never checkpoints again.
       v: 1, key: prog.key, jobId: prog.jobId || '', source: prog.source, year: prog.year, dir: prog.dir, dateField: prog.field, downloadDetails: true,
+      // SPEC-022: uuid batches ride inside prog.chunks; mode/rinFilter restore the run's identity.
+      mode: prog.mode || 'range', rinFilter: prog.rinFilter || [],
       statuses: prog.statuses, from: prog.from, to: prog.to, cap: SRC.cap, totalRows: prog.totalRows,
       chunks: prog.chunks, doneIds: prog.doneIds || [], failedIds: prog.failedIds || [],
       excludeColumns: prog.excludeColumns || [], downloadPdf: !!prog.downloadPdf,
@@ -410,7 +464,7 @@ export function createOrchestrator(hooks = {}) {
   }
 
   return {
-    pickFolder, setFolder, folderName, plan, start, resume,
+    pickFolder, setFolder, folderName, plan, planUuids, start, resume,
     pause: () => stop('pause'), halt: () => stop('halt'), tokenStatus, SOURCES,
     dir: () => dirHandle,
     ensureDir: async (opts) => { if (!dirHandle) await pickFolder(); return (await folderAllowed(opts)) ? dirHandle : null; },

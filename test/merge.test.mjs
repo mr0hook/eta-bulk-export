@@ -222,3 +222,41 @@ test('merge: HIGH regression — an unreadable chunk is surfaced, not silently c
   assert.match(final, /1\/2 files/, 'reports the REAL read count (1/2), not files.length');
   assert.ok(sumFile(dir), 'the readable rows still produce a combined file');
 });
+
+test('T-229 uuid-run files and the folder-wide merge are invisible to each other (SPEC-022)', async () => {
+  const { uuidMergeScope, chunkFile } = await import('../src/core/store.js');
+  const dir = fakeDir();
+  const U = 'الرقم الإلكترونى';
+
+  // a normal range chunk + a uuid-run chunk in the SAME folder
+  await putXlsx(dir, 'eInvoices_2025_Sent_a.xlsx',
+    ['مسلسل', 'الحالة', U], [[1, 'Valid', 'R1']], ['رقم الفاتورة', U], [['A-1', 'R1']]);
+  const plan = { mode: 'uuids', key: 'uuids_k1', source: 'invoices', year: '2026', dir: 'uuids', dateField: 'Uuid', statuses: [] };
+  const chunk = { id: 'uuids_0', label: 'UUIDs 1-2' };
+  const uuidFile = chunkFile(plan, chunk);
+  assert.ok(uuidFile.startsWith('eInvoicesUuid_'), uuidFile);
+  await putXlsx(dir, uuidFile,
+    ['مسلسل', 'الحالة', U], [[1, 'Valid', 'X1'], [2, 'Valid', 'X2']], ['رقم الفاتورة', U], [['B-1', 'X1'], ['B-2', 'X2']]);
+
+  // direction 1: the folder-wide merge consumes ONLY the range file
+  await mergeFolder(ExcelJS, dir, { onStatus: () => {} });
+  const wideSum = await load(dir, sumFile(dir));
+  assert.equal(wideSum.actualRowCount - 1, 1, 'folder-wide COMBINED holds only the range row');
+  assert.ok(!JSON.stringify(new TextDecoder().decode(dir.files.get([...dir.files.keys()].find((n) => n === 'eta_merge_state.json')))).includes('X1'),
+    'the folder-wide state never consumed a uuid-run uuid');
+
+  // direction 2: the scoped merge consumes ONLY its own run's files, under its own state
+  const scope = uuidMergeScope(plan);
+  const log = [];
+  await mergeFolder(ExcelJS, dir, { onStatus: (m) => log.push(m), scope });
+  const scopedSum = [...dir.files.keys()].find((n) => n.startsWith(scope.prefix) && /COMBINED_SUMMARY/.test(n));
+  assert.ok(scopedSum, 'scoped COMBINED written under the uuid prefix');
+  assert.equal((await load(dir, scopedSum)).actualRowCount - 1, 2, 'scoped COMBINED holds exactly the uuid rows');
+  assert.ok(dir.files.has(scope.stateFile), 'scoped merge keeps its own state file');
+  assert.ok(dir.files.has('eta_merge_state.json'), 'the folder-wide state survives untouched');
+
+  // and the folder-wide merge, re-run, still ignores everything the scoped one produced
+  const log2 = [];
+  await mergeFolder(ExcelJS, dir, { onStatus: (m) => log2.push(m) });
+  assert.equal((await load(dir, sumFile(dir))).actualRowCount - 1, 1, 'still only the range row');
+});

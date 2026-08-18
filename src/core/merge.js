@@ -32,22 +32,29 @@ const toObj = (hdr, vals) => { const o = {}; for (let i = 0; i < hdr.length; i++
 // Normalize header strings so the same Arabic column in two Unicode forms (NFC/NFD) isn't unioned as two columns.
 const nfcHdr = (arr) => arr.map((h) => (typeof h === 'string' ? h.normalize('NFC') : h));
 
-export async function mergeFolder(ExcelJS, dir, { onStatus = () => {}, rowCap } = {}) {
+// `scope` (SPEC-022): merge ONE uuid run's files instead of the whole folder — { re, prefix,
+// stateFile } from store.uuidMergeScope(plan). The folder-wide default regex requires the
+// underscore right after e(Invoices|Receipts), so scoped (eInvoicesUuid_…) files and outputs are
+// invisible to it by construction; the scoped state file keeps the two merges' incremental
+// records from ever touching.
+export async function mergeFolder(ExcelJS, dir, { onStatus = () => {}, rowCap, scope } = {}) {
   if (!ExcelJS) { onStatus(t('merge.noExcel')); return; }
   // Sorted so parts come out in roughly chronological order: chunk filenames embed the date label,
   // so name order tracks date order within a run. SPEC-013's period labels are only meaningful if
   // consecutive parts cover consecutive ranges rather than interleaving.
-  const files = (await listFiles(dir, /^e(Invoices|Receipts)_.*\.xlsx$/i)).filter((n) => !/COMBINED/i.test(n)).sort();
+  const files = (await listFiles(dir, scope?.re || /^e(Invoices|Receipts)_.*\.xlsx$/i)).filter((n) => !/COMBINED/i.test(n)).sort();
   if (!files.length) { onStatus(t('merge.noFiles')); return; }
   // Sweep scratch files an earlier run left behind. Pre-fix versions only unlinked the temp on the happy
   // path, so a crashed merge stranded a multi-GB .jsonl in the user's export folder for good.
-  for (const stale of await listFiles(dir, TEMP_RE)) { try { await remove(dir, stale); } catch {} }
+  const tempRe = scope ? new RegExp('^' + scope.prefix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '_COMBINED_.*\\.jsonl$', 'i') : TEMP_RE;
+  for (const stale of await listFiles(dir, tempRe)) { try { await remove(dir, stale); } catch {} }
   // Half-written output from a merge that died mid-file. Never a deliverable; always disposable.
   for (const half of await listFiles(dir, ms.WORKING_RE)) { try { await remove(dir, half); } catch {} }
-  const prefix = /^eReceipts/i.test(files[0]) ? 'eReceipts' : 'eInvoices';
+  const prefix = scope?.prefix || (/^eReceipts/i.test(files[0]) ? 'eReceipts' : 'eInvoices');
+  const stateFile = scope?.stateFile;
 
   // ---- mode ----
-  let state = await ms.readState(dir);
+  let state = await ms.readState(dir, stateFile);
   if (state && !(await ms.partsIntact(dir, state))) { onStatus(t('merge.rebuildParts')); state = null; }
   const sizes = await ms.fileSizes(dir, files);
   let { mode, reason, newFiles } = ms.decideMode(state, files, sizes, prefix);
@@ -56,12 +63,13 @@ export async function mergeFolder(ExcelJS, dir, { onStatus = () => {}, rowCap } 
   if (mode === 'incremental') onStatus(t('merge.incremental', { n: newFiles.length, total: files.length }));
 
   // Older versions minted a new dated COMBINED set on every merge and abandoned the previous one.
-  // Never delete the user's files — just say once that they are superseded.
-  const dated = await listFiles(dir, ms.DATED_RE);
+  // Never delete the user's files — just say once that they are superseded. (Legacy names only —
+  // scoped runs never produced them.)
+  const dated = scope ? [] : await listFiles(dir, ms.DATED_RE);
   if (dated.length) onStatus(t('merge.superseded', { n: dated.length }));
 
   const out = await runMerge(ExcelJS, dir, {
-    onStatus, rowCap, prefix, files, sizes,
+    onStatus, rowCap, prefix, files, sizes, stateFile,
     read: mode === 'incremental' ? newFiles : files,
     base: mode === 'incremental' ? state : null,
   });
@@ -69,11 +77,11 @@ export async function mergeFolder(ExcelJS, dir, { onStatus = () => {}, rowCap } 
   // set at that point, so restarting in full mode is clean.
   if (out === 'DRIFT') {
     onStatus(t('merge.driftRebuild'));
-    await runMerge(ExcelJS, dir, { onStatus, rowCap, prefix, files, sizes, read: files, base: null });
+    await runMerge(ExcelJS, dir, { onStatus, rowCap, prefix, files, sizes, stateFile, read: files, base: null });
   }
 }
 
-async function runMerge(ExcelJS, dir, { onStatus, rowCap, prefix, files, sizes, read, base }) {
+async function runMerge(ExcelJS, dir, { onStatus, rowCap, prefix, files, sizes, read, base, stateFile }) {
   const jsonl = `${prefix}_COMBINED_${Date.now().toString(36)}.jsonl`;
   // Seeding from state is what makes the incremental pass correct: without the prior UUIDs it cannot
   // tell a genuinely new invoice from one merged last week, and without the prior column unions the
@@ -165,7 +173,7 @@ async function runMerge(ExcelJS, dir, { onStatus, rowCap, prefix, files, sizes, 
       prefix, sumCols, lineCols, sheetNames, nextSerial: serial, parts, writer: 'stream-v1',
       consumed: files.filter((n) => sizes.get(n) >= 0).map((n) => ({ name: n, size: sizes.get(n) })),
       uuids: [...seen],
-    });
+    }, stateFile);
 
     const total = base ? base.uuids.length + uniq : uniq;
     const readN = read.length - failed.length;

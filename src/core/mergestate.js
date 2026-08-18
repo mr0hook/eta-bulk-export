@@ -23,9 +23,11 @@ export const WORKING_RE = /\.writing\.xlsx$/i;
 
 export const DATED_RE = /^e(Invoices|Receipts)_COMBINED_\d{4}-\d{2}-\d{2}T[\d-]+Z(_part\d+)?\.xlsx$/i;
 
-export async function readState(dir) {
+// `file` (SPEC-022): a scoped merge — one uuid run's files only — keeps its OWN state so it can
+// never clobber the folder-wide range merge's incremental record, and vice versa.
+export async function readState(dir, file = STATE) {
   try {
-    const raw = await readText(dir, STATE);
+    const raw = await readText(dir, file);
     if (!raw) return null;
     const j = JSON.parse(raw);
     if (!j || typeof j !== 'object' || j.v !== V) return null;
@@ -38,8 +40,8 @@ export async function readState(dir) {
   } catch { return null; }
 }
 
-export async function writeState(dir, state) {
-  await writeText(dir, STATE, JSON.stringify({ ...state, v: V, updatedAt: new Date().toISOString() }));
+export async function writeState(dir, state, file = STATE) {
+  await writeText(dir, file, JSON.stringify({ ...state, v: V, updatedAt: new Date().toISOString() }));
 }
 
 // Sizes let us notice a chunk file that was re-downloaded or repaired since we consumed it.

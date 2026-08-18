@@ -6,15 +6,29 @@ const PREFIX = '__etaBulk_v1_';
 // short deterministic hash (djb2) — for collision-free, filter-aware filenames
 function hash8(s) { let h = 5381; for (let i = 0; i < String(s).length; i++) h = ((h * 33) ^ String(s).charCodeAt(i)) >>> 0; return h.toString(36).padStart(7, '0').slice(-7); }
 export const runKey = (source, year, dir, field, from, to) => (source === 'receipts' ? 'receipts_' : '') + `${year}_${dir}_${field}_${from}_${to}`;
-export const filePrefix = (plan) => (plan.source === 'receipts' ? 'eReceipts' : 'eInvoices');
-// Filter signature: date field + selected statuses (order-independent). Distinguishes runs that share
-// year/dir/source but filter differently, so a stale file from another filter can't be counted as done.
-const planSig = (plan) => hash8(`${plan.dateField || ''}|${[...(plan.statuses || [])].sort().join(',')}`);
+// SPEC-022: uuid-list runs get their own prefix — the folder-wide merge regex requires the
+// underscore right after e(Invoices|Receipts), so these files never leak into a range COMBINED.
+export const filePrefix = (plan) => (plan.mode === 'uuids' ? 'eInvoicesUuid' : plan.source === 'receipts' ? 'eReceipts' : 'eInvoices');
+// Filter signature: date field + selected statuses (order-independent) + for list runs the list
+// identity itself and any RIN filter. Distinguishes runs that share year/dir/source but filter
+// differently, so a stale file from another filter can't be counted as done — two different UUID
+// lists share chunk ids ('uuids_0'…), so without the key here their files would alias.
+const planSig = (plan) => hash8(`${plan.dateField || ''}|${[...(plan.statuses || [])].sort().join(',')}|${plan.mode === 'uuids' ? plan.key : ''}|${[...(plan.rinFilter || [])].sort().join(',')}`);
 // Filename embeds the collision-free chunk.id (via hash) + the filter signature, so two distinct chunks
 // — even sub-minute granular chunks with byte-identical human labels — can never map to one file, and a
 // different filter over the same range never aliases onto these files. label kept as a readable prefix.
 export const chunkFile = (plan, chunk) => `${filePrefix(plan)}_${plan.year}_${plan.dir}_${planSig(plan)}_${safeName(chunk.label || chunk.id)}_${hash8(chunk.id)}.xlsx`;
 const progressName = (plan) => `eta_progress_${safeName(plan.key)}.json`;
+
+// SPEC-022: everything one uuid run's merge needs to see ONLY its own files. The prefix mirrors
+// chunkFile()'s fixed head (filePrefix_year_dir_sig), so the regex matches exactly this run's
+// chunks and COMBINED parts and nothing else in the folder; the state file keeps the scoped
+// merge's incremental record apart from the folder-wide one.
+export function uuidMergeScope(plan) {
+  const pfx = `${filePrefix(plan)}_${plan.year}_${plan.dir}_${planSig(plan)}`;
+  const esc = pfx.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return { re: new RegExp('^' + esc + '_.*\\.xlsx$', 'i'), prefix: pfx, stateFile: `eta_merge_state_${pfx}.json` };
+}
 
 /**
  * The run's per-chunk state as one character per chunk, in plan order: d=done, f=failed, r=running,
@@ -47,6 +61,9 @@ export async function writeProgress(dir, plan, status) {
     // the server's /job/plan answer) can still check point against the job it belongs to. Without
     // it, mark() bails on `!p.jobId` and the run goes dark to the backend for its whole life.
     key: plan.key, jobId: plan.jobId || '', source: plan.source, status, updatedAt: new Date().toISOString(),
+    // SPEC-022: mode + filters travel with the progress file. For uuid runs the chunks below carry
+    // each batch's uuid slice — the ONLY durable copy (the server holds a count), so resume owns it.
+    mode: plan.mode || 'range', rinFilter: plan.rinFilter || [],
     year: plan.year, dir: plan.dir, field: plan.dateField, from: plan.from, to: plan.to, statuses: plan.statuses,
     totalChunks: plan.chunks.length, totalRows: plan.totalRows, excludeColumns: plan.excludeColumns || [], downloadPdf: !!plan.downloadPdf,
     doneChunks: doneChunks.length, remainingChunks: plan.chunks.length - doneChunks.length,
