@@ -65,3 +65,11 @@ test('addDaysYmd: leap day and Egypt DST transition are calendar-exact', () => {
   assert.equal(addDaysYmd('2026-04-23', 3), '2026-04-26', 'across the DST spring-forward window');
   assert.equal(addDaysYmd('2026-01-01', -3), '2025-12-29', 'year underflow');
 });
+
+test('SPEC-022: a RIN-filtered run syncs with its filter; a uuid-list run does not sync at all', () => {
+  const base = { from: '2025-01-01', to: '2025-06-30', source: 'invoices', dir: 'Sent', field: 'Issue', statuses: ['Valid'] };
+  const s = deriveSyncSel({ ...base, rinFilter: ['555000111'] }, '2025-07-10');
+  assert.deepEqual(s.rinFilter, ['555000111'], 'the filter travels into the derived selection');
+  assert.equal(deriveSyncSel({ mode: 'uuids', from: '', to: '', source: 'invoices', field: 'Uuid' }, '2025-07-10'), null,
+    'a uuid-list progress derives nothing — there is no range to extend');
+});

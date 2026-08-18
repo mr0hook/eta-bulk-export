@@ -12,7 +12,8 @@ import { createRunLog } from '../core/runlog.js';
 import { createEtaTracker } from '../core/eta.js';
 import { FONT_BLOBS } from './fonts.js';
 import { lsGet, lsSet } from '../core/ls.js';
-import { readProgress } from '../core/store.js';
+import { readProgress, uuidMergeScope } from '../core/store.js';
+import { parseList } from '../core/listinput.js';   // SPEC-022: the pasted UUID/RIN list
 import { deriveSyncSel } from '../core/sync.js';
 import { todayYmd } from '../core/time.js';
 import { t, getLang, setLang } from '../core/i18n.js';
@@ -372,6 +373,16 @@ export function mountUI() {
               </div>
               <div style="margin-top:12px"><label class="l" data-i18n="ui.status">Status</label><div class="chips" id="statuses">${ALL_STATUSES.map((s) => `<label class="sc"><input type="checkbox" id="st_${s}" checked>${s}</label>`).join('')}</div></div>
               <div style="margin-top:12px"><label class="l"><span data-i18n="ui.columns">Columns</span> <span id="colhint">· all</span></label><div class="chips" id="cols"></div></div>
+            </div>
+          </details>
+          <!-- SPEC-022 · paste a list instead of picking dates: document UUIDs run an exact-list
+               export (invoices only); registration numbers filter the range above. -->
+          <details class="cols adv" id="lstbox">
+            <summary><span data-i18n="flow.byList">By list (UUIDs / registration numbers)</span> <span id="lsthint"></span></summary>
+            <div class="advbody">
+              <div class="hint-line" style="margin-top:0" data-i18n="flow.listNote">Paste invoice UUIDs (exports exactly those invoices — the dates and tabs above are ignored) or counterparty registration numbers (exports only their documents from the range above). The list never leaves this device.</div>
+              <textarea class="ctl" id="lst" rows="4" style="width:100%;margin-top:8px;resize:vertical;font-family:var(--font-mono, monospace);font-size:12px" spellcheck="false"></textarea>
+              <label class="togg" id="lsteraRow" style="margin-top:8px" hidden><input type="checkbox" id="lstera" checked> <span data-i18n="flow.listEra">All years (2020 → today)</span></label>
             </div>
           </details>
           <div class="folder"><span>${FOLDER_ICO}</span><span class="p" id="folder">No output folder</span><button class="btn sm" id="pick" data-i18n="ui.pick">Pick</button></div>
@@ -847,7 +858,14 @@ export function mountUI() {
   $('start').onclick = async () => {
     const adv = readAdvanced();
     saveAdvanced(kind, adv);
+    // SPEC-022: a pasted list changes what Start means. Refusals happen HERE, before any screen
+    // change, so a bad paste never leaves the user staring at an empty run.
+    const parsed = parseList($('lst') ? $('lst').value : '');
+    if (parsed.error === 'mixed') { setFt('err', t('flow.listMixed')); return; }
+    if (parsed.error === 'too_many') { setFt('err', t('flow.listTooMany')); return; }
+    if (parsed.kind === 'rin' && source === 'receipts') { setFt('err', t('flow.listRinReceipts')); return; }
     const sel = buildSel(kind, { from: $('from').value, to: $('to').value }, adv);
+    if (parsed.kind === 'rin') { sel.rinFilter = parsed.items; if ($('lstera').checked) sel.era = true; }
     // runGuarded owns `busy` for exactly as long as orch.start() runs — never releasing on a status
     // line — so the next Start can only land once the orchestrator has actually stopped.
     const r = await runGuarded({
@@ -856,12 +874,26 @@ export function mountUI() {
         await refreshLicense(); if (!licensed) { $('gate').hidden = false; $('rg-name').focus(); return; }
         currentPlan = null; lastChunk = null;
         setStep('run'); renderChunkMap();
-        const p = await orch.plan(sel);
+        const p = parsed.kind === 'uuid'
+          ? await orch.planUuids({ uuids: parsed.items, downloadPdf: adv.downloadPdf, excludeColumns: [...adv.excludeColumns] })
+          : await orch.plan(sel);
         if (p) await orch.start(p);
       },
     });
     if (r.error) { logLine(t('ft.planFailed', { msg: r.error?.message || r.error }), { level: 'err' }); setFt('err', t('ft.planFailedShort')); }
   };
+  // Live classification under the By-list summary: what the paste is, how many, how many typos.
+  $('lst').addEventListener('input', () => {
+    const p = parseList($('lst').value);
+    const bad = p.invalid.length ? t('flow.listBad', { m: p.invalid.length }) : '';
+    $('lsteraRow').hidden = p.kind !== 'rin';
+    $('lsthint').textContent =
+      p.error === 'mixed' ? t('flow.listMixed')
+      : p.error === 'too_many' ? t('flow.listTooMany')
+      : p.kind === 'uuid' ? t('flow.listUuids', { n: p.items.length }) + bad
+      : p.kind === 'rin' ? t('flow.listRins', { n: p.items.length }) + bad
+      : bad;
+  });
   // The interrupted-run entry. The server holds the PLAN (its chunks are only purged at 'done'); the
   // folder holds the PROGRESS — and the column/PDF choices the server never stored — so the folder's
   // own plan wins whenever it describes the same run.
@@ -969,8 +1001,8 @@ export function mountUI() {
   };
   // One merge path, whether it is the automatic end of a run or the standalone button: both must
   // notice unreadable files and both must be able to raise the repair offer.
-  async function runMergeInto(dir, onMsg) {
-    await mergeFolder(window.ExcelJS, dir, { onStatus: (m) => { onMsg(m); logLine(m); setFt('run', m); } });
+  async function runMergeInto(dir, onMsg, scope) {
+    await mergeFolder(window.ExcelJS, dir, { onStatus: (m) => { onMsg(m); logLine(m); setFt('run', m); }, scope });
   }
   $('merge').onclick = async () => {
     if (busy) return;
@@ -1000,7 +1032,9 @@ export function mountUI() {
       if (!d) { setFt('warn', t('orch.pickFolder')); return; }
       logLine(t('flow.merging'), { level: 'run' }); setFt('run', t('flow.merging'));
       const res = await finishRun({
-        merge: (onMsg) => runMergeInto(d, onMsg),
+        // SPEC-022: a uuid run merges ONLY its own files, under its own state — the folder-wide
+        // sweep neither sees them nor is touched by them.
+        merge: (onMsg) => runMergeInto(d, onMsg, p.mode === 'uuids' ? uuidMergeScope(p) : undefined),
         checkpoint: (runClean(meta) && p.jobId)
           ? () => jobCheckpoint({ jobId: p.jobId, state: 'done', done: (p.doneIds || []).length, failed: (p.failedIds || []).length })
           : null,

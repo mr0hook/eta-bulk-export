@@ -20,6 +20,9 @@ export function deriveSyncSel(progress, today) {
     year: fY === tY ? fY : fY + '-' + tY,              // same label rule as the drawer's gather()
     dir: progress.dir, field: progress.field, from, to,
     statuses: progress.statuses, excludeColumns: progress.excludeColumns || [],
+    // SPEC-022b: a filtered run syncs FILTERED. Dropping the RIN list here would silently widen
+    // the export to the whole range — the exact subset/superset aliasing planSig exists to prevent.
+    rinFilter: progress.rinFilter || [],
     downloadPdf: !!progress.downloadPdf, downloadDetails: true,
   };
 }
