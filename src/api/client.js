@@ -3,6 +3,19 @@ import { API_ORIGIN } from './sources.js';
 import { getToken } from '../core/token.js';
 
 const MAX_BACKOFF = 10 * 60 * 1000;
+// Per-request deadlines (2026-08-19): the WAF can TARPIT — hold a connection open and never
+// answer. Without a timeout that hangs a mapLimit worker forever and the run goes silent
+// ("stuck at chunk N", no errors, no waits). A timed-out request rejects with TimeoutError,
+// which is NOT the user's abort — it falls into the ordinary retry-with-backoff below and, if it
+// keeps happening, surfaces as that row's loud failure instead of an invisible hang.
+const REQ_TIMEOUT_MS = 60 * 1000;        // JSON endpoints: search pages and details
+const BLOB_TIMEOUT_MS = 180 * 1000;      // official PDFs are bigger and slower
+const deadline = (signal, ms) => {
+  try {
+    if (typeof AbortSignal.timeout !== 'function' || typeof AbortSignal.any !== 'function') return signal;
+    return signal ? AbortSignal.any([signal, AbortSignal.timeout(ms)]) : AbortSignal.timeout(ms);
+  } catch { return signal; }
+};
 const coded = (code) => Object.assign(new Error(code), { code });
 // abort-aware sleep: rejects with STOPPED the instant the signal aborts, so Pause/Halt isn't stuck behind a backoff
 const sleep = (ms, signal) => new Promise((resolve, reject) => {
@@ -30,14 +43,14 @@ export function buildUrl(SRC, fromISO, toISO, dir, field, page, size, statusPara
   return `${SRC.search}?${p.toString()}`;
 }
 
-export async function apiGet(url, { attempts = 7, signal, onRate } = {}) {
+export async function apiGet(url, { attempts = 7, signal, onRate, timeoutMs = REQ_TIMEOUT_MS } = {}) {
   try { if (new URL(url).origin !== API_ORIGIN) throw coded('BAD_URL'); } catch { throw coded('BAD_URL'); }
   let lastErr, saw403 = false;
   for (let i = 0; i < attempts; i++) {
     if (signal?.aborted) throw coded('STOPPED');
     const tok = getToken(); if (!tok) throw coded('AUTH');
     try {
-      const r = await fetch(url, { headers: { Authorization: `Bearer ${tok}`, Accept: 'application/json', 'Accept-Language': 'ar' }, signal });
+      const r = await fetch(url, { headers: { Authorization: `Bearer ${tok}`, Accept: 'application/json', 'Accept-Language': 'ar' }, signal: deadline(signal, timeoutMs) });
       if (r.redirected && new URL(r.url).origin !== API_ORIGIN) throw coded('BAD_URL');   // never trust a response redirected off the ETA origin
       if (r.status === 401) throw coded('AUTH');
       // 403 is deliberately NOT auth (2026-08-19, portal build 72): /details returns
@@ -104,14 +117,14 @@ export async function fetchDetails(SRC, uuid, opts) {
 
 // Official signed PDF for a document/receipt: authenticated GET returning a binary blob.
 // Same origin + session token as the JSON API. 404 → NOT_FOUND (no PDF for that doc).
-export async function apiGetBlob(url, { attempts = 5, signal, onRate } = {}) {
+export async function apiGetBlob(url, { attempts = 5, signal, onRate, timeoutMs = BLOB_TIMEOUT_MS } = {}) {
   try { if (new URL(url).origin !== API_ORIGIN) throw coded('BAD_URL'); } catch { throw coded('BAD_URL'); }
   let lastErr;
   for (let i = 0; i < attempts; i++) {
     if (signal?.aborted) throw coded('STOPPED');
     const tok = getToken(); if (!tok) throw coded('AUTH');
     try {
-      const r = await fetch(url, { headers: { Authorization: `Bearer ${tok}`, Accept: 'application/pdf', 'Accept-Language': 'ar' }, signal });
+      const r = await fetch(url, { headers: { Authorization: `Bearer ${tok}`, Accept: 'application/pdf', 'Accept-Language': 'ar' }, signal: deadline(signal, timeoutMs) });
       if (r.redirected && new URL(r.url).origin !== API_ORIGIN) throw coded('BAD_URL');   // never trust a response redirected off the ETA origin
       if (r.status === 401) throw coded('AUTH');   // 403 falls to the generic retry — see apiGet
       if (r.status === 404) throw coded('NOT_FOUND');

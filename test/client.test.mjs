@@ -161,3 +161,26 @@ test('fetchDetails: unwraps invoices (identity) and receipts (.receipt)', async 
   stubFetch(() => resp(200, { receipt: { uuid: 'r', bar: 2 } }));
   assert.equal((await fetchDetails(SOURCES.receipts, 'r', {})).bar, 2);
 });
+
+test('T-240 a hung request times out into the retry path — and a user abort is still STOPPED', async () => {
+  // 2026-08-19: the WAF tarpitted /details — connections held open, never answered — and with no
+  // deadline all 40 workers hung silently ("stuck at chunk 2", zero log lines). A timeout must
+  // read as a retryable failure, NOT as the user's pause.
+  const hang = (url, opts) => new Promise((_, rej) => {
+    const s = opts?.signal;
+    if (s?.aborted) return rej(s.reason);
+    s?.addEventListener('abort', () => rej(s.reason), { once: true });
+  });
+  globalThis.fetch = hang;
+  const t0 = Date.now();
+  await assert.rejects(
+    () => apiGet(API_ORIGIN + '/a', { attempts: 2, timeoutMs: 40 }),
+    (e) => e.code !== 'STOPPED',
+    'a timeout must surface as an ordinary failure after retries, never as STOPPED');
+  assert.ok(Date.now() - t0 < 30000, 'and it must not hang');
+
+  const ctrl = new AbortController();
+  const p = apiGet(API_ORIGIN + '/a', { attempts: 3, timeoutMs: 60000, signal: ctrl.signal });
+  setTimeout(() => ctrl.abort(), 10);
+  await assert.rejects(() => p, (e) => e.code === 'STOPPED', 'the user pause is still STOPPED');
+});
