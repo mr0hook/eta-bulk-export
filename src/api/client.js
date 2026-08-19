@@ -74,7 +74,12 @@ export async function apiGet(url, { attempts = 7, signal, onRate, timeoutMs = RE
       if (!r.ok) { lastErr = new Error('HTTP ' + r.status); await sleep(1500 * (i + 1) + Math.floor(Math.random() * 500), signal); continue; }
       return await r.json();
     } catch (e) {
-      if (e.name === 'AbortError' || signal?.aborted) throw coded('STOPPED');   // aborts are not retryable rate-limits
+      // STOPPED means THE USER stopped — decided solely by the caller's signal. The deadline's
+      // timeout also surfaces as an abort, and not always as TimeoutError: a deadline that fires
+      // MID-BODY (r.json() on a slow stream) rejects with plain AbortError in Chrome. Before this
+      // check keyed on the caller's signal (2026-08-19), such a timeout masqueraded as the user's
+      // Pause and the run "paused itself" with no one touching it — a phantom pause mid-details.
+      if (signal?.aborted) throw coded('STOPPED');
       if (['AUTH', 'FORBIDDEN', 'NOT_FOUND', 'STOPPED', 'BAD_URL', 'NOT_PDF'].includes(e.code)) throw e;
       lastErr = e; const w = Math.min(5000 * 2 ** i, MAX_BACKOFF) + Math.floor(Math.random() * 1000); onRate?.(w); await sleep(w, signal);
     }
@@ -140,7 +145,9 @@ export async function apiGetBlob(url, { attempts = 5, signal, onRate, timeoutMs 
       if (!(head[0] === 0x25 && head[1] === 0x50 && head[2] === 0x44 && head[3] === 0x46)) throw coded('NOT_PDF');   // %PDF magic — reject an HTML/JSON error page served as 200
       return blob;
     } catch (e) {
-      if (e.name === 'AbortError' || signal?.aborted) throw coded('STOPPED');   // aborts are not retryable rate-limits
+      // Same rule as apiGet: only the CALLER's aborted signal is the user's stop; a deadline
+      // firing mid-body rejects as plain AbortError and must retry, not fake a pause.
+      if (signal?.aborted) throw coded('STOPPED');
       if (['AUTH', 'NOT_FOUND', 'STOPPED', 'BAD_URL', 'NOT_PDF'].includes(e.code)) throw e;
       lastErr = e; const w = Math.min(5000 * 2 ** i, MAX_BACKOFF) + Math.floor(Math.random() * 1000); onRate?.(w); await sleep(w, signal);
     }

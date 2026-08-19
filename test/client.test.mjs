@@ -230,6 +230,23 @@ test('T-255b mapAdaptive: a thrown AUTH/STOPPED rejects the batch, empty input r
   assert.deepEqual(await mapAdaptive([], gov, async (x) => x), [], 'no items → resolves immediately');
 });
 
+test('T-263 a spurious AbortError (deadline firing mid-body) retries — only the caller\'s aborted signal is STOPPED', async () => {
+  // The phantom-pause incident (2026-08-19): the 60s request deadline firing during r.json() on a
+  // slow stream rejects with plain AbortError, and the old `e.name === 'AbortError'` check turned
+  // that into STOPPED — the run loop then "paused itself" mid-details with no one touching it.
+  let n = 0;
+  stubFetch(() => { if (n++ === 0) { const e = new Error('aborted'); e.name = 'AbortError'; throw e; } return resp(200, { ok: 1 }); });
+  const j = await apiGet(API_ORIGIN + '/a', {});
+  assert.deepEqual(j, { ok: 1 });
+  assert.equal(n, 2, 'the abort was retried like any transient failure, not treated as the user\'s Pause');
+
+  const ctrl = new AbortController(); ctrl.abort();
+  let called = 0;
+  stubFetch(() => { called++; return resp(200, { ok: 1 }); });
+  await assert.rejects(() => apiGet(API_ORIGIN + '/a', { signal: ctrl.signal }), (e) => e.code === 'STOPPED');
+  assert.equal(called, 0, 'a genuinely aborted caller signal is STOPPED before any fetch');
+});
+
 test('T-256 apiGet marks a real 429 for the governor (onRate second arg), plain error backoff stays unmarked', async () => {
   let n = 0; const calls = [];
   stubFetch(() => (n++ === 0 ? resp(429, {}, { 'Retry-After': '0' }) : resp(200, { ok: 1 })));

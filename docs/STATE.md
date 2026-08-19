@@ -19,7 +19,21 @@ single origin bg.js is allowed to fetch, and manifest.json's host_permissions. A
 up in `git status` (manifest.json changes) and `package-ext.mjs` refuses to zip one.
 
 ## NEXT ACTION
-→ 2026-08-19 ~21:30, SPEC-028 BUILT (v0.9.0): "⟳ Load failed UUIDs" button in the By-list box —
+→ 2026-08-19 ~23:45, PHANTOM-PAUSE FIX (v0.9.1): the live Purchases run "paused itself" three
+  times mid-details with NO 'Pausing…' line (23:13:05, 23:16:16, 23:25:59). Root cause: the
+  v0.6.4 request deadline firing MID-BODY (r.json() on a slow stream under 40-deep details)
+  rejects with plain AbortError — not TimeoutError — and apiGet's `e.name === 'AbortError'`
+  check turned that into STOPPED, which the run loop printed as a bare user pause. Fix: STOPPED
+  is keyed ONLY on the caller's signal (apiGet + apiGetBlob), and the run loop treats a STOPPED
+  with neither flag set as a spurious abort that falls into ordinary retry (T-263; 391/391).
+  USER: reload the unpacked extension (v0.9.1) and Resume the paused Purchases run (8/43).
+  ALSO from the same log: an entity flip at 23:24:29 was auto-restored in 12s (SPEC-023 working),
+  but chunk 7 completed with 112/1086 — the 974 flip-era 403s are in eta_failures.jsonl and are
+  EXACTLY what the new Load-failed-UUIDs button is for, after the run finishes. FUTURE SPEC
+  CANDIDATE: mass-FORBIDDEN in one chunk (e.g. >50%) should FAIL the chunk as a flip symptom
+  instead of completing thin.
+
+→ Previous (2026-08-19 ~21:30), SPEC-028 BUILT (v0.9.0): "⟳ Load failed UUIDs" button in the By-list box —
   reads eta_failures.jsonl (folder-gated via ensureFolder), fills the paste box with retryable
   document uuids (pdf-only/over-cap/receipts lines excluded, deduped), user presses Start as a
   normal SPEC-022 uuid run. T-262; suite 390/390; dist at v0.9.0. USER: reload the unpacked

@@ -488,9 +488,13 @@ export function createOrchestrator(hooks = {}) {
             // return bypasses the next-chunk-boundary check) so the footer/tracker don't stay frozen on the last
             // "▶ fetching…" line during a multi-hour run.
             if (e.code === 'STOPPED') {
-              if (flags.halted) { onStatus(t('orch.halted'), { level: 'err', terminal: true }); await mark(plan, 'halted'); }
-              else { onStatus(t('orch.pausedAt', { i: i + 1, n: plan.chunks.length }), { level: 'wait', terminal: true }); await mark(plan, 'paused'); }
-              return;
+              if (flags.halted) { onStatus(t('orch.halted'), { level: 'err', terminal: true }); await mark(plan, 'halted'); return; }
+              if (flags.paused) { onStatus(t('orch.pausedAt', { i: i + 1, n: plan.chunks.length }), { level: 'wait', terminal: true }); await mark(plan, 'paused'); return; }
+              // STOPPED with NEITHER flag set: nobody asked to stop. The 2026-08-19 phantom-pause
+              // incident — a request deadline firing mid-body surfaces as AbortError and used to
+              // masquerade as Pause, silently parking multi-hour runs. The client now keys STOPPED
+              // on the caller's signal, and this guard keeps ANY future spurious abort inside the
+              // ordinary retry path instead of a pause no one requested.
             }
             const wait = 60000 * (attempt + 1); onStatus(t('orch.chunkBackoff', { i: i + 1, a: attempt + 1, msg, m: Math.round(wait / 60000) }), { level: 'wait', kind: 'backoff' });
             // Abort-aware backoff: poll the pause/halt flags so a Pause/Halt during a 1–2 min failure backoff is
