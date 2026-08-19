@@ -8,6 +8,32 @@ function mkChunk(fromISO, toISO, count, warn, subF, subT) {
   return { id: `${fromISO}_${toISO}${subF ? '_' + subF + '_' + subT : ''}`, fromISO, toISO, subF, subT, label: chunkLabel(fromISO, toISO) + sub, count, warn };
 }
 
+// SPEC-024 — coalescing. Bisection accepts the first window under cap, so adjacent leaves are
+// routinely half-empty; a greedy left-to-right fold merges them up to 90% of cap. Never touches a
+// warned chunk; plain merges with plain (the span between two leaves probed zero — widening over
+// it can only ADD a late arrival, and over-report dedups by UUID); sub merges with sub only inside
+// the same issuance window. The server (lead-worker/src/planner.js) does the identical merge
+// streaming at emit time — same function, planner.test.mjs proves the equivalence.
+const MERGE_FILL = 0.9;
+function canMerge(a, b, target) {
+  if (!a || a.warn || b.warn || a.count + b.count > target) return false;
+  if (!a.subF && !b.subF) return true;
+  return !!a.subF && !!b.subF && a.fromISO === b.fromISO && a.toISO === b.toISO;
+}
+export function coalesce(chunks, cap) {
+  const target = Math.floor(cap * MERGE_FILL);
+  const out = [];
+  for (const c of chunks) {
+    const p = out[out.length - 1];
+    if (canMerge(p, c, target)) {
+      out[out.length - 1] = p.subF
+        ? mkChunk(p.fromISO, p.toISO, p.count + c.count, null, p.subF, c.subT)
+        : mkChunk(p.fromISO, c.toISO, p.count + c.count, null);
+    } else out.push(c);
+  }
+  return out;
+}
+
 // deps: { probe(fromISO,toISO,subF?,subT?)->count, detectMaxSub(issF,issT)->isoOrNull, onProgress(n,msg), stopped()->bool }
 export async function buildChunks(SRC, from, to, field, deps) {
   const { probe, detectMaxSub = async () => null, onProgress = () => {}, stopped = () => false } = deps;
@@ -72,5 +98,5 @@ export async function buildChunks(SRC, from, to, field, deps) {
   }
 
   onProgress(0, `Probing ${chunkLabel(dayStartISO(from), dayEndISO(to))}…`);
-  return split(dayStartISO(from), dayEndISO(to), 0);
+  return coalesce(await split(dayStartISO(from), dayEndISO(to), 0), CAP);   // SPEC-024
 }

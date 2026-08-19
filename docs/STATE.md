@@ -35,9 +35,11 @@ up in `git status` (manifest.json changes) and `package-ext.mjs` refuses to zip 
   colleague actively working another entity on the same login ends in the 3-restore pause by
   design. Long-term advice given: separate ETA user accounts per person/entity.
 
-→ THEN: DEPLOY THE WORKER TO PRODUCTION — it now carries TWO things: the cursor stack-overflow fix
-  (80d615a) and SPEC-022's /plan/uuids route (without it, the new By-list export gets
-  'not found' from the backend and refuses to run):
+→ THEN: DEPLOY THE WORKER TO PRODUCTION — it now carries THREE things: the cursor stack-overflow
+  fix (80d615a), SPEC-022's /plan/uuids route (without it, the new By-list export gets
+  'not found' from the backend and refuses to run), and SPEC-024's chunk coalescing (adjacent
+  under-filled chunks merge up to 90% of cap — roughly halves the chunk count of the 8M-doc plan;
+  cursor-compatible with in-flight plans, so deploying mid-probe is safe):
       cd lead-worker && npx wrangler deploy --env production
   Then: (1) re-run the 2M-invoice stress test (should plan clean past probe ~1036), and
   (2) reload the unpacked extension (dist/ is rebuilt) and try the new By-list box:
@@ -160,6 +162,19 @@ because every other phase adds code to the file it breaks up.
 - (resolved) refreshLicense ungated-branch rj-scan gap — fixed in F-06.
 
 ## Session log
+- 2026-08-19 · SPEC-024 chunk coalescing BUILT (server + reference chunker + tests; no extension
+  code shipped, so no version bump — dist/ is byte-unchanged). Driver: the live 8M-doc probe showed
+  "4 chunks one day, 1 chunk the next" — bisection's ~50–60% average fill. Adjacent un-warned
+  chunks now merge greedily up to floor(cap·0.9) (plain with plain; sub only inside one issuance
+  window), streaming at emit() server-side so the cursor ALSO shrinks during planning, post-pass
+  fold in chunker.js — planner.test proves the two forms identical (T-240..T-243; T-147 re-pinned
+  with non-mergeable leaves; smoke's synthetic windows raised 100→9500 to deliberately keep its
+  2-chunk plumbing checks). Suite 381/381 + SMOKE OK. NOT DEPLOYED.
+  Live ETA telemetry captured during the same probe (monitor tab, ~38 min): /documents/search is
+  strictly sequential at ~1.3 req/s, ~18KB/page, zero 429s in 2,000+ calls, ONE 503, but p50
+  latency CLIMBED 428→711ms over the session (soft-throttle or load ramp — an adaptive pacer and
+  parallel search paging are the next networking levers; a portal inlinecontent call hung 90s,
+  re-validating the v0.6.4 deadlines).
 - 2026-08-10 · Run visibility: the backend's picture of a live run was blind in four places, all one
   root cause — the server was only told about a run at a few late transition points. (1) job_chunks
   .state was written once as the literal 'pending' by finishPlan and never updated by anything, so

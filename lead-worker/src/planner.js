@@ -14,6 +14,9 @@ import { dayStartISO, dayEndISO, ymdOf, addDays, daysBetween, chunkLabel } from 
 
 const DEPTH_MAX = 80;      // chunker.js: depth > 80 on the date axis
 const SUB_DEPTH_MAX = 64;  // chunker.js: depth > 64 on the submission-time axis
+const MERGE_FILL = 0.9;    // SPEC-024: merged chunks target ≤ 90% of cap — headroom for documents
+                           // that arrive between plan time and fetch time (single unmerged leaves
+                           // may still sit anywhere below cap, exactly as bisection always allowed)
 
 function mkChunk(fromISO, toISO, count, warn, subF, subT) {
   const sub = subF && subT ? ` · sub ${subF.slice(11, 19)}→${subT.slice(11, 19)}` : '';
@@ -23,6 +26,29 @@ function mkChunk(fromISO, toISO, count, warn, subF, subT) {
     label: chunkLabel(fromISO, toISO) + sub,
     count, warn,
   };
+}
+
+// SPEC-024 — coalescing. Bisection accepts the first window under cap, so adjacent leaves are
+// routinely half-empty; merging them as they are accepted halves the chunk count of a big plan
+// (and with it the cursor that rides every /plan/step, the checkpoint string, and the per-chunk
+// fixed costs of the run). Rules: never touch a warned chunk; plain merges with plain (the span
+// between two accepted leaves probed zero, so widening over it can only ever ADD a late-arriving
+// document — over-report dedups, under-report is unrecoverable); sub merges with sub only inside
+// the SAME issuance window. Mirrored as a post-pass fold in src/core/chunker.js — a left-to-right
+// greedy fold and this streaming form are the same function, and planner.test.mjs proves it.
+function canMerge(a, b, target) {
+  if (!a || a.warn || b.warn || a.count + b.count > target) return false;
+  if (!a.subF && !b.subF) return true;
+  return !!a.subF && !!b.subF && a.fromISO === b.fromISO && a.toISO === b.toISO;
+}
+
+function emitCoalesced(out, c, cap) {
+  const p = out[out.length - 1];
+  if (canMerge(p, c, Math.floor(cap * MERGE_FILL))) {
+    out[out.length - 1] = p.subF
+      ? mkChunk(p.fromISO, p.toISO, p.count + c.count, null, p.subF, c.subT)
+      : mkChunk(p.fromISO, c.toISO, p.count + c.count, null);
+  } else out.push(c);
 }
 
 /** Begin a plan. Returns the machine state; call advance() to get the first instruction. */
@@ -46,7 +72,10 @@ const instructionFor = (f) =>
 // split() / ss() / subSplit() between their await points.
 function resolve(st, f, obs) {
   const push = (frame) => st.stack.push(frame);
-  const emit = (c) => st.out.push(c);
+  // Streaming coalesce (SPEC-024). Safe against the subDone `out.length === mark` emptiness check:
+  // a subtree's FIRST emission can never merge backwards across the mark, because the chunk before
+  // it is either plain or a sub chunk of a different issuance window — both incompatible.
+  const emit = (c) => emitCoalesced(st.out, c, st.cap);
 
   if (f.t === 'subInit') {
     const maxSub = obs && obs.maxSub;

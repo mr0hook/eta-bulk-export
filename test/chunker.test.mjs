@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildChunks } from '../src/core/chunker.js';
+import { buildChunks, coalesce } from '../src/core/chunker.js';
 
 // synthetic "server": count docs whose timestamp is within [from,to] (inclusive, full precision)
 function makeProbe(docs) {
@@ -101,6 +101,51 @@ test('sub-split: detectMaxSub returning null degrades to a warned single-day chu
   const chunks = await buildChunks(SRC, '2025-05-02', '2025-05-02', 'Issue', { probe, detectMaxSub: async () => null });
   assert.equal(chunks.length, 1);
   assert.equal(chunks[0].warn, 'over_cap_single_day', 'falls back to the warned over-cap chunk when the sub axis is unavailable');
+});
+
+// ── SPEC-024: the coalescing fold, unit-level ───────────────────────────────────────────────────
+test('T-243 coalesce: merges runs of small plain chunks up to 90% of cap, greedily and only there', () => {
+  const P = (from, to, count, warn) => ({
+    id: `${from}_${to}`, fromISO: `${from}T00:00:00.000Z`, toISO: `${to}T21:59:59.999Z`,
+    subF: undefined, subT: undefined, label: from, count, warn: warn || null,
+  });
+  // [10, 20, 30] all fit inside target 90 → ONE chunk spanning the outer range, counts summed.
+  const merged = coalesce([P('2025-01-01', '2025-01-02', 10), P('2025-01-03', '2025-01-04', 20), P('2025-01-05', '2025-01-06', 30)], 100);
+  assert.equal(merged.length, 1);
+  assert.equal(merged[0].count, 60);
+  assert.equal(merged[0].fromISO, '2025-01-01T00:00:00.000Z');
+  assert.equal(merged[0].toISO, '2025-01-06T21:59:59.999Z');
+  assert.ok(!merged[0].warn);
+
+  // Greedy boundary: 50+45 = 95 > 90 stays split; the 45 then takes the 10 (55 ≤ 90).
+  const greedy = coalesce([P('2025-02-01', '2025-02-01', 50), P('2025-02-02', '2025-02-02', 45), P('2025-02-03', '2025-02-03', 10)], 100);
+  assert.deepEqual(greedy.map((c) => c.count), [50, 55]);
+
+  // A single chunk already above the target passes through untouched (bisection always allowed
+  // a lone leaf anywhere under cap; the target only governs merges).
+  const lone = coalesce([P('2025-03-01', '2025-03-01', 97)], 100);
+  assert.equal(lone.length, 1);
+  assert.equal(lone[0].count, 97);
+
+  // A warned chunk is a wall: nothing merges into it, nothing merges through it.
+  const walled = coalesce([P('2025-04-01', '2025-04-01', 40), P('2025-04-02', '2025-04-02', 500, 'over_cap_single_day'), P('2025-04-03', '2025-04-03', 40)], 100);
+  assert.deepEqual(walled.map((c) => c.count), [40, 500, 40]);
+  assert.equal(walled[1].warn, 'over_cap_single_day');
+
+  // Sub chunks: merge inside one issuance window, never across windows, never with a plain chunk.
+  const S = (day, sf, st, count) => ({
+    id: `${day}_${day}_${sf}_${st}`, fromISO: `${day}T00:00:00.000Z`, toISO: `${day}T21:59:59.999Z`,
+    subF: `${day}T${sf}:00.000Z`, subT: `${day}T${st}:00.000Z`, label: day, count, warn: null,
+  });
+  const subs = coalesce([
+    P('2025-05-01', '2025-05-01', 30),
+    S('2025-05-02', '08:00', '10:00', 30), S('2025-05-02', '10:00', '12:00', 40),   // same window → merge (70)
+    S('2025-05-03', '08:00', '10:00', 30),                                          // next day's window → wall
+  ], 100);
+  assert.deepEqual(subs.map((c) => c.count), [30, 70, 30]);
+  assert.equal(subs[1].subF, '2025-05-02T08:00:00.000Z');
+  assert.equal(subs[1].subT, '2025-05-02T12:00:00.000Z');
+  assert.equal(subs[1].fromISO, '2025-05-02T00:00:00.000Z', 'a merged sub chunk keeps its issuance window');
 });
 
 test('date-only: whole-day split, coverage, no day double-counted', async () => {

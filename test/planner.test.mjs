@@ -108,6 +108,99 @@ test('T-137 equivalence: whole-day split across a full year', async () => {
   await assertIdentical('year', SRC, 'Issue', '2025-01-01', '2025-12-31', docs);
 });
 
+// ── SPEC-024: coalescing ────────────────────────────────────────────────────────────────────────
+test('T-240 coalescing equivalence + greedy maximality on a skewed corpus (sparse year, dense hour)', async () => {
+  // The corpus that produces the "4 chunks one day, 1 chunk the next" complaint: deep bisection
+  // around a dense cluster leaves tiny sparse fragments on its flanks. Those must merge — in BOTH
+  // implementations identically — and the merge must be maximal (greedy left nothing on the table).
+  const SRC = { cap: 100, granular: ['DateTimeReceived'], subSplit: false };
+  const target = Math.floor(SRC.cap * 0.9);
+  const docs = [];
+  for (let i = 0; i < 365; i++) docs.push(Date.parse('2025-01-01T09:00:00Z') + i * 86400000);   // 1/day
+  const cluster = Date.parse('2025-06-15T10:00:00Z');
+  for (let i = 0; i < 500; i++) docs.push(cluster + i * 7200);                                  // 500 in one hour
+  const chunks = await assertIdentical('coalesce', SRC, 'DateTimeReceived', '2025-01-01', '2025-12-31', docs);
+
+  const { covered, missed } = (() => {
+    const ranges = chunks.map((c) => [Date.parse(c.fromISO), Date.parse(c.toISO)]);
+    let cov = 0, miss = 0;
+    for (const t of docs) (ranges.some(([lo, hi]) => t >= lo && t <= hi) ? cov++ : miss++);
+    return { covered: cov, missed: miss };
+  })();
+  assert.equal(missed, 0, 'coalescing must stay gap-free');
+  assert.equal(covered, docs.length);
+  for (const c of chunks) assert.ok(!c.warn, 'this corpus needs no over-cap warnings');
+  // Greedy maximality: any adjacent pair still summing under the fill target should have merged.
+  for (let i = 0; i + 1 < chunks.length; i++) {
+    const a = chunks[i], b = chunks[i + 1];
+    if (!a.subF && !b.subF) assert.ok(a.count + b.count > target,
+      `chunks ${i}/${i + 1} (${a.count}+${b.count}) fit the target ${target} and should have merged`);
+  }
+});
+
+test('T-241 a warned over-cap chunk never participates in a merge, in either direction', async () => {
+  // A day the planner cannot split finer sits between two small days. The warn chunk must stay
+  // alone — merging it would hide the over-cap surplus warning the run loop writes to
+  // eta_failures.jsonl — and the small flanks must not merge THROUGH it.
+  const SRC = { cap: 100, granular: ['Submission'], subSplit: false };
+  const day = (d) => Date.parse(`2025-07-0${d}T12:00:00Z`);
+  const probe = async (fromISO, toISO) => {
+    const lo = Date.parse(fromISO), hi = Date.parse(toISO);
+    let n = 0;
+    if (day(1) >= lo && day(1) <= hi) n += 40;
+    if (day(2) >= lo && day(2) <= hi) n += 999999;   // a single day that cannot be split
+    if (day(3) >= lo && day(3) <= hi) n += 40;
+    return n;
+  };
+  const mine = await buildChunks(SRC, '2025-07-01', '2025-07-03', 'Issue', { probe });
+  const theirs = await runPlan(cfg(SRC, 'Issue', '2025-07-01', '2025-07-03'), { probe, detectMaxSub: async () => null });
+  assert.deepEqual(theirs, mine, 'both implementations agree around the warn chunk');
+  assert.equal(mine.length, 3, 'small–warned–small stays three chunks');
+  assert.equal(mine[1].warn, 'over_cap_single_day');
+  assert.ok(!mine[0].warn && !mine[2].warn);
+  assert.equal(mine[0].count, 40);
+  assert.equal(mine[2].count, 40);
+});
+
+test('T-242 sub-split chunks merge only inside their own issuance window', async () => {
+  // Two consecutive over-cap issuance days, each sub-split by submission time into small leaves.
+  // Merges must happen within each day (that is the user-visible "4 chunks for one day" fix) and
+  // never across the day boundary, and both implementations must agree exactly.
+  const SRC = { cap: 100, granular: ['Submission'], subSplit: true };
+  const docs = [];
+  const mk = (iss, sub) => docs.push({ iss, sub });
+  for (let i = 0; i < 450; i++) mk(Date.parse('2025-05-02T06:00:00Z') + (i % 600) * 1000, Date.parse('2025-05-02T08:00:00Z') + i * 24000);
+  for (let i = 0; i < 450; i++) mk(Date.parse('2025-05-03T06:00:00Z') + (i % 600) * 1000, Date.parse('2025-05-03T08:00:00Z') + i * 24000);
+  const probe = async (fromISO, toISO, subF, subT) => {
+    const lo = Date.parse(fromISO), hi = Date.parse(toISO);
+    const sl = subF ? Date.parse(subF) : -Infinity, sh = subT ? Date.parse(subT) : Infinity;
+    return docs.reduce((n, d) => n + (d.iss >= lo && d.iss <= hi && d.sub >= sl && d.sub <= sh ? 1 : 0), 0);
+  };
+  const detectMaxSub = async (fromISO, toISO) => {
+    const lo = Date.parse(fromISO), hi = Date.parse(toISO);
+    const subs = docs.filter((d) => d.iss >= lo && d.iss <= hi).map((d) => d.sub);
+    return subs.length ? new Date(Math.max(...subs)).toISOString() : null;
+  };
+  const mine = await buildChunks(SRC, '2025-05-02', '2025-05-03', 'Issue', { probe, detectMaxSub });
+  const theirs = await runPlan(cfg(SRC, 'Issue', '2025-05-02', '2025-05-03'), { probe, detectMaxSub });
+  assert.deepEqual(theirs, mine, 'both implementations agree on the sub-split merge');
+
+  const windows = new Set(mine.filter((c) => c.subF).map((c) => `${c.fromISO}_${c.toISO}`));
+  assert.ok(windows.size >= 2, 'both days were sub-split');
+  for (const c of mine) {
+    assert.ok(c.count < SRC.cap, `chunk ${c.label} has ${c.count} ≥ cap`);
+    if (c.subF) assert.ok(windows.has(`${c.fromISO}_${c.toISO}`), 'a sub chunk stays inside one issuance window');
+  }
+  // Coverage on both axes survives the merges.
+  let missed = 0;
+  for (const d of docs) {
+    const hit = mine.some((c) => d.iss >= Date.parse(c.fromISO) && d.iss <= Date.parse(c.toISO)
+      && (!c.subF || (d.sub >= Date.parse(c.subF) && d.sub <= Date.parse(c.subT))));
+    if (!hit) missed++;
+  }
+  assert.equal(missed, 0, 'no document falls into a gap after coalescing');
+});
+
 // ── machine mechanics ───────────────────────────────────────────────────────────────────────────
 test('T-145 a replayed step returns the identical instruction', () => {
   // The client hard-fails and retries on a network error rather than falling back, so the same step

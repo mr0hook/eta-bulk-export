@@ -352,8 +352,10 @@ try {
 
   // ── SPEC-016: the planner conversation ──
   // A synthetic portal: anything wider than ~200 days is over the 10,000 invoice cap, anything
-  // narrower is comfortably under. One split, two chunks, three steps.
-  const probeFor = (f, t) => (Date.parse(t) - Date.parse(f) > 200 * 86400000 ? 20000 : 100);
+  // narrower is comfortably under. One split, two chunks, three steps. 9,500 (not 100) per window
+  // so SPEC-024's coalescing — which would merge two windows summing ≤ 9,000 — deliberately leaves
+  // the two-chunk structure intact; these checks pin the D1/timeline plumbing, not the merge.
+  const probeFor = (f, t) => (Date.parse(t) - Date.parse(f) > 200 * 86400000 ? 20000 : 9500);
 
   // A device of its own: dev-1 has been deleted and restored by the trash tests above, and the
   // restore deliberately drops a RIN another account re-claimed. Reusing it here would make these
@@ -396,7 +398,7 @@ try {
   check('plan/step completes and returns chunks', !!plan && plan.done && plan.chunks.length === 2, plan ? 'chunks=' + plan.chunks.length : 'never finished');
   check('planned chunks are stored in D1, in order', JOBS._chunks.length === 2 && JOBS._chunks[0].idx === 0 && JOBS._chunks[1].idx === 1);
   const jobRow = JOBS._jobs.get(s0.jobId);
-  check('job row reaches planned with its totals', jobRow && jobRow.state === 'planned' && jobRow.total_chunks === 2 && jobRow.total_rows === 200);
+  check('job row reaches planned with its totals', jobRow && jobRow.state === 'planned' && jobRow.total_chunks === 2 && jobRow.total_rows === 19000);
 
   const tampered = await signed('/plan/step', { jobId: s0.jobId, cursor: String(s0.cursor).slice(0, -4) + 'AAAA', observation: { count: 1 } }, PK, PD);
   check('a tampered cursor is refused, not treated as empty state', tampered.status === 400);
@@ -431,7 +433,7 @@ try {
   const res1 = await (await signed('/job/resumable', {}, PK, PD)).json();
   check('an unfinished job is offered as resumable', res1.ok && res1.jobs.length === 1 && res1.jobs[0].id === s0.jobId && res1.jobs[0].done_count === 1);
   const plan1 = await (await signed('/job/plan', { jobId: s0.jobId }, PK, PD)).json();
-  check('resuming returns the stored plan in order', plan1.ok && plan1.chunks.length === 2 && plan1.chunks[0].label && plan1.chunks[0].count === 100);
+  check('resuming returns the stored plan in order', plan1.ok && plan1.chunks.length === 2 && plan1.chunks[0].label && plan1.chunks[0].count === 9500);
   const otherPlan = await (await signed('/job/plan', { jobId: s0.jobId }, reg.clientKey, 'dev-1')).json();
   check("another device cannot read this job's plan", otherPlan.ok !== true);
 
@@ -786,7 +788,7 @@ try {
   const one = await (await admin('/api/job?id=' + j3.jobId)).json();
   check('/api/job returns the run and its chunk plan in order',
     one.ok && one.job.jobId === j3.jobId && one.job.total === 2 && one.chunks.length === 2
-    && one.chunks[0].idx === 0 && !!one.chunks[0].chunkId && one.chunks[0].count === 100
+    && one.chunks[0].idx === 0 && !!one.chunks[0].chunkId && one.chunks[0].count === 9500
     && !!one.chunks[0].label && one.chunks[0].state === 'pending');
 
   const purged = await (await admin('/api/job', { id: j3.jobId, action: 'purge' })).json();

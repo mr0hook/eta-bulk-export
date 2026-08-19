@@ -99,7 +99,10 @@ test('T-147 the cursor stays small on a plan that accepts hundreds of chunks', a
     const span = Date.parse(i.toISO || i.subT) - Date.parse(i.fromISO || i.subF);
     const out = { ...st, out: [] };                       // mirror the real route: chunks go to D1
     worst = Math.max(worst, (await seal(key, 'j', out)).length);
-    r = advance(st, { count: span > 300000 ? 999999 : 10 });
+    // 40 per leaf, NOT 10: with SPEC-024 coalescing, 10-count neighbours merge four-to-one and the
+    // plan shrinks below the size this test needs. 40+40 exceeds the merge target (45), so every
+    // leaf stays its own chunk and the "hundreds of chunks" claim keeps meaning.
+    r = advance(st, { count: span > 300000 ? 999999 : 40 });
     steps++;
   }
   assert.ok(r.done, 'the plan finished');
