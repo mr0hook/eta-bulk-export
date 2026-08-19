@@ -37,6 +37,10 @@ const BATCH_DOCS = 2000;
 // as an entity-flip casualty and FAILED — never completed thin. Genuine per-document 403s
 // (intermediary/marketplace submissions) arrive in ones and fives, far under this.
 const MASS_FORBIDDEN_MIN = 25;
+// SPEC-031: the SESSION host — the origin this content script runs on, and a different host from
+// the API the run talks to. Pinned as a constant (never read from location) so the warm can only
+// ever hit the portal.
+const PORTAL_ORIGIN = 'https://invoicing.eta.gov.eg';
 // Token handling: the portal silently renews the access token for as long as a portal tab is open
 // (overnight runs on the original tool proved this), and every request reads the CURRENT token from
 // localStorage — so a token whose exp is near is normal steady state, NOT a coming failure. We
@@ -70,6 +74,13 @@ export function createOrchestrator(hooks = {}) {
   let dirHandle = null, running = false, currentCtrl = null, folderOk = null;
   let pinnedProfile = null;   // SPEC-030: the entity the CURRENT run belongs to (null outside runs)
   const flags = { paused: false, halted: false };
+  // SPEC-031 — the renewal fetch hold. A rescue renewal boots the portal SPA, and that boot is what
+  // can flip the active company; every document fetched in those seconds would come back 403 under
+  // the wrong entity (the 2026-08-19 chunk-7 incident: 974 of 1,086 dropped). So document fetches
+  // park here for the few seconds a renewal takes and resume once the company has been re-pinned.
+  let renewHold = null, renewRelease = null;
+  const holdRenew = () => { if (!renewHold) renewHold = new Promise((r) => { renewRelease = r; }); };
+  const releaseRenew = () => { const r = renewRelease; renewHold = null; renewRelease = null; try { r?.(); } catch {} };
   // SPEC-009 — keeps the portal SESSION host alive for the length of a run (see session.js). The
   // run itself only ever talks to the API host, which is exactly why the session idles out.
   //
@@ -80,18 +91,31 @@ export function createOrchestrator(hooks = {}) {
   // the next chunk boundary to discover 403 carnage: if the stamp moved, switch straight back and
   // re-boot once more so localStorage carries the corrected profile. Best-effort by contract.
   const session = createSessionKeeper({
-    warm: () => bridgeRequest('portal-warm'),
-    renew: async () => { onStatus(t('orch.sessionRenew'), { level: 'wait' }); await bridgeRequest('portal-renew'); },
+    // SPEC-031: warm from the PAGE. This code runs inside the portal tab, so a request to the
+    // portal origin is FIRST-PARTY and carries the session cookie whatever its SameSite setting.
+    // The service-worker warm (kept as the fallback) is cross-site, and a Lax/Strict cookie
+    // legitimately does not ride along with it — which is the only reason the old design needed a
+    // tab boot to slide the session at all.
+    warm: async () => {
+      try { await fetch(PORTAL_ORIGIN + '/', { method: 'GET', credentials: 'include', cache: 'no-store' }); return; }
+      catch { /* CSP/offline — fall through to the worker */ }
+      try { await bridgeRequest('portal-warm'); } catch {}
+    },
+    onSelfRenew: () => onStatus(t('orch.tokenSelfRenew'), { level: 'ok', kind: 'token' }),
+    renew: async () => { holdRenew(); onStatus(t('orch.sessionRenew'), { level: 'wait' }); await bridgeRequest('portal-renew'); },
+    // Runs after EVERY renewal attempt (session.js guarantees it, even on failure) — so the hold is
+    // always released and a flip is always corrected before fetching resumes.
     afterRenew: async () => {
-      if (!running || !pinnedProfile?.taxId) return;
-      if (profileStamp() === pinnedProfile.stamp) return;
-      onStatus(t('orch.renewFlipped'), { level: 'wait' });
       try {
+        if (!running || !pinnedProfile?.taxId) return;
+        if (profileStamp() === pinnedProfile.stamp) return;
+        onStatus(t('orch.renewFlipped'), { level: 'wait' });
         if (await switchTaxpayer(pinnedProfile.taxId)) {
           await bridgeRequest('portal-renew');   // direct (gap-exempt): re-mint under the restored entity
           onStatus(t('orch.renewPinned'), { level: 'ok' });
         }
       } catch { /* the chunk-boundary restore is the enforcing layer; this one just acts sooner */ }
+      finally { releaseRenew(); }
     },
   });
 
@@ -405,6 +429,7 @@ export function createOrchestrator(hooks = {}) {
             // herd retries; each clean fetch votes to grow it back.
             const getDetails = (list) => mapAdaptive(list, detGov, async (row) => {
               try {
+                if (renewHold) await renewHold;   // SPEC-031: never fetch while the entity may be flipped
                 const d = await fetchDetails(SRC, SRC.rowUuid(row), { signal: currentCtrl.signal, onRate: (w, isRate) => { if (isRate) detGov.slow(); rate(w); } });
                 detGov.ok();
                 return { ok: { search: SRC.rowSearch(row), detail: d } };

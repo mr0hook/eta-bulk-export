@@ -19,7 +19,20 @@ single origin bg.js is allowed to fetch, and manifest.json's host_permissions. A
 up in `git status` (manifest.json changes) and `package-ext.mjs` refuses to zip one.
 
 ## NEXT ACTION
-→ 2026-08-20 ~00:50, SPEC-029 + SPEC-030 BUILT (v0.10.0), four user directives in one pass:
+→ 2026-08-20 ~01:15, SPEC-031 BUILT (v0.11.0) — the "is the 15-min refresh necessary?" answer:
+  NO for the part that was ours. ETA's ~15-min token TTL is theirs and harmless (the portal SPA
+  self-renews while a tab is open — orchestrator.js:40, field-proven). What was ours was SPEC-009's
+  30-MIN FORCED TAB BOOT, which re-runs OIDC and lets the portal re-select the login's default
+  entity — THE flip vector, and why flips track working hours and never happen at 4am. Retired.
+  Now: (a) the warm is issued FIRST-PARTY from the page (carries the SameSite cookie the
+  service-worker warm could not), (b) an ADVANCING token expiry is proof the session is alive, so
+  a tab boots ONLY when the portal stops renewing and the token runs down (<10 min), (c) during
+  any renewal every document fetch is HELD and the entity re-pinned before release, so no request
+  can go out under the wrong company. T-071 rewritten, T-267..T-269; 397/397.
+  USER MUST: reload the unpacked extension (v0.11.0). Expect ZERO background tabs on a healthy run
+  and a "🔄 The portal refreshed the session token by itself" line instead.
+
+→ Previous (2026-08-20 ~00:50), SPEC-029 + SPEC-030 BUILT (v0.10.0), four user directives:
   (1) 10k CHUNKS RESTORED — orchestrator now processes chunks in 2,000-doc batches (details →
   pdfs → refs → rows → parts per batch, raw JSON dropped; serialBase keeps مسلسل continuous;
   ≤2,000-doc chunks keep the old single-pass path bit-for-bit). capReceived REMOVED from the
