@@ -19,7 +19,15 @@ single origin bg.js is allowed to fetch, and manifest.json's host_permissions. A
 up in `git status` (manifest.json changes) and `package-ext.mjs` refuses to zip one.
 
 ## NEXT ACTION
-→ 2026-08-19 03:00: v0.6.3 committed after the live 4M-doc run surfaced the ENTITY-SWITCH class
+→ 2026-08-19 ~17:30, SPEC-025 (v0.7.1): the live Sales run's details phase hit a portal 429 storm
+  (fixed 40-worker pool; 77 rate-hits in an 81s monitor window; drawer stuck in "Rate-limited (429)
+  — waiting" loops; NOT an entity flip — searches returned rows and details returned 200 whenever
+  admitted). Details concurrency is now an AIMD governor (start 12, halve on 429 with floor 3 and
+  10s growth freeze, +1 per 25 clean fetches, ceiling at the old 40/30). USER MUST: reload the
+  unpacked extension (dist/ rebuilt at v0.7.1), then Resume the paused Sales run — the current
+  chunk refetches and the pool self-tunes to whatever the portal allows today.
+
+→ Previous (2026-08-19 03:00): v0.6.3 committed after the live 4M-doc run surfaced the ENTITY-SWITCH class
   of failure (one login, several entities EACH WITH ITS OWN RIN; a cold portal load re-auths and
   can flip the active entity for every tab → empty searches + per-doc 403s. The per-chunk RIN
   guard passed because the switched-to entity was ALSO registered on the account — it checked
@@ -162,12 +170,23 @@ because every other phase adds code to the file it breaks up.
 - (resolved) refreshLicense ungated-branch rj-scan gap — fixed in F-06.
 
 ## Session log
+- 2026-08-19 · SPEC-025 adaptive details concurrency BUILT + shipped as v0.7.1. The monitored
+  Sales run (13 chunks / 66,719 rows) proved the fixed CONC=40 details pool draws a 429 storm:
+  all 40 workers stall on each wave, then stampede back in lockstep. Now an AIMD governor
+  (makeGovernor + mapAdaptive in client.js, wired in orchestrator's getDetails): 429 → halve
+  (floor 3) + 10s growth freeze; 25 clean fetches → +1; old CONC values are the ceiling. apiGet/
+  apiGetBlob mark real 429s via onRate's second arg so network blips never shrink the pool.
+  T-254..T-256 (+T-255b); suite 385/385; dist rebuilt. Diagnosis note for posterity: the user
+  suspected an entity flip — the monitor disproved it in one screenshot (rows flowing, details
+  200 in ~250ms when admitted, no 403s/empty searches; the drawer was in a rate-limit wait).
+  New-test numbering starts at T-250: T-24x was already taken (v0.6.4 deadlines T-240, SPEC-023
+  pinning T-241..T-244) — SPEC-024's tests renumbered T-250..T-253 before commit.
 - 2026-08-19 · SPEC-024 chunk coalescing BUILT (server + reference chunker + tests; no extension
   code shipped, so no version bump — dist/ is byte-unchanged). Driver: the live 8M-doc probe showed
   "4 chunks one day, 1 chunk the next" — bisection's ~50–60% average fill. Adjacent un-warned
   chunks now merge greedily up to floor(cap·0.9) (plain with plain; sub only inside one issuance
   window), streaming at emit() server-side so the cursor ALSO shrinks during planning, post-pass
-  fold in chunker.js — planner.test proves the two forms identical (T-240..T-243; T-147 re-pinned
+  fold in chunker.js — planner.test proves the two forms identical (T-250..T-253; T-147 re-pinned
   with non-mergeable leaves; smoke's synthetic windows raised 100→9500 to deliberately keep its
   2-chunk plumbing checks). Suite 381/381 + SMOKE OK. NOT DEPLOYED.
   Live ETA telemetry captured during the same probe (monitor tab, ~38 min): /documents/search is

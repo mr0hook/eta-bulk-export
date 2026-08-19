@@ -69,7 +69,7 @@ export async function apiGet(url, { attempts = 7, signal, onRate, timeoutMs = RE
         const ra = parseInt(r.headers?.get?.('Retry-After') || '', 10);
         const base = Number.isFinite(ra) && ra >= 0 ? ra * 1000 : 5000 * 2 ** i;   // ignore negative/garbage Retry-After; 0 = retry now
         const w = Math.min(base, MAX_BACKOFF) + Math.floor(Math.random() * 1000);
-        lastErr = coded('RATE_LIMIT'); onRate?.(w); await sleep(w, signal); continue;
+        lastErr = coded('RATE_LIMIT'); onRate?.(w, true); await sleep(w, signal); continue;   // true = real 429 (SPEC-025: feeds the governor)
       }
       if (!r.ok) { lastErr = new Error('HTTP ' + r.status); await sleep(1500 * (i + 1) + Math.floor(Math.random() * 500), signal); continue; }
       return await r.json();
@@ -132,7 +132,7 @@ export async function apiGetBlob(url, { attempts = 5, signal, onRate, timeoutMs 
         const ra = parseInt(r.headers?.get?.('Retry-After') || '', 10);
         const base = Number.isFinite(ra) && ra >= 0 ? ra * 1000 : 5000 * 2 ** i;
         const w = Math.min(base, MAX_BACKOFF) + Math.floor(Math.random() * 1000);
-        lastErr = coded('RATE_LIMIT'); onRate?.(w); await sleep(w, signal); continue;
+        lastErr = coded('RATE_LIMIT'); onRate?.(w, true); await sleep(w, signal); continue;   // true = real 429 (SPEC-025)
       }
       if (!r.ok) { lastErr = new Error('HTTP ' + r.status); await sleep(1500 * (i + 1) + Math.floor(Math.random() * 500), signal); continue; }
       const blob = await r.blob();
@@ -181,4 +181,40 @@ export async function mapLimit(items, limit, fn) {
   });
   await Promise.all(workers);
   return out;
+}
+
+// SPEC-025 — AIMD concurrency governor for the details phase. The portal's rate ceiling is opaque
+// and moves with its load (this session: 40 workers drew a 429 storm; the sequential search lane
+// never drew one), so the limit is DISCOVERED, TCP-style: any real 429 halves it and freezes
+// growth for a cool-down; every `rise` consecutive successes grow it by 1 back up to the old
+// static maximum. One governor lives for a whole run — chunk 13 keeps what chunk 1 learned.
+export function makeGovernor({ start = 12, min = 3, max = 40, rise = 25, cooldownMs = 10000, now = Date.now } = {}) {
+  let limit = Math.max(min, Math.min(start, max)), streak = 0, coolUntil = 0;
+  return {
+    limit: () => limit,
+    ok() { if (now() < coolUntil || limit >= max) { streak = 0; return; } if (++streak >= rise) { limit++; streak = 0; } },
+    slow() { limit = Math.max(min, Math.floor(limit / 2)); streak = 0; coolUntil = now() + cooldownMs; },
+  };
+}
+
+// mapLimit with a live limit: the pump starts work while active < gov.limit(), so a shrink simply
+// stops new spawns (the surplus drains as fetches finish) and growth takes effect on the next
+// completion. Same contract as mapLimit otherwise — ordered results, first rejection wins.
+export function mapAdaptive(items, gov, fn) {
+  const out = new Array(items.length);
+  let i = 0, active = 0, rejected = false;
+  return new Promise((resolve, reject) => {
+    const pump = () => {
+      if (rejected) return;
+      if (i >= items.length && active === 0) return resolve(out);
+      while (!rejected && active < gov.limit() && i < items.length) {
+        const idx = i++; active++;
+        Promise.resolve(fn(items[idx], idx)).then(
+          (r) => { out[idx] = r; active--; pump(); },
+          (e) => { if (!rejected) { rejected = true; reject(e); } },
+        );
+      }
+    };
+    pump();
+  });
 }

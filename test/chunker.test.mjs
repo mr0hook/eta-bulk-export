@@ -104,7 +104,7 @@ test('sub-split: detectMaxSub returning null degrades to a warned single-day chu
 });
 
 // ── SPEC-024: the coalescing fold, unit-level ───────────────────────────────────────────────────
-test('T-243 coalesce: merges runs of small plain chunks up to 90% of cap, greedily and only there', () => {
+test('T-253 coalesce: merges runs of small plain chunks up to 90% of cap, greedily and only there', () => {
   const P = (from, to, count, warn) => ({
     id: `${from}_${to}`, fromISO: `${from}T00:00:00.000Z`, toISO: `${to}T21:59:59.999Z`,
     subF: undefined, subT: undefined, label: from, count, warn: warn || null,

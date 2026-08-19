@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 // getToken() (imported transitively) reads localStorage; give it a token so apiGet reaches fetch.
 globalThis.localStorage = { getItem: (k) => (k === 'USER_DATA' ? JSON.stringify({ access_token: 'tok' }) : null) };
 
-const { apiGet, apiGetBlob, fetchPdf, probeCount, fetchAllRows, fetchDetails } = await import('../src/api/client.js');
+const { apiGet, apiGetBlob, fetchPdf, probeCount, fetchAllRows, fetchDetails, makeGovernor, mapAdaptive } = await import('../src/api/client.js');
 const { SOURCES, API_ORIGIN } = await import('../src/api/sources.js');
 const INV = SOURCES.invoices;
 
@@ -160,6 +160,88 @@ test('fetchDetails: unwraps invoices (identity) and receipts (.receipt)', async 
   assert.equal((await fetchDetails(INV, 'x', {})).foo, 1);
   stubFetch(() => resp(200, { receipt: { uuid: 'r', bar: 2 } }));
   assert.equal((await fetchDetails(SOURCES.receipts, 'r', {})).bar, 2);
+});
+
+// ── SPEC-025: the AIMD details governor ─────────────────────────────────────────────────────────
+test('T-254 governor: halves on 429 (floor min), freezes growth for the cool-down, climbs +1 per rise, capped at max', () => {
+  let tnow = 0;
+  const g = makeGovernor({ start: 12, min: 3, max: 40, rise: 25, cooldownMs: 10000, now: () => tnow });
+  assert.equal(g.limit(), 12);
+
+  g.slow();
+  assert.equal(g.limit(), 6, 'a 429 halves the pool');
+  for (let i = 0; i < 100; i++) g.ok();
+  assert.equal(g.limit(), 6, 'successes during the cool-down must not regrow the pool');
+
+  tnow = 10001;
+  for (let i = 0; i < 24; i++) g.ok();
+  assert.equal(g.limit(), 6, '24 successes are not yet a rise');
+  g.ok();
+  assert.equal(g.limit(), 7, 'the 25th consecutive success grows the pool by 1');
+
+  g.slow(); g.slow(); g.slow();
+  assert.equal(g.limit(), 3, 'repeated 429s bottom out at the floor, never below');
+
+  tnow = 100000;
+  const c = makeGovernor({ start: 4, min: 1, max: 5, rise: 2, cooldownMs: 0, now: () => tnow });
+  c.ok(); c.ok();
+  assert.equal(c.limit(), 5);
+  c.ok(); c.ok(); c.ok(); c.ok();
+  assert.equal(c.limit(), 5, 'the old static CONC value is the ceiling');
+});
+
+test('T-255 mapAdaptive: in-flight work tracks the live limit (shrink drains, growth re-expands), output stays ordered', async () => {
+  let limit = 4;
+  const gov = { limit: () => limit };
+  const started = []; const resolvers = [];
+  const p = mapAdaptive([...Array(12).keys()], gov, (item, idx) => new Promise((res) => {
+    started.push(idx);
+    resolvers[idx] = () => res(item * 10);
+  }));
+  const inFlight = () => started.length - resolvers.filter((r, i) => r === null && started.includes(i)).length;
+  const settle = () => new Promise((r) => setTimeout(r, 0));
+
+  await settle();
+  assert.equal(started.length, 4, 'spawns exactly the starting limit');
+
+  limit = 2;                     // portal pushed back: shrink mid-flight
+  resolvers[0](); resolvers[0] = null; await settle();
+  assert.equal(started.length, 4, 'over the new limit → the surplus drains, nothing new spawns');
+  resolvers[1](); resolvers[1] = null; await settle();
+  assert.equal(started.length, 4, 'still at 2 in flight = the new limit — no spawn');
+  resolvers[2](); resolvers[2] = null; await settle();
+  assert.equal(started.length, 5, 'dropping under the limit admits the next item');
+
+  limit = 6;                     // portal recovered: grow
+  resolvers[3](); resolvers[3] = null; await settle();
+  assert.equal(started.length, 10, 'a completion under a raised limit refills the whole pool');
+
+  for (let i = 4; i < 12; i++) { resolvers[i](); resolvers[i] = null; await settle(); }
+  const out = await p;
+  assert.deepEqual(out, [...Array(12).keys()].map((i) => i * 10), 'results keep item order whatever the limit did');
+  void inFlight;
+});
+
+test('T-255b mapAdaptive: a thrown AUTH/STOPPED rejects the batch, empty input resolves', async () => {
+  const gov = { limit: () => 3 };
+  await assert.rejects(
+    () => mapAdaptive([1, 2, 3, 4, 5], gov, async (x) => { if (x === 2) { const e = new Error('auth'); e.code = 'AUTH'; throw e; } return x; }),
+    (e) => e.code === 'AUTH');
+  assert.deepEqual(await mapAdaptive([], gov, async (x) => x), [], 'no items → resolves immediately');
+});
+
+test('T-256 apiGet marks a real 429 for the governor (onRate second arg), plain error backoff stays unmarked', async () => {
+  let n = 0; const calls = [];
+  stubFetch(() => (n++ === 0 ? resp(429, {}, { 'Retry-After': '0' }) : resp(200, { ok: 1 })));
+  await apiGet(API_ORIGIN + '/a', { onRate: (w, isRate) => calls.push([w, isRate]) });
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0][1], true, 'a 429 must carry the rate flag — it is what shrinks the details pool');
+
+  n = 0; const calls2 = [];
+  stubFetch(() => { if (n++ === 0) throw new Error('connection reset'); return resp(200, { ok: 1 }); });
+  await apiGet(API_ORIGIN + '/a', { onRate: (w, isRate) => calls2.push([w, isRate]) });
+  assert.equal(calls2.length, 1);
+  assert.notEqual(calls2[0][1], true, 'a network blip must NOT shrink the pool');
 });
 
 test('T-240 a hung request times out into the retry path — and a user abort is still STOPPED', async () => {

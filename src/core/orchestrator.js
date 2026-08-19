@@ -2,7 +2,7 @@
 // Own run loop — no dependency on the base extension's builders, subscription gate, or capture hooks.
 import { SOURCES, ALL_STATUSES } from '../api/sources.js';
 import { tokenStatus, profileStamp, profileInfo } from './token.js';
-import { buildUrl, apiGet, probeCount, fetchAllRows, fetchDetails, fetchPdf, mapLimit, switchTaxpayer } from '../api/client.js';
+import { buildUrl, apiGet, probeCount, fetchAllRows, fetchDetails, fetchPdf, mapLimit, mapAdaptive, makeGovernor, switchTaxpayer } from '../api/client.js';
 import { planViaServer, planUuidList } from './planclient.js';   // SPEC-016: the server decides where to cut; chunker.js is now test-only
 import { listKey, rinMatch, rinIdsOf } from './listinput.js';   // SPEC-022: pasted-list runs
 import { safeName } from './time.js';
@@ -22,7 +22,11 @@ import { bumpStats } from './stats.js';
 import { t } from './i18n.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+// SPEC-025: these are now the CEILING for the details governor, not a fixed pool size. A live
+// run on 2026-08-19 proved 40 fixed workers draw a portal 429 storm (77 rate-hits/81s) that
+// stalls all 40 in lockstep; the governor starts low and discovers the portal's real ceiling.
 const CONC = { invoices: 40, receipts: 30 };
+const DETAIL_START = { invoices: 12, receipts: 10 };
 const PDF_CONC = 8;   // official PDFs are larger; fetch fewer at once
 // Token handling: the portal silently renews the access token for as long as a portal tab is open
 // (overnight runs on the original tool proved this), and every request reads the CURRENT token from
@@ -251,6 +255,10 @@ export function createOrchestrator(hooks = {}) {
     const prof0 = profileInfo();   // the entity this run belongs to — stamp + TaxId, see token.js
     let restores = 0;              // SPEC-023: auto-restores this run; past 3 a human is fighting us — pause
     const droppedByChunk = new Map();   // chunkId → count; per-chunk so a chunk retry overwrites, never double-counts
+    // SPEC-025: one AIMD governor for the whole run's details phase — a 429 halves the pool
+    // (floor 3), 25 clean fetches grow it by 1 back toward the old static maximum. Run-scoped on
+    // purpose: what the portal taught us on chunk 1 is still true on chunk 13.
+    const detGov = makeGovernor({ start: DETAIL_START[SRC.key] || 10, min: 3, max: CONC[SRC.key] || 30 });
     let pdfDropped = 0;   // official-PDF fetch failures (supplementary, best-effort — never fails the chunk)
     let pdfSaved = 0;     // PDFs actually written this session (usage counter)
     // Poll localStorage for a renewed token (portal renews from its session; another portal tab shares
@@ -364,8 +372,14 @@ export function createOrchestrator(hooks = {}) {
             }
             onStatus(t('orch.chunkDetails', { i: i + 1, n: plan.chunks.length, count: rows.length }), { level: 'run' });
             let dDone = 0; const dTotal = rows.length;
-            const getDetails = (list) => mapLimit(list, CONC[SRC.key] || 30, async (row) => {
-              try { const d = await fetchDetails(SRC, SRC.rowUuid(row), { signal: currentCtrl.signal, onRate: rate }); return { ok: { search: SRC.rowSearch(row), detail: d } }; }
+            // SPEC-025: adaptive pool. A real 429 (onRate's second arg) shrinks it before the
+            // herd retries; each clean fetch votes to grow it back.
+            const getDetails = (list) => mapAdaptive(list, detGov, async (row) => {
+              try {
+                const d = await fetchDetails(SRC, SRC.rowUuid(row), { signal: currentCtrl.signal, onRate: (w, isRate) => { if (isRate) detGov.slow(); rate(w); } });
+                detGov.ok();
+                return { ok: { search: SRC.rowSearch(row), detail: d } };
+              }
               catch (e) { if (e.code === 'AUTH' || e.code === 'STOPPED') throw e; return { fail: { row, uuid: SRC.rowUuid(row), err: String(e?.message || e) } }; }
               finally { dDone++; onChunk({ i: i + 1, n: plan.chunks.length, phase: 'details', cur: Math.min(dDone, dTotal), max: dTotal }); }
             });

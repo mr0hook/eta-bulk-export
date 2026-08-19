@@ -75,14 +75,14 @@ stay unmerged, everything after merges. Gap-freedom is unaffected either way.
 
 ## Tests
 
-- T-240 (planner.test.mjs) equivalence on a merge-heavy corpus: many sparse days → multi-day
+- T-250 (planner.test.mjs) equivalence on a merge-heavy corpus: many sparse days → multi-day
   merged chunks; both impls identical; every chunk ≤ target unless it is a single unmerged leaf;
   greedy maximality (no adjacent compatible pair sums ≤ target); coverage gap-free.
-- T-241 (planner.test.mjs) pathological over-cap corpus: warned chunks stay one-per-day,
+- T-251 (planner.test.mjs) pathological over-cap corpus: warned chunks stay one-per-day,
   unmerged (extends T-151's ground).
-- T-242 (planner.test.mjs) two consecutive over-cap issuance days, both sub-split: merges stay
+- T-252 (planner.test.mjs) two consecutive over-cap issuance days, both sub-split: merges stay
   inside each day's window; cross-day sub merge never happens; both impls identical.
-- T-243 (chunker.test.mjs) fill property on the year corpus: for every adjacent compatible pair,
+- T-253 (chunker.test.mjs) fill property on the year corpus: for every adjacent compatible pair,
   `a.count + b.count > target` (greedy left nothing mergeable on the table).
 - smoke-worker.mjs planner scenario re-pinned: synthetic under-cap windows raised 100 → 9,500 so
   the two-chunk structure (deliberately) survives coalescing; totals updated.

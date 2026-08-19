@@ -109,7 +109,7 @@ test('T-137 equivalence: whole-day split across a full year', async () => {
 });
 
 // ── SPEC-024: coalescing ────────────────────────────────────────────────────────────────────────
-test('T-240 coalescing equivalence + greedy maximality on a skewed corpus (sparse year, dense hour)', async () => {
+test('T-250 coalescing equivalence + greedy maximality on a skewed corpus (sparse year, dense hour)', async () => {
   // The corpus that produces the "4 chunks one day, 1 chunk the next" complaint: deep bisection
   // around a dense cluster leaves tiny sparse fragments on its flanks. Those must merge — in BOTH
   // implementations identically — and the merge must be maximal (greedy left nothing on the table).
@@ -138,7 +138,7 @@ test('T-240 coalescing equivalence + greedy maximality on a skewed corpus (spars
   }
 });
 
-test('T-241 a warned over-cap chunk never participates in a merge, in either direction', async () => {
+test('T-251 a warned over-cap chunk never participates in a merge, in either direction', async () => {
   // A day the planner cannot split finer sits between two small days. The warn chunk must stay
   // alone — merging it would hide the over-cap surplus warning the run loop writes to
   // eta_failures.jsonl — and the small flanks must not merge THROUGH it.
@@ -162,7 +162,7 @@ test('T-241 a warned over-cap chunk never participates in a merge, in either dir
   assert.equal(mine[2].count, 40);
 });
 
-test('T-242 sub-split chunks merge only inside their own issuance window', async () => {
+test('T-252 sub-split chunks merge only inside their own issuance window', async () => {
   // Two consecutive over-cap issuance days, each sub-split by submission time into small leaves.
   // Merges must happen within each day (that is the user-visible "4 chunks for one day" fix) and
   // never across the day boundary, and both implementations must agree exactly.
