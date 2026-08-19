@@ -29,6 +29,14 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const CONC = { invoices: 40, receipts: 30 };
 const DETAIL_START = { invoices: 12, receipts: 10 };
 const PDF_CONC = 8;   // official PDFs are larger; fetch fewer at once
+// SPEC-029: a chunk is processed in document batches — raw detail JSONs never accumulate past one
+// batch (~1GB at 2,000 line-heavy received invoices, measured live 2026-08-19), so chunk size is
+// no longer bounded by tab memory and the planner's cap can stay at 10k for every direction.
+const BATCH_DOCS = 2000;
+// SPEC-030: at/above this many FORBIDDEN rows (and ≥ half the processed docs) a chunk is treated
+// as an entity-flip casualty and FAILED — never completed thin. Genuine per-document 403s
+// (intermediary/marketplace submissions) arrive in ones and fives, far under this.
+const MASS_FORBIDDEN_MIN = 25;
 // Token handling: the portal silently renews the access token for as long as a portal tab is open
 // (overnight runs on the original tool proved this), and every request reads the CURRENT token from
 // localStorage — so a token whose exp is near is normal steady state, NOT a coming failure. We
@@ -60,12 +68,31 @@ export function createOrchestrator(hooks = {}) {
   // classify without string-sniffing; kind marks high-frequency lines the run log coalesces (rate/page/probe).
   const rate = (w) => onStatus(t('orch.rateWait', { s: Math.round(w / 1000) }), { level: 'wait', kind: 'rate' });
   let dirHandle = null, running = false, currentCtrl = null, folderOk = null;
+  let pinnedProfile = null;   // SPEC-030: the entity the CURRENT run belongs to (null outside runs)
   const flags = { paused: false, halted: false };
   // SPEC-009 — keeps the portal SESSION host alive for the length of a run (see session.js). The
   // run itself only ever talks to the API host, which is exactly why the session idles out.
+  //
+  // SPEC-030 afterRenew: the renewal's background tab boots the portal SPA — a cold load that can
+  // re-select the login's DEFAULT entity server-side. That is THE flip vector: it fired at the
+  // same second as the 2026-08-19 chunk-7 flip ("session running low" + "company changed" in one
+  // log line pair). So the check happens immediately after EVERY renewal instead of waiting for
+  // the next chunk boundary to discover 403 carnage: if the stamp moved, switch straight back and
+  // re-boot once more so localStorage carries the corrected profile. Best-effort by contract.
   const session = createSessionKeeper({
     warm: () => bridgeRequest('portal-warm'),
     renew: async () => { onStatus(t('orch.sessionRenew'), { level: 'wait' }); await bridgeRequest('portal-renew'); },
+    afterRenew: async () => {
+      if (!running || !pinnedProfile?.taxId) return;
+      if (profileStamp() === pinnedProfile.stamp) return;
+      onStatus(t('orch.renewFlipped'), { level: 'wait' });
+      try {
+        if (await switchTaxpayer(pinnedProfile.taxId)) {
+          await bridgeRequest('portal-renew');   // direct (gap-exempt): re-mint under the restored entity
+          onStatus(t('orch.renewPinned'), { level: 'ok' });
+        }
+      } catch { /* the chunk-boundary restore is the enforcing layer; this one just acts sooner */ }
+    },
   });
 
   function statusPlan(sel, SRC) {
@@ -254,6 +281,7 @@ export function createOrchestrator(hooks = {}) {
     const rowsAtStart = rowsFetched;        // usage counters count only THIS session's new rows (resumes never double-count)
     flags.paused = false; flags.halted = false; let consec = 0;
     const prof0 = profileInfo();   // the entity this run belongs to — stamp + TaxId, see token.js
+    pinnedProfile = prof0;         // SPEC-030: lets afterRenew re-pin the entity the moment a renewal flips it
     let restores = 0;              // SPEC-023: auto-restores this run; past 3 a human is fighting us — pause
     const droppedByChunk = new Map();   // chunkId → count; per-chunk so a chunk retry overwrites, never double-counts
     // SPEC-025: one AIMD governor for the whole run's details phase — a 429 halves the pool
@@ -384,86 +412,135 @@ export function createOrchestrator(hooks = {}) {
               catch (e) { if (e.code === 'AUTH' || e.code === 'STOPPED') throw e; return { fail: { row, uuid: SRC.rowUuid(row), err: String(e?.message || e) } }; }
               finally { dDone++; onChunk({ i: i + 1, n: plan.chunks.length, phase: 'details', cur: Math.min(dDone, dTotal), max: dTotal }); }
             });
-            let outcomes = await getDetails(rows);
-            let records = outcomes.filter((o) => o.ok).map((o) => o.ok);
-            let failedRows = outcomes.filter((o) => o.fail).map((o) => o.fail);
-            if (failedRows.length) {   // one bounded retry pass for stragglers that outlasted apiGet's own 7 retries
-              onStatus(t('orch.detailsRetry', { count: failedRows.length, i: i + 1 }), { level: 'warn' });
-              outcomes = await getDetails(failedRows.map((f) => f.row));
-              records = records.concat(outcomes.filter((o) => o.ok).map((o) => o.ok));
-              failedRows = outcomes.filter((o) => o.fail).map((o) => o.fail);
-            }
-            // Never silently drop: a total failure fails the whole chunk (so resume retries it, no
-            // empty file). Uuid-mode exception: NOT_FOUND is a conclusive answer about a pasted id
-            // (mistyped, deleted, or another taxpayer's) — a batch of all-missing uuids is a valid
-            // outcome that lands on the Missed sheet, while any OTHER kind of total failure (API
-            // down, auth flapping) still fails the chunk so resume retries it.
-            if (failedRows.length && !records.length && (!isUuids || failedRows.some((f) => f.err !== 'NOT_FOUND'))) throw new Error(t('orch.allDetailsFailed', { count: rows.length, i: i + 1 }));
-            if (plan.downloadPdf) {   // official signed PDFs FIRST — before the xlsx exists, so an interrupted PDF
-              // phase (Pause/token-expiry) leaves no chunk file and resume re-runs the whole chunk incl. its PDFs.
-              onStatus(t('orch.chunkPdfs', { i: i + 1, n: plan.chunks.length, count: rows.length }), { level: 'run' });
-              const pdfDir = await fs.subdir(dirHandle, 'pdfs');
-              let pDone = 0;
-              const pdfFails = (await mapLimit(rows, PDF_CONC, async (row) => {
-                const uuid = SRC.rowUuid(row);
-                try { const blob = await fetchPdf(SRC, uuid, { signal: currentCtrl.signal, onRate: rate }); await fs.writeBlob(pdfDir, safeName(row.internalID || row.receiptNumber || uuid) + '.pdf', blob); return null; }
-                catch (e) { if (e.code === 'AUTH' || e.code === 'STOPPED') throw e; return { uuid, err: String(e?.message || e) }; }
-                finally { pDone++; onChunk({ i: i + 1, n: plan.chunks.length, phase: 'pdf', cur: pDone, max: rows.length }); }
-              })).filter(Boolean);
-              pdfSaved += rows.length - pdfFails.length;
-              if (pdfFails.length) {
-                pdfDropped += pdfFails.length;
-                const lines = pdfFails.map((f) => JSON.stringify({ at: new Date().toISOString(), chunk: c.id, kind: 'pdf', uuid: f.uuid, err: f.err })).join('\n') + '\n';
-                try { await fs.appendText(dirHandle, 'eta_failures.jsonl', lines); } catch {}
-                onStatus(t('orch.pdfsUnavailable', { count: pdfFails.length, i: i + 1 }), { level: 'warn' });
-              }
-            }
-            // SPEC-008: resolve each note's reference UUIDs to the original's invoice number. Free
-            // for originals already in this export; only the genuinely-missing ones cost a lookup.
-            // AUTH/STOPPED propagate into the catch below, which owns renewal and pause.
-            if (opts.refNumbers) await resolveReferenceNumbers(records, { SRC }, opts.refNumbers, {
-              signal: currentCtrl.signal, onRate: rate,
-              onLookup: (n2) => onStatus(t('orch.refLookup', { i: i + 1, n: plan.chunks.length, n2 }), { level: 'run' }),
-            });
-            onStatus(t('orch.chunkXlsx', { i: i + 1, n: plan.chunks.length, count: records.length }), { level: 'run' });
-            // SPEC-027: build rows first; a line-heavy chunk streams its details into capped part
-            // files (constant memory) and keeps only the summary in ExcelJS. Order is load-bearing:
-            // stale parts swept, parts written, summary LAST — the summary file is what
-            // scanDoneFromFolder treats as "chunk done", so a crash mid-chunk never looks complete.
-            const built = buildRows(records, plan.source, opts);
+            // Order is load-bearing (SPEC-027): stale parts swept, parts written, summary LAST —
+            // the summary file is what scanDoneFromFolder treats as "chunk done", so a crash
+            // mid-chunk never looks complete.
             const chunkName = store.chunkFile(plan, c);
             const partEsc = chunkName.replace(/\.xlsx$/i, '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
             try { for (const stale of await fs.listFiles(dirHandle, new RegExp('^' + partEsc + '_det_p\\d+\\.xlsx$', 'i'))) { try { await fs.remove(dirHandle, stale); } catch {} } } catch {}
-            let r;
-            if (built.lineRows.length > CHUNK_LINES_INLINE_MAX) {
-              const parts = await writeDetailParts(dirHandle, (pi) => store.chunkDetailFile(plan, c, pi), built);
-              onStatus(t('orch.chunkParts', { i: i + 1, parts: parts.length, count: built.lineRows.length }), { level: 'run' });
-              r = renderFromRows(window.ExcelJS, built, { includeLines: false });
+
+            // One batch of documents: details (with one bounded retry pass for stragglers that
+            // outlasted apiGet's own retries), then this batch's PDFs and reference numbers.
+            const doBatch = async (batchRows) => {
+              let outcomes = await getDetails(batchRows);
+              let records = outcomes.filter((o) => o.ok).map((o) => o.ok);
+              let failedRows = outcomes.filter((o) => o.fail).map((o) => o.fail);
+              if (failedRows.length) {
+                onStatus(t('orch.detailsRetry', { count: failedRows.length, i: i + 1 }), { level: 'warn' });
+                outcomes = await getDetails(failedRows.map((f) => f.row));
+                records = records.concat(outcomes.filter((o) => o.ok).map((o) => o.ok));
+                failedRows = outcomes.filter((o) => o.fail).map((o) => o.fail);
+              }
+              if (plan.downloadPdf) {   // official signed PDFs FIRST — before the xlsx exists, so an interrupted PDF
+                // phase (Pause/token-expiry) leaves no chunk file and resume re-runs the whole chunk incl. its PDFs.
+                onStatus(t('orch.chunkPdfs', { i: i + 1, n: plan.chunks.length, count: batchRows.length }), { level: 'run' });
+                const pdfDir = await fs.subdir(dirHandle, 'pdfs');
+                let pDone = 0;
+                const pdfFails = (await mapLimit(batchRows, PDF_CONC, async (row) => {
+                  const uuid = SRC.rowUuid(row);
+                  try { const blob = await fetchPdf(SRC, uuid, { signal: currentCtrl.signal, onRate: rate }); await fs.writeBlob(pdfDir, safeName(row.internalID || row.receiptNumber || uuid) + '.pdf', blob); return null; }
+                  catch (e) { if (e.code === 'AUTH' || e.code === 'STOPPED') throw e; return { uuid, err: String(e?.message || e) }; }
+                  finally { pDone++; onChunk({ i: i + 1, n: plan.chunks.length, phase: 'pdf', cur: pDone, max: batchRows.length }); }
+                })).filter(Boolean);
+                pdfSaved += batchRows.length - pdfFails.length;
+                if (pdfFails.length) {
+                  pdfDropped += pdfFails.length;
+                  const lines = pdfFails.map((f) => JSON.stringify({ at: new Date().toISOString(), chunk: c.id, kind: 'pdf', uuid: f.uuid, err: f.err })).join('\n') + '\n';
+                  try { await fs.appendText(dirHandle, 'eta_failures.jsonl', lines); } catch {}
+                  onStatus(t('orch.pdfsUnavailable', { count: pdfFails.length, i: i + 1 }), { level: 'warn' });
+                }
+              }
+              // SPEC-008: resolve each note's reference UUIDs to the original's invoice number. Free
+              // for originals already in this export; only the genuinely-missing ones cost a lookup.
+              // AUTH/STOPPED propagate into the catch below, which owns renewal and pause.
+              if (opts.refNumbers) await resolveReferenceNumbers(records, { SRC }, opts.refNumbers, {
+                signal: currentCtrl.signal, onRate: rate,
+                onLookup: (n2) => onStatus(t('orch.refLookup', { i: i + 1, n: plan.chunks.length, n2 }), { level: 'run' }),
+              });
+              return { records, failedRows };
+            };
+            // SPEC-030: a flood of per-document 403s is an entity flip's signature, not a property
+            // of the documents — fail the chunk so the boundary restore heals and the whole chunk
+            // refetches, instead of completing thin (2026-08-19 chunk-7: 974/1086 dropped).
+            const massForbidden = (failed, processed) => {
+              const forb = failed.filter((f) => f.err === 'FORBIDDEN').length;
+              if (forb >= MASS_FORBIDDEN_MIN && forb * 2 >= processed) throw new Error(t('orch.massForbidden', { n: forb, total: processed }));
+            };
+
+            let r, allFailed = [], written = 0;
+            if (rows.length <= BATCH_DOCS) {
+              // Single batch — the pre-SPEC-029 path, unchanged (covers uuid batches ≤500 too).
+              const { records, failedRows } = await doBatch(rows);
+              allFailed = failedRows;
+              massForbidden(allFailed, rows.length);
+              // Never silently drop: a total failure fails the whole chunk (so resume retries it, no
+              // empty file). Uuid-mode exception: NOT_FOUND is a conclusive answer about a pasted id
+              // (mistyped, deleted, or another taxpayer's) — a batch of all-missing uuids is a valid
+              // outcome that lands on the Missed sheet, while any OTHER kind of total failure (API
+              // down, auth flapping) still fails the chunk so resume retries it.
+              if (allFailed.length && !records.length && (!isUuids || allFailed.some((f) => f.err !== 'NOT_FOUND'))) throw new Error(t('orch.allDetailsFailed', { count: rows.length, i: i + 1 }));
+              onStatus(t('orch.chunkXlsx', { i: i + 1, n: plan.chunks.length, count: records.length }), { level: 'run' });
+              const built = buildRows(records, plan.source, opts);
+              written = records.length;
+              if (built.lineRows.length > CHUNK_LINES_INLINE_MAX) {
+                const parts = await writeDetailParts(dirHandle, (pi) => store.chunkDetailFile(plan, c, pi), built);
+                onStatus(t('orch.chunkParts', { i: i + 1, parts: parts.length, count: built.lineRows.length }), { level: 'run' });
+                r = renderFromRows(window.ExcelJS, built, { includeLines: false });
+              } else {
+                r = renderFromRows(window.ExcelJS, built, { includeLines: true });
+              }
             } else {
-              r = renderFromRows(window.ExcelJS, built, { includeLines: true });
+              // SPEC-029: multi-batch streaming — raw detail JSONs never accumulate past one batch
+              // (~1GB at 2,000 line-heavy docs), which is what makes the 10k cap safe again. Each
+              // batch's line rows go straight to part files; only the small summary rows are kept.
+              // Parts may carry different dynamic columns per batch — merge unions headers by name.
+              const unionCols = (into, cols) => { if (!into) return cols.slice(); const have = new Set(into.map((x) => x.key)); for (const col of cols) if (!have.has(col.key)) { into.push(col); have.add(col.key); } return into; };
+              let sumRows = [], sumCols = null, lineCols = null, cfg0 = null, partIdx = 0, processed = 0;
+              for (let b0 = 0; b0 < rows.length; b0 += BATCH_DOCS) {
+                const { records, failedRows } = await doBatch(rows.slice(b0, b0 + BATCH_DOCS));
+                allFailed.push(...failedRows);
+                processed += records.length + failedRows.length;
+                massForbidden(allFailed, processed);
+                const built = buildRows(records, plan.source, { ...opts, serialBase: written });
+                written += records.length;
+                cfg0 = built.cfg;
+                sumRows.push(...built.summaryRows);
+                sumCols = unionCols(sumCols, built.summaryCols);
+                lineCols = unionCols(lineCols, built.lineCols);
+                if (built.lineRows.length) {
+                  await writeDetailParts(dirHandle, () => store.chunkDetailFile(plan, c, ++partIdx), built);
+                  onStatus(t('orch.chunkParts', { i: i + 1, parts: partIdx, count: built.lineRows.length }), { level: 'run' });
+                }
+              }
+              if (allFailed.length && !written && (!isUuids || allFailed.some((f) => f.err !== 'NOT_FOUND'))) throw new Error(t('orch.allDetailsFailed', { count: rows.length, i: i + 1 }));
+              onStatus(t('orch.chunkXlsx', { i: i + 1, n: plan.chunks.length, count: written }), { level: 'run' });
+              r = renderFromRows(window.ExcelJS, {
+                summaryCols: sumCols || [], lineCols: lineCols || [], summaryRows: sumRows, lineRows: [],
+                cfg: cfg0 || buildRows([], plan.source, opts).cfg,
+              }, { includeLines: false });
             }
             // SPEC-022: a pasted uuid that could not be fetched must be VISIBLE in the deliverable,
             // not only in eta_failures.jsonl — a third sheet, which merge (worksheets[0]/[1]) and
             // scanDoneFromFolder both ignore by construction.
-            if (isUuids && failedRows.length) {
+            if (isUuids && allFailed.length) {
               const ws = r.workbook.addWorksheet('Missed');
               ws.addRow(['UUID', 'Error']);
-              failedRows.forEach((f) => ws.addRow([f.uuid, f.err]));
+              allFailed.forEach((f) => ws.addRow([f.uuid, f.err]));
               ws.getColumn(1).width = 30; ws.getColumn(2).width = 44;
             }
             const buf = await r.workbook.xlsx.writeBuffer();
             await fs.writeBlob(dirHandle, chunkName, new Blob([buf], { type: XLSX_MIME }));
             onChunk({ i: i + 1, n: plan.chunks.length, phase: 'write', cur: 1, max: 1 });
-            if (failedRows.length) {
+            if (allFailed.length) {
               // The xlsx file now exists, so resume() (via scanDoneFromFolder) would count this chunk as
               // done. Record the dropped documents DURABLY first; if the log can't be written (e.g. the
               // user has eta_failures.jsonl open and it's locked), delete the chunk file and fail the
               // chunk so resume retries the whole thing — nothing vanishes silently.
-              const lines = failedRows.map((f) => JSON.stringify({ at: new Date().toISOString(), chunk: c.id, source: plan.source, uuid: f.uuid, err: f.err })).join('\n') + '\n';
+              const lines = allFailed.map((f) => JSON.stringify({ at: new Date().toISOString(), chunk: c.id, source: plan.source, uuid: f.uuid, err: f.err })).join('\n') + '\n';
               try { await fs.appendText(dirHandle, 'eta_failures.jsonl', lines); }
-              catch (logErr) { try { await fs.remove(dirHandle, chunkName); } catch {} throw new Error(t('orch.dropLogFailed', { count: failedRows.length, msg: String(logErr?.message || logErr) })); }
-              droppedByChunk.set(c.id, failedRows.length);
-              onStatus(t('orch.docsDropped', { count: failedRows.length, i: i + 1, written: records.length, total: rows.length }), { level: 'warn' });
+              catch (logErr) { try { await fs.remove(dirHandle, chunkName); } catch {} throw new Error(t('orch.dropLogFailed', { count: allFailed.length, msg: String(logErr?.message || logErr) })); }
+              droppedByChunk.set(c.id, allFailed.length);
+              onStatus(t('orch.docsDropped', { count: allFailed.length, i: i + 1, written, total: rows.length }), { level: 'warn' });
             }
             rowsFetched += rows.length; onCount(rowsFetched, plan.totalRows);
             ok = true; consec = 0;
@@ -523,7 +600,7 @@ export function createOrchestrator(hooks = {}) {
       // JOB_STATE maps this to 'merging', which is the honest state: the output does not exist yet.
       await mark(plan, complete ? 'done' : 'incomplete');
     } finally {
-      running = false; keepalive.stop(); session.stop();
+      running = false; pinnedProfile = null; keepalive.stop(); session.stop();
       // Every terminal path returns from inside the loop, so the last lines — including the halt or
       // pause reason a user reads the next morning — only reach disk because of this flush.
       try { await fLog?.flush(); } catch {}

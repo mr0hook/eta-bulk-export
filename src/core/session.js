@@ -26,7 +26,7 @@ export const RENEW_MIN_GAP_MS = 5 * 60 * 1000;  // never churn tabs faster than 
 export const RENEW_EVERY_MS = 30 * 60 * 1000;
 
 export function createSessionKeeper({
-  warm, renew,
+  warm, renew, afterRenew,
   status = tokenStatus,
   onStatus = () => {},
   now = Date.now,
@@ -41,7 +41,11 @@ export function createSessionKeeper({
   async function renewNow() {
     if (now() - lastRenew < RENEW_MIN_GAP_MS) return false;
     lastRenew = sinceRenew = now();
-    try { await renew?.(); return true; } catch { return false; }
+    try { await renew?.(); } catch { return false; }
+    // SPEC-030: the renewal's SPA boot is the entity-flip vector on multi-entity logins — give the
+    // owner a hook to verify/re-pin the active company IMMEDIATELY, not at the next chunk boundary.
+    try { await afterRenew?.(); } catch { /* best-effort: pinning must never break a renewal */ }
+    return true;
   }
 
   async function tick() {

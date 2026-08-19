@@ -20,14 +20,13 @@ import { stampJobs } from '../users.js';
 // Mirrors SOURCES in the extension (src/api/sources.js). Held server-side so a client cannot raise
 // its own cap and have the planner accept oversized chunks.
 //
-// SPEC-026: capReceived — a LOWER cap when the run's direction includes received documents.
-// Measured live 2026-08-19: a Purchases (Received) invoice retains ~540KB of heap during a chunk
-// (line-heavy supplier documents), so a 9.5k-doc chunk needs ~5GB and kills the tab (Chrome's
-// per-tab ceiling is ~4GB; the user saw "Invalid array length" and Aw-Snap crashes). 2,000 docs
-// peaks ~1.1GB + render headroom. Sales (Sent) documents are several times lighter — they keep
-// the full cap. Applied to dir 'Received' AND 'all' (an 'all' run contains received docs too).
+// SPEC-026 (superseded by SPEC-029): capReceived briefly lowered Received-direction chunks to
+// 2,000 docs because a chunk's raw detail JSONs were held whole (~540KB per line-heavy received
+// invoice → a 9.5k chunk needed ~5GB and killed the tab). The extension now processes chunks in
+// 2,000-doc batches (v0.10.0), so memory no longer depends on chunk size and every direction
+// plans at the full cap again. capFor stays as the hook should a per-direction cap ever return.
 const SOURCES = {
-  invoices: { cap: 10000, capReceived: 2000, granular: ['Submission'], subSplit: true, fields: ['Issue', 'Submission'] },
+  invoices: { cap: 10000, granular: ['Submission'], subSplit: true, fields: ['Issue', 'Submission'] },
   receipts: { cap: 3000, granular: ['DateTimeReceived'], subSplit: false, fields: ['DateTimeReceived', 'DateTimeIssued'] },
 };
 const capFor = (src, dir) => (src.capReceived && dir !== 'Sent' ? src.capReceived : src.cap);

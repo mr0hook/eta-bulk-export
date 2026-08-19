@@ -19,7 +19,22 @@ single origin bg.js is allowed to fetch, and manifest.json's host_permissions. A
 up in `git status` (manifest.json changes) and `package-ext.mjs` refuses to zip one.
 
 ## NEXT ACTION
-→ 2026-08-19 ~23:45, PHANTOM-PAUSE FIX (v0.9.1): the live Purchases run "paused itself" three
+→ 2026-08-20 ~00:50, SPEC-029 + SPEC-030 BUILT (v0.10.0), four user directives in one pass:
+  (1) 10k CHUNKS RESTORED — orchestrator now processes chunks in 2,000-doc batches (details →
+  pdfs → refs → rows → parts per batch, raw JSON dropped; serialBase keeps مسلسل continuous;
+  ≤2,000-doc chunks keep the old single-pass path bit-for-bit). capReceived REMOVED from the
+  worker (SPEC-026 superseded; smoke T-257 re-pinned to the revert).
+  (2) Random pauses: fixed in v0.9.1 (phantom STOPPED from mid-body deadline aborts).
+  (3) Company flips: ROOT-CAUSED — SPEC-009's renewal tab boot re-selects the login's default
+  entity server-side (flip + "session running low" in the same log second). Now: afterRenew hook
+  re-pins the entity seconds after every renewal, and a mass-403 chunk (≥25 FORBIDDEN, ≥half)
+  FAILS instead of completing thin (chunk-7 class). T-264..T-266; suite 394/394; SMOKE OK.
+  USER MUST: (a) `cd lead-worker && npm run deploy:prod` (cap revert; agent is permission-blocked
+  from deploys), (b) reload the unpacked extension (v0.10.0), (c) plans made under the 2k cap
+  keep working (batching is orthogonal); NEW plans cut 10k chunks again.
+  Chunk-7's 974 flip-era UUIDs: run finishes → "⟳ Load failed UUIDs" → Start.
+
+→ Previous (2026-08-19 ~23:45), PHANTOM-PAUSE FIX (v0.9.1): the live Purchases run "paused itself" three
   times mid-details with NO 'Pausing…' line (23:13:05, 23:16:16, 23:25:59). Root cause: the
   v0.6.4 request deadline firing MID-BODY (r.json() on a slow stream under 40-deep details)
   rejects with plain AbortError — not TimeoutError — and apiGet's `e.name === 'AbortError'`

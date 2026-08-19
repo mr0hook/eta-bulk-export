@@ -162,7 +162,7 @@ function buildInvoices(records, options, cfg) {
   if (S.some((o) => o.ePaymentNumber)) sumCols.push({ key: 'ePaymentNumber', header: 'رقم المدفوعة', width: 15 });
 
   const summaryRows = [], lineRows = [];
-  let serial = 0;
+  let serial = options.serialBase || 0;   // SPEC-029: batches of one chunk keep one continuous index
   for (const o of S) {
     serial++;   // always emit the summary row — a lineless/odd detail must NOT silently vanish (receipts already do this)
     // A credit note reverses value: EVERY figure it carries exports negative, so a plain SUM()
@@ -267,7 +267,7 @@ function buildReceipts(records, options, cfg) {
   }
 
   const summaryRows = [], lineRows = [];
-  let serial = 0;
+  let serial = options.serialBase || 0;   // SPEC-029: batches of one chunk keep one continuous index
   for (const r of recs) {
     const g = r.detail; serial++;
     const row = {

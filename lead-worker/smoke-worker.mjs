@@ -439,11 +439,11 @@ try {
   const otherPlan = await (await signed('/job/plan', { jobId: s0.jobId }, reg.clientKey, 'dev-1')).json();
   check("another device cannot read this job's plan", otherPlan.ok !== true);
 
-  // ── T-257 (SPEC-026): direction-aware cap ─────────────────────────────────────────────────────
-  // 5,000 docs in one window is a legal single chunk for a Sent plan (cap 10,000) but OVER CAP for
-  // a Received plan (cap 2,000) — measured live: received invoices are line-heavy and a 9.5k-doc
-  // chunk OOMs the tab. Narrow (≤2-day) windows report 1,600: under the received cap, and two of
-  // them (3,200) exceed the coalescing target floor(2000*0.9)=1800, so merges cannot re-breach it.
+  // ── T-257 (SPEC-026 → SPEC-029): the direction-aware cap is RETIRED ──────────────────────────
+  // SPEC-026 planned Received chunks at 2,000 while the extension held a whole chunk's raw JSON;
+  // SPEC-029's batched pipeline removed that bound, so BOTH directions plan a 5,000-doc window as
+  // one full-cap chunk again. This pins the revert — if capReceived ever comes back deliberately,
+  // repoint these two checks at the new contract.
   const drivePlan = async (body, probeOf) => {
     const st0 = await (await signed('/plan/start', body, PK, PD)).json();
     if (!st0.ok) return { start: st0 };
@@ -463,8 +463,8 @@ try {
   check('T-257 a Sent plan keeps the full 10k cap (5,000-doc window = one chunk)',
     !!sentPlan.fin && sentPlan.fin.chunks.length === 1 && sentPlan.fin.chunks[0].count === 5000);
   const recvPlan = await drivePlan({ ...dirRange, dir: 'Received' }, dirProbe);
-  check('T-257 a Received plan splits at the 2,000 cap and every chunk stays under it',
-    !!recvPlan.fin && recvPlan.fin.chunks.length > 1 && recvPlan.fin.chunks.every((c) => c.count < 2000 && !c.warn));
+  check('T-257 a Received plan uses the same full cap (SPEC-026 retired by SPEC-029)',
+    !!recvPlan.fin && recvPlan.fin.chunks.length === 1 && recvPlan.fin.chunks[0].count === 5000);
   // Drop the two T-257 jobs from the mock store so the job-count/resumable/quota checks below
   // keep seeing exactly the fixture jobs they were written against (same pattern as the uuid
   // scenario's chunk cleanup above).
