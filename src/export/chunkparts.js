@@ -1,51 +1,103 @@
-// SPEC-027 — split-chunk detail parts. A chunk whose line rows would OOM ExcelJS's object model
-// (~KBs of heap per row; "Invalid array length"/Aw-Snap at creation, and the same again when merge
-// reads the file back) streams them instead into single-sheet part files of ≤ PART_ROW_CAP rows
-// via the SPEC-014 writer (constant memory at any size). An invoice's lines never straddle two
-// parts — merge joins lines to summaries within one file set member, so the whole invoice must
-// stay together (the same rule mergeout's rotator enforces on the COMBINED side).
+// SPEC-027 / SPEC-032 — detail rows for one chunk.
+//
+// A chunk file is INTERMEDIATE: merge reads it back and produces the COMBINED deliverables, which
+// roll at Excel's own 1,048,576-row sheet limit (mergeout.ROW_CAP). So the caps here are not about
+// what Excel can hold — they are about what can be WRITTEN and READ BACK without OOMing the tab:
+//
+//   • writing: the vendored browser ExcelJS keeps ~KBs of object model per row, so a big lines
+//     sheet cannot go through it. The SPEC-014 streaming writer used below is flat-memory instead.
+//   • reading: merge Phase 1 loads each chunk file THROUGH ExcelJS (fidelity, header union, dedup).
+//     F-10 measured ~9.5KB heap/row there: 72k rows peaks ~950MB and passes, 90k OOMs. That read
+//     back — not Excel — is what bounds a part at PART_ROW_CAP.
+//
+// SPEC-032: split only when a chunk genuinely needs it. Rows are held in memory while the chunk
+// still fits in ONE file, so an ordinary chunk (even a 10,000-document one) writes a single
+// workbook exactly as it always did; a chunk that outgrows the inline budget spills to part files
+// and rolls only at the read-back cap. An invoice's lines never straddle two parts — merge joins
+// lines to their summary row within one file.
 import { createXlsxWriter } from './xlsxstream.js';
 import { clean } from './sanitize.js';
 
-// Above this, the single-workbook path is left alone: every Sales chunk observed lives well under
-// it, so the common case stays byte-identical to pre-SPEC-027 output.
+// Held in memory (plain row objects, ~tens of MB at this size) while the chunk may still be one
+// file. Crossing it is what starts a part file, NOT a batch boundary.
 export const CHUNK_LINES_INLINE_MAX = 30000;
-// The envelope F-10 proved safe for ExcelJS to LOAD back — merge reads each part through ExcelJS,
-// so the write-side cap must respect the read side's memory, not Excel's 1M-row sheet limit.
+// The envelope merge's ExcelJS read-back tolerates — see the note above.
 export const PART_ROW_CAP = 60000;
 
-/**
- * Write built.lineRows into capped part files. `nameOf(i)` supplies the 1-based part filename.
- * Returns the part names in order. Values pass through sanitize.clean() so parts get the same
- * noncharacter/lone-surrogate scrub the ExcelJS path applies via cleanRow().
- */
-export async function writeDetailParts(dirHandle, nameOf, built, { rowCap = PART_ROW_CAP } = {}) {
-  const cols = built.lineCols;
-  const header = cols.map((c) => String(c.header ?? c.key));
-  const rows = built.lineRows;
-  // Per-invoice runs: line rows are built contiguously per document, keyed by uuid.
+const headerOf = (cols) => cols.map((c) => String(c.header ?? c.key));
+const valueOf = (row, col) => { const v = row[col.key]; return typeof v === 'string' ? clean(v) : (v ?? ''); };
+// Contiguous runs of one document's line rows (buildRows emits them together, keyed by uuid).
+function runsOf(rows) {
   const runs = [];
   for (let i = 0; i < rows.length;) {
     let j = i + 1;
     while (j < rows.length && rows[j].uuid === rows[i].uuid) j++;
     runs.push([i, j]); i = j;
   }
-  const val = (r, c) => { const v = r[c.key]; return typeof v === 'string' ? clean(v) : (v ?? ''); };
+  return runs;
+}
+function unionCols(into, add) {
+  if (!into) return add.slice();
+  const have = new Set(into.map((c) => c.key));
+  for (const c of add) if (!have.has(c.key)) { into.push(c); have.add(c.key); }
+  return into;
+}
 
-  const out = [];
-  let w = null, wRows = 0;
-  const open = async () => {
-    const name = nameOf(out.length + 1);
-    out.push(name);
-    w = await createXlsxWriter(dirHandle, name, { sheetName: built.cfg.lineSheet, header, rtl: true });
-    wRows = 0;
+/**
+ * Collect a chunk's line rows across however many batches, then either hand them back to be
+ * written inline (one file) or report the part files they were streamed into.
+ *
+ * add(built) — one batch's buildRows() output.  finish() — { mode:'inline', rows, cols }
+ *                                                        | { mode:'parts', parts, cols }
+ */
+export function createDetailSink(dirHandle, nameOf, { inlineMax = CHUNK_LINES_INLINE_MAX, rowCap = PART_ROW_CAP } = {}) {
+  let held = [], cols = null, sheetName = 'Details', spilled = false;
+  const parts = [];
+  let writer = null, writerCols = null, writerRows = 0;
+
+  const openPart = async () => {
+    // The header is fixed when a part opens. Later batches may introduce new dynamic columns, so
+    // rows are always written against THIS part's own column list — never a later, wider one, which
+    // would shift every value one column right. Merge unions the parts' headers by name.
+    writerCols = cols.slice();
+    const name = nameOf(parts.length + 1);
+    parts.push(name);
+    writer = await createXlsxWriter(dirHandle, name, { sheetName, header: headerOf(writerCols), rtl: true });
+    writerRows = 0;
   };
-  for (const [a, b] of runs) {
-    const n = b - a;
-    if (!w || (wRows > 0 && wRows + n > rowCap)) { if (w) await w.close(); await open(); }
-    for (let i = a; i < b; i++) await w.addRow(cols.map((c) => val(rows[i], c)));
-    wRows += n;
-  }
-  if (w) await w.close();
-  return out;
+  const writeRows = async (rows) => {
+    for (const [a, b] of runsOf(rows)) {
+      const n = b - a;
+      if (!writer || (writerRows > 0 && writerRows + n > rowCap)) { if (writer) await writer.close(); await openPart(); }
+      for (let i = a; i < b; i++) await writer.addRow(writerCols.map((c) => valueOf(rows[i], c)));
+      writerRows += n;
+    }
+  };
+
+  return {
+    get spilled() { return spilled; },
+    async add(built) {
+      cols = unionCols(cols, built.lineCols);
+      if (built.cfg?.lineSheet) sheetName = built.cfg.lineSheet;
+      if (!built.lineRows.length) return;
+      if (spilled) { await writeRows(built.lineRows); return; }
+      held.push(...built.lineRows);
+      if (held.length <= inlineMax) return;
+      spilled = true;                     // outgrew one file — flush what is held, then stream
+      const flush = held; held = [];
+      await writeRows(flush);
+    },
+    async finish() {
+      if (!spilled) return { mode: 'inline', rows: held, cols: cols || [] };
+      if (writer) { await writer.close(); writer = null; }
+      return { mode: 'parts', parts, cols: cols || [] };
+    },
+  };
+}
+
+/** Write one batch of built rows straight to part files. Kept for direct/unit use. */
+export async function writeDetailParts(dirHandle, nameOf, built, { rowCap = PART_ROW_CAP } = {}) {
+  const sink = createDetailSink(dirHandle, nameOf, { inlineMax: 0, rowCap });
+  await sink.add(built);
+  return (await sink.finish()).parts;
 }

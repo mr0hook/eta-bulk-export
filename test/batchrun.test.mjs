@@ -77,26 +77,26 @@ test('T-264 buildRows serialBase: batches of one chunk keep one continuous index
   assert.equal(buildRows(recs, 'invoices', {}).summaryRows[0].index, 1, 'no base → unchanged');
 });
 
-test('T-265 a 4,500-doc chunk streams three batches into part files with one continuous serial', async () => {
+test('T-265 a 4,500-doc chunk spans three batches but still lands in ONE file (SPEC-032)', async () => {
+  // The batching exists for MEMORY (raw JSON never accumulates past one batch); it must not
+  // fragment the output. 4,500 line rows is far under the inline budget, so this chunk writes one
+  // workbook with real line rows — exactly what a pre-batching run produced.
   setToken();
   stubPagedFetch(4500);
   const dir = fakeDir();
   await run(dir, mkPlan(4500));
 
-  const parts = [...dir.files.keys()].filter((n) => /_det_p\d+\.xlsx$/i.test(n)).sort();
-  assert.equal(parts.length, 3, 'one part per 2,000-doc batch (2000/2000/500)');
-  let lineTotal = 0;
-  for (const p of parts) lineTotal += (await loadSheet(dir, p)).actualRowCount - 1;
-  assert.equal(lineTotal, 4500, 'every document\'s line row landed in a part (1 line each)');
+  assert.equal([...dir.files.keys()].filter((n) => /_det_p\d+\.xlsx$/i.test(n)).length, 0,
+    'no part files: a batch boundary is not a reason to split a file');
 
-  const summaryName = [...dir.files.keys()].find((n) => n.endsWith('.xlsx') && !/_det_p\d+/.test(n));
-  assert.ok(summaryName, 'the summary workbook exists under the chunk name');
+  const summaryName = [...dir.files.keys()].find((n) => n.endsWith('.xlsx'));
+  assert.ok(summaryName, 'the chunk workbook exists');
   const s0 = await loadSheet(dir, summaryName, 0);
   assert.equal(s0.actualRowCount - 1, 4500, 'all summary rows in one sheet');
   assert.equal(s0.getRow(2).values[1], 1, 'serial starts at 1');
   assert.equal(s0.getRow(4501).values[1], 4500, 'serial is continuous across batches');
   const s1 = await loadSheet(dir, summaryName, 1);
-  assert.equal(s1.actualRowCount, 1, 'the summary workbook\'s lines sheet is header-only');
+  assert.equal(s1.actualRowCount - 1, 4500, 'the lines sheet holds every line row inline');
 
   assert.deepEqual(progress(dir).doneIds, ['c1'], 'the chunk completed');
   assert.ok(![...dir.files.keys()].some((n) => n === 'eta_failures.jsonl'), 'no documents were dropped');

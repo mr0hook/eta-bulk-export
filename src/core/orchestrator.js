@@ -7,7 +7,7 @@ import { planViaServer, planUuidList } from './planclient.js';   // SPEC-016: th
 import { listKey, rinMatch, rinIdsOf } from './listinput.js';   // SPEC-022: pasted-list runs
 import { safeName } from './time.js';
 import { buildRows, renderFromRows, XLSX_MIME } from '../export/xlsx.js';
-import { writeDetailParts, CHUNK_LINES_INLINE_MAX } from '../export/chunkparts.js';   // SPEC-027
+import { createDetailSink } from '../export/chunkparts.js';   // SPEC-027/032
 import { refreshMapping } from '../export/mapsync.js';   // SPEC-021: column mapping served by the worker, bundled fallback
 import { resolveReferenceNumbers } from './refs.js';
 import * as store from './store.js';
@@ -492,58 +492,40 @@ export function createOrchestrator(hooks = {}) {
               if (forb >= MASS_FORBIDDEN_MIN && forb * 2 >= processed) throw new Error(t('orch.massForbidden', { n: forb, total: processed }));
             };
 
-            let r, allFailed = [], written = 0;
-            if (rows.length <= BATCH_DOCS) {
-              // Single batch — the pre-SPEC-029 path, unchanged (covers uuid batches ≤500 too).
-              const { records, failedRows } = await doBatch(rows);
-              allFailed = failedRows;
-              massForbidden(allFailed, rows.length);
-              // Never silently drop: a total failure fails the whole chunk (so resume retries it, no
-              // empty file). Uuid-mode exception: NOT_FOUND is a conclusive answer about a pasted id
-              // (mistyped, deleted, or another taxpayer's) — a batch of all-missing uuids is a valid
-              // outcome that lands on the Missed sheet, while any OTHER kind of total failure (API
-              // down, auth flapping) still fails the chunk so resume retries it.
-              if (allFailed.length && !records.length && (!isUuids || allFailed.some((f) => f.err !== 'NOT_FOUND'))) throw new Error(t('orch.allDetailsFailed', { count: rows.length, i: i + 1 }));
-              onStatus(t('orch.chunkXlsx', { i: i + 1, n: plan.chunks.length, count: records.length }), { level: 'run' });
-              const built = buildRows(records, plan.source, opts);
-              written = records.length;
-              if (built.lineRows.length > CHUNK_LINES_INLINE_MAX) {
-                const parts = await writeDetailParts(dirHandle, (pi) => store.chunkDetailFile(plan, c, pi), built);
-                onStatus(t('orch.chunkParts', { i: i + 1, parts: parts.length, count: built.lineRows.length }), { level: 'run' });
-                r = renderFromRows(window.ExcelJS, built, { includeLines: false });
-              } else {
-                r = renderFromRows(window.ExcelJS, built, { includeLines: true });
-              }
-            } else {
-              // SPEC-029: multi-batch streaming — raw detail JSONs never accumulate past one batch
-              // (~1GB at 2,000 line-heavy docs), which is what makes the 10k cap safe again. Each
-              // batch's line rows go straight to part files; only the small summary rows are kept.
-              // Parts may carry different dynamic columns per batch — merge unions headers by name.
-              const unionCols = (into, cols) => { if (!into) return cols.slice(); const have = new Set(into.map((x) => x.key)); for (const col of cols) if (!have.has(col.key)) { into.push(col); have.add(col.key); } return into; };
-              let sumRows = [], sumCols = null, lineCols = null, cfg0 = null, partIdx = 0, processed = 0;
-              for (let b0 = 0; b0 < rows.length; b0 += BATCH_DOCS) {
-                const { records, failedRows } = await doBatch(rows.slice(b0, b0 + BATCH_DOCS));
-                allFailed.push(...failedRows);
-                processed += records.length + failedRows.length;
-                massForbidden(allFailed, processed);
-                const built = buildRows(records, plan.source, { ...opts, serialBase: written });
-                written += records.length;
-                cfg0 = built.cfg;
-                sumRows.push(...built.summaryRows);
-                sumCols = unionCols(sumCols, built.summaryCols);
-                lineCols = unionCols(lineCols, built.lineCols);
-                if (built.lineRows.length) {
-                  await writeDetailParts(dirHandle, () => store.chunkDetailFile(plan, c, ++partIdx), built);
-                  onStatus(t('orch.chunkParts', { i: i + 1, parts: partIdx, count: built.lineRows.length }), { level: 'run' });
-                }
-              }
-              if (allFailed.length && !written && (!isUuids || allFailed.some((f) => f.err !== 'NOT_FOUND'))) throw new Error(t('orch.allDetailsFailed', { count: rows.length, i: i + 1 }));
-              onStatus(t('orch.chunkXlsx', { i: i + 1, n: plan.chunks.length, count: written }), { level: 'run' });
-              r = renderFromRows(window.ExcelJS, {
-                summaryCols: sumCols || [], lineCols: lineCols || [], summaryRows: sumRows, lineRows: [],
-                cfg: cfg0 || buildRows([], plan.source, opts).cfg,
-              }, { includeLines: false });
+            // SPEC-029 + SPEC-032: documents are processed in batches so raw detail JSONs never
+            // accumulate past one batch (~1GB at 2,000 line-heavy docs — what makes the 10k cap
+            // safe), while the detail SINK decides file layout by the finished row count, not by
+            // batch boundaries: an ordinary chunk lands in ONE workbook exactly as before, and
+            // only a chunk that outgrows the inline budget spills into part files.
+            const sink = createDetailSink(dirHandle, (pi) => store.chunkDetailFile(plan, c, pi));
+            const unionCols = (into, cols) => { if (!into) return cols.slice(); const have = new Set(into.map((x) => x.key)); for (const col of cols) if (!have.has(col.key)) { into.push(col); have.add(col.key); } return into; };
+            let allFailed = [], written = 0, sumRows = [], sumCols = null, cfg0 = null, processed = 0;
+            for (let b0 = 0; b0 < rows.length; b0 += BATCH_DOCS) {
+              const { records, failedRows } = await doBatch(rows.slice(b0, b0 + BATCH_DOCS));
+              allFailed.push(...failedRows);
+              processed += records.length + failedRows.length;
+              massForbidden(allFailed, processed);
+              const built = buildRows(records, plan.source, { ...opts, serialBase: written });
+              written += records.length;
+              cfg0 = built.cfg;
+              sumRows.push(...built.summaryRows);
+              sumCols = unionCols(sumCols, built.summaryCols);
+              await sink.add(built);
             }
+            // Never silently drop: a total failure fails the whole chunk (so resume retries it, no
+            // empty file). Uuid-mode exception: NOT_FOUND is a conclusive answer about a pasted id
+            // (mistyped, deleted, or another taxpayer's) — a batch of all-missing uuids is a valid
+            // outcome that lands on the Missed sheet, while any OTHER kind of total failure (API
+            // down, auth flapping) still fails the chunk so resume retries it.
+            if (allFailed.length && !written && (!isUuids || allFailed.some((f) => f.err !== 'NOT_FOUND'))) throw new Error(t('orch.allDetailsFailed', { count: rows.length, i: i + 1 }));
+            const det = await sink.finish();
+            if (det.mode === 'parts') onStatus(t('orch.chunkParts', { i: i + 1, parts: det.parts.length, count: rows.length }), { level: 'run' });
+            onStatus(t('orch.chunkXlsx', { i: i + 1, n: plan.chunks.length, count: written }), { level: 'run' });
+            const r = renderFromRows(window.ExcelJS, {
+              summaryCols: sumCols || [], lineCols: det.cols, summaryRows: sumRows,
+              lineRows: det.mode === 'inline' ? det.rows : [],
+              cfg: cfg0 || buildRows([], plan.source, opts).cfg,
+            }, { includeLines: det.mode === 'inline' });
             // SPEC-022: a pasted uuid that could not be fetched must be VISIBLE in the deliverable,
             // not only in eta_failures.jsonl — a third sheet, which merge (worksheets[0]/[1]) and
             // scanDoneFromFolder both ignore by construction.

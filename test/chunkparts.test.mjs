@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import ExcelJS from 'exceljs';
 import { buildRows, renderWorkbook, renderFromRows } from '../src/export/xlsx.js';
-import { writeDetailParts } from '../src/export/chunkparts.js';
+import { writeDetailParts, createDetailSink } from '../src/export/chunkparts.js';
 import { chunkFile, chunkDetailFile, detailParentOf, CHUNK_DET_RE } from '../src/core/store.js';
 import { mergeFolder } from '../src/core/merge.js';
 
@@ -97,6 +97,40 @@ test('T-259 writeDetailParts: capped parts, no invoice straddles two parts, name
   const det3 = chunkDetailFile(plan, chunk, 3);
   assert.ok(CHUNK_DET_RE.test(det3));
   assert.equal(detailParentOf(det3), chunkFile(plan, chunk), 'a part name maps back to its summary file');
+});
+
+test('T-270 the sink keeps a chunk in ONE file until it genuinely outgrows it, then rolls at the cap', async () => {
+  const dir = fakeDir();
+  const nameOf = (i) => `eInvoices_x_det_p${String(i).padStart(2, '0')}.xlsx`;
+  // Small chunk, several batches: stays inline, no file is written at all.
+  const small = createDetailSink(dir, nameOf, { inlineMax: 10, rowCap: 20 });
+  await small.add(buildRows([rec('U1', 3), rec('U2', 3)], 'invoices', {}));
+  await small.add(buildRows([rec('U3', 3)], 'invoices', {}));
+  const outSmall = await small.finish();
+  assert.equal(outSmall.mode, 'inline', 'under the budget it is one workbook, batches notwithstanding');
+  assert.equal(outSmall.rows.length, 9);
+  assert.equal(dir.files.size, 0, 'no part file is created for a chunk that fits');
+  assert.ok(outSmall.cols.length, 'the caller still gets the line columns for the sheet');
+
+  // Big chunk: crosses the budget → spills, then rolls only at the row cap, never mid-invoice.
+  const big = createDetailSink(dir, nameOf, { inlineMax: 10, rowCap: 20 });
+  for (let b = 0; b < 4; b++) await big.add(buildRows([rec('B' + b + 'a', 6), rec('B' + b + 'b', 6)], 'invoices', {}));
+  const outBig = await big.finish();
+  assert.equal(outBig.mode, 'parts');
+  assert.equal(outBig.parts.length, 3, '48 rows at a 20-row cap, respecting 6-row invoices → 18/18/12');
+  const counts = [];
+  const seen = [];
+  for (const p of outBig.parts) {
+    const ws = await loadSheet(dir, p);
+    counts.push(ws.actualRowCount - 1);
+    const uCol = ws.getRow(1).values.slice(1).indexOf(U) + 1;
+    const us = new Set();
+    ws.eachRow((row, rn) => { if (rn > 1) us.add(row.values[uCol]); });
+    seen.push(us);
+  }
+  assert.deepEqual(counts, [18, 18, 12], 'parts fill to the cap without splitting an invoice');
+  for (let a = 0; a < seen.length; a++) for (let b = a + 1; b < seen.length; b++)
+    for (const u of seen[a]) assert.ok(!seen[b].has(u), `invoice ${u} must live in exactly one part`);
 });
 
 test('T-260 merge joins a split chunk (summary + parts) identically to the legacy single file', async () => {

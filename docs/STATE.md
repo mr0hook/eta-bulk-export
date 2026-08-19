@@ -19,7 +19,18 @@ single origin bg.js is allowed to fetch, and manifest.json's host_permissions. A
 up in `git status` (manifest.json changes) and `package-ext.mjs` refuses to zip one.
 
 ## NEXT ACTION
-→ 2026-08-20 ~01:15, SPEC-031 BUILT (v0.11.0) — the "is the 15-min refresh necessary?" answer:
+→ 2026-08-20 ~02:40, SPEC-032 BUILT (v0.11.1): user caught SPEC-029 fragmenting output — it opened
+  a part file PER 2,000-doc BATCH, so a 10k chunk became 5 files even with a few thousand detail
+  rows. Batching is for MEMORY and must not decide layout. createDetailSink now holds line rows
+  while the chunk may still fit one file (30k budget): under it → ONE workbook with inline lines,
+  exactly like pre-batching; over it → parts rolling only at the 60k read-back cap, never
+  mid-invoice, header pinned per part. Limits kept straight in the spec: the DELIVERABLE (merge
+  output) already rolls at Excel's 1,000,000; chunk files are intermediate and bounded by merge's
+  ExcelJS read-back (~9.5KB/row, F-10: 72k passes / 90k OOMs) — raising a part to 1M rows requires
+  streaming reads in merge first (future work). T-265 rewritten, T-270; 398/398.
+  USER: reload the unpacked extension (v0.11.1).
+
+→ Previous (2026-08-20 ~01:15), SPEC-031 BUILT (v0.11.0) — the "is the 15-min refresh necessary?" answer:
   NO for the part that was ours. ETA's ~15-min token TTL is theirs and harmless (the portal SPA
   self-renews while a tab is open — orchestrator.js:40, field-proven). What was ours was SPEC-009's
   30-MIN FORCED TAB BOOT, which re-runs OIDC and lets the portal re-select the login's default
