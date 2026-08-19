@@ -19,10 +19,18 @@ import { stampJobs } from '../users.js';
 
 // Mirrors SOURCES in the extension (src/api/sources.js). Held server-side so a client cannot raise
 // its own cap and have the planner accept oversized chunks.
+//
+// SPEC-026: capReceived — a LOWER cap when the run's direction includes received documents.
+// Measured live 2026-08-19: a Purchases (Received) invoice retains ~540KB of heap during a chunk
+// (line-heavy supplier documents), so a 9.5k-doc chunk needs ~5GB and kills the tab (Chrome's
+// per-tab ceiling is ~4GB; the user saw "Invalid array length" and Aw-Snap crashes). 2,000 docs
+// peaks ~1.1GB + render headroom. Sales (Sent) documents are several times lighter — they keep
+// the full cap. Applied to dir 'Received' AND 'all' (an 'all' run contains received docs too).
 const SOURCES = {
-  invoices: { cap: 10000, granular: ['Submission'], subSplit: true, fields: ['Issue', 'Submission'] },
+  invoices: { cap: 10000, capReceived: 2000, granular: ['Submission'], subSplit: true, fields: ['Issue', 'Submission'] },
   receipts: { cap: 3000, granular: ['DateTimeReceived'], subSplit: false, fields: ['DateTimeReceived', 'DateTimeIssued'] },
 };
+const capFor = (src, dir) => (src.capReceived && dir !== 'Sent' ? src.capReceived : src.cap);
 
 const YMD = /^\d{4}-\d{2}-\d{2}$/;
 const MAX_STEPS = 20000;   // backstop: the depth caps bound a plan long before this
@@ -77,7 +85,7 @@ export async function planRoutes(request, env, url, path) {
     // createJob so a deployment whose D1 predates the users tables still mints jobs normally.
     try { await stampJobs(env, dev.deviceId, dev.email); } catch {}
 
-    const st = startPlan({ cap: src.cap, granular: src.granular.includes(field), subSplit: src.subSplit, field, from, to });
+    const st = startPlan({ cap: capFor(src, String(b.dir || '')), granular: src.granular.includes(field), subSplit: src.subSplit, field, from, to });
     const r = advance(st);
     const key = await cursorKey(env);
     return json({ ok: true, jobId: id, cursor: await seal(key, id, st), ...trim(r) });

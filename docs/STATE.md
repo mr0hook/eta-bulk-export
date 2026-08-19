@@ -19,6 +19,14 @@ single origin bg.js is allowed to fetch, and manifest.json's host_permissions. A
 up in `git status` (manifest.json changes) and `package-ext.mjs` refuses to zip one.
 
 ## NEXT ACTION
+→ 2026-08-19 ~19:45, SPEC-026 BUILT, DEPLOY IN PROGRESS: the Purchases run's chunk-1 failure
+  ("Invalid array length", earlier an Aw-Snap tab kill) is MEMORY, not data — heap measured at
+  2,273MB with 44% of 9,477 received invoices fetched (~540KB/doc; line-heavy). Worker now plans
+  Received/all invoice runs at cap 2,000 (Sales stays 10k). After deploy: user starts a FRESH
+  Purchases plan (the old 38-chunk plan is a dead end — its chunk 1 can never fit). NEXT SPEC
+  after that: streaming chunk render (map rows on arrival, drop raw JSON, part-split the details
+  sheet like the merger) — then the cap can rise again.
+
 → 2026-08-19 ~17:30, SPEC-025 (v0.7.1): the live Sales run's details phase hit a portal 429 storm
   (fixed 40-worker pool; 77 rate-hits in an 81s monitor window; drawer stuck in "Rate-limited (429)
   — waiting" loops; NOT an entity flip — searches returned rows and details returned 200 whenever

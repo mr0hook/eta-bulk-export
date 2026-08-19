@@ -366,7 +366,9 @@ try {
   })).json();
   check('planner device registered with its own RIN', pReg.ok && pReg.boundRins.includes('900000001'));
   const PK = pReg.clientKey, PD = 'dev-plan', PRIN = '900000001';
-  const startBody = { source: 'invoices', field: 'Issue', from: '2025-01-01', to: '2025-12-31', rin: PRIN, version: '9.9.9' };
+  // dir 'Sent' explicitly: SPEC-026 gives any non-Sent invoice direction the conservative 2,000
+  // cap, and this scenario's 9,500-doc windows are legal only under the full Sales cap.
+  const startBody = { source: 'invoices', field: 'Issue', from: '2025-01-01', to: '2025-12-31', dir: 'Sent', rin: PRIN, version: '9.9.9' };
 
   const unsignedStart = await call('/plan/start', { method: 'POST', body: JSON.stringify({ source: 'invoices' }), headers: { 'content-type': 'application/json' } });
   check('plan/start unsigned → 401', unsignedStart.status === 401);
@@ -436,6 +438,40 @@ try {
   check('resuming returns the stored plan in order', plan1.ok && plan1.chunks.length === 2 && plan1.chunks[0].label && plan1.chunks[0].count === 9500);
   const otherPlan = await (await signed('/job/plan', { jobId: s0.jobId }, reg.clientKey, 'dev-1')).json();
   check("another device cannot read this job's plan", otherPlan.ok !== true);
+
+  // ── T-257 (SPEC-026): direction-aware cap ─────────────────────────────────────────────────────
+  // 5,000 docs in one window is a legal single chunk for a Sent plan (cap 10,000) but OVER CAP for
+  // a Received plan (cap 2,000) — measured live: received invoices are line-heavy and a 9.5k-doc
+  // chunk OOMs the tab. Narrow (≤2-day) windows report 1,600: under the received cap, and two of
+  // them (3,200) exceed the coalescing target floor(2000*0.9)=1800, so merges cannot re-breach it.
+  const drivePlan = async (body, probeOf) => {
+    const st0 = await (await signed('/plan/start', body, PK, PD)).json();
+    if (!st0.ok) return { start: st0 };
+    let cur = st0.cursor, ins = st0.instruction, fin = null, n = 0;
+    while (ins && n < 80) {
+      const obs = ins.kind === 'detectMaxSub' ? { maxSub: null } : { count: probeOf(ins) };
+      const rr = await (await signed('/plan/step', { jobId: st0.jobId, cursor: cur, observation: obs }, PK, PD)).json();
+      n++;
+      if (rr.done) { fin = rr; break; }
+      cur = rr.cursor; ins = rr.instruction;
+    }
+    return { start: st0, fin };
+  };
+  const dirProbe = (ins) => (Date.parse(ins.toISO || ins.subT) - Date.parse(ins.fromISO || ins.subF) > 2 * 86400000 ? 5000 : 1600);
+  const dirRange = { source: 'invoices', field: 'Issue', from: '2025-06-01', to: '2025-06-08', rin: PRIN, version: '9.9.9' };
+  const sentPlan = await drivePlan({ ...dirRange, dir: 'Sent' }, dirProbe);
+  check('T-257 a Sent plan keeps the full 10k cap (5,000-doc window = one chunk)',
+    !!sentPlan.fin && sentPlan.fin.chunks.length === 1 && sentPlan.fin.chunks[0].count === 5000);
+  const recvPlan = await drivePlan({ ...dirRange, dir: 'Received' }, dirProbe);
+  check('T-257 a Received plan splits at the 2,000 cap and every chunk stays under it',
+    !!recvPlan.fin && recvPlan.fin.chunks.length > 1 && recvPlan.fin.chunks.every((c) => c.count < 2000 && !c.warn));
+  // Drop the two T-257 jobs from the mock store so the job-count/resumable/quota checks below
+  // keep seeing exactly the fixture jobs they were written against (same pattern as the uuid
+  // scenario's chunk cleanup above).
+  for (const jid of [sentPlan.start && sentPlan.start.jobId, recvPlan.start && recvPlan.start.jobId].filter(Boolean)) {
+    JOBS._jobs.delete(jid);
+    for (let i = JOBS._chunks.length - 1; i >= 0; i--) if (JOBS._chunks[i].job_id === jid) JOBS._chunks.splice(i, 1);
+  }
 
   // ── SPEC-022: /plan/uuids — the gate for list-driven exports ──────────────────────────────────
   // The client sends a COUNT, never the UUIDs: the server decides the batching and mints a real
