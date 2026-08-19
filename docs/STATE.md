@@ -19,7 +19,17 @@ single origin bg.js is allowed to fetch, and manifest.json's host_permissions. A
 up in `git status` (manifest.json changes) and `package-ext.mjs` refuses to zip one.
 
 ## NEXT ACTION
-→ 2026-08-19 ~20:15, SPEC-027 BUILT (v0.8.0): split chunk render. A chunk whose line rows exceed
+→ 2026-08-19 ~21:30, SPEC-028 BUILT (v0.9.0): "⟳ Load failed UUIDs" button in the By-list box —
+  reads eta_failures.jsonl (folder-gated via ensureFolder), fills the paste box with retryable
+  document uuids (pdf-only/over-cap/receipts lines excluded, deduped), user presses Start as a
+  normal SPEC-022 uuid run. T-262; suite 390/390; dist at v0.9.0. USER: reload the unpacked
+  extension when convenient (the running Purchases run is on the loaded build — reloading
+  mid-run pauses it; Resume continues). The worker deploy landed earlier (~198-chunk plan with
+  2,000-cap Received chunks observed live at 64 req/s, zero 429s, heap ~340MB).
+  NEXT SPEC when the run completes: map-on-arrival (drop raw JSON as rows are built) so the
+  Received cap can rise from 2,000 (revert-to-10k question answered: not until then).
+
+→ Previous (2026-08-19 ~20:15), SPEC-027 BUILT (v0.8.0): split chunk render. A chunk whose line rows exceed
   30k now streams details into `_det_pNN.xlsx` part files (≤60k rows each, SPEC-014 writer,
   constant memory; an invoice never straddles parts) and keeps only a styled summary workbook in
   ExcelJS (lines sheet header-only), written LAST as the resume marker; stale parts are swept on

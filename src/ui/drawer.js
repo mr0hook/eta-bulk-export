@@ -14,6 +14,8 @@ import { FONT_BLOBS } from './fonts.js';
 import { lsGet, lsSet } from '../core/ls.js';
 import { readProgress, uuidMergeScope } from '../core/store.js';
 import { parseList } from '../core/listinput.js';   // SPEC-022: the pasted UUID/RIN list
+import { parseFailureUuids } from '../core/failures.js';   // SPEC-028: retry list from eta_failures.jsonl
+import { readText } from '../core/fs.js';
 import { deriveSyncSel } from '../core/sync.js';
 import { todayYmd } from '../core/time.js';
 import { t, getLang, setLang } from '../core/i18n.js';
@@ -383,6 +385,9 @@ export function mountUI() {
               <div class="hint-line" style="margin-top:0" data-i18n="flow.listNote">Paste invoice UUIDs (exports exactly those invoices — the dates and tabs above are ignored) or counterparty registration numbers (exports only their documents from the range above). The list never leaves this device.</div>
               <textarea class="ctl" id="lst" rows="4" style="width:100%;margin-top:8px;resize:vertical;font-family:var(--font-mono, monospace);font-size:12px" spellcheck="false"></textarea>
               <label class="togg" id="lsteraRow" style="margin-top:8px" hidden><input type="checkbox" id="lstera" checked> <span data-i18n="flow.listEra">All years (2020 → today)</span></label>
+              <!-- SPEC-028: fills the box above from eta_failures.jsonl — a paste typed by the
+                   extension, so every list validation and the server's batching apply unchanged. -->
+              <button class="btn sm" id="lstFails" style="margin-top:8px" data-i18n="flow.loadFails">⟳ Load failed UUIDs</button>
             </div>
           </details>
           <div class="folder"><span>${FOLDER_ICO}</span><span class="p" id="folder">No output folder</span><button class="btn sm" id="pick" data-i18n="ui.pick">Pick</button></div>
@@ -894,6 +899,21 @@ export function mountUI() {
       : p.kind === 'rin' ? t('flow.listRins', { n: p.items.length }) + bad
       : bad;
   });
+  // SPEC-028: one click from eta_failures.jsonl to a retry list. A LOADER, not an auto-runner —
+  // the user reviews the filled box (and their Advanced choices) and presses the normal Start.
+  $('lstFails').onclick = async () => {
+    if (busy) { refuseRun(); return; }
+    const d = await ensureFolder();
+    if (!d) { setFt('', t('orch.pickFolder')); return; }
+    let txt = '';
+    try { txt = await readText(d, 'eta_failures.jsonl'); } catch {}   // absent file = nothing recorded
+    const p = parseFailureUuids(txt);
+    if (!p.uuids.length) { setFt('warn', t('flow.failsNone')); return; }
+    $('lstbox').open = true;
+    $('lst').value = p.uuids.join('\n');
+    $('lst').dispatchEvent(new Event('input'));
+    setFt('ok', t('flow.failsLoaded', { n: p.uuids.length }));
+  };
   // The interrupted-run entry. The server holds the PLAN (its chunks are only purged at 'done'); the
   // folder holds the PROGRESS — and the column/PDF choices the server never stored — so the folder's
   // own plan wins whenever it describes the same run.
