@@ -19,7 +19,18 @@ single origin bg.js is allowed to fetch, and manifest.json's host_permissions. A
 up in `git status` (manifest.json changes) and `package-ext.mjs` refuses to zip one.
 
 ## NEXT ACTION
-→ 2026-08-19 ~19:45, SPEC-026 BUILT, DEPLOY IN PROGRESS: the Purchases run's chunk-1 failure
+→ 2026-08-19 ~20:15, SPEC-027 BUILT (v0.8.0): split chunk render. A chunk whose line rows exceed
+  30k now streams details into `_det_pNN.xlsx` part files (≤60k rows each, SPEC-014 writer,
+  constant memory; an invoice never straddles parts) and keeps only a styled summary workbook in
+  ExcelJS (lines sheet header-only), written LAST as the resume marker; stale parts are swept on
+  retry. Merge Phase 1 groups a chunk's parts onto its summary (orphan part → skip-with-warn in
+  full mode, DRIFT full rebuild in incremental). T-258..T-261; suite 389/389; dist at v0.8.0.
+  USER MUST, in order: (1) run `cd lead-worker && npm run deploy:prod` (SPEC-026 Received cap
+  2,000 + SPEC-024 coalescing + cursor fix — the agent's deploy was permission-blocked),
+  (2) reload the unpacked extension (v0.8.0), (3) start a FRESH Purchases plan — never resume the
+  dead 38-chunk plan (its 9,477-doc chunk 1 can never fit pre-deploy).
+
+→ Previous (2026-08-19 ~19:45), SPEC-026 BUILT: the Purchases run's chunk-1 failure
   ("Invalid array length", earlier an Aw-Snap tab kill) is MEMORY, not data — heap measured at
   2,273MB with 44% of 9,477 received invoices fetched (~540KB/doc; line-heavy). Worker now plans
   Received/all invoice runs at cap 2,000 (Sales stays 10k). After deploy: user starts a FRESH
@@ -178,6 +189,12 @@ because every other phase adds code to the file it breaks up.
 - (resolved) refreshLicense ungated-branch rj-scan gap — fixed in F-06.
 
 ## Session log
+- 2026-08-19 · SPEC-027 split chunk render BUILT (v0.8.0). User-identified root: summary count ≠
+  line count — 10k invoices can be 1M+ line rows, and BOTH ends choke on the one-workbook shape
+  (ExcelJS object model at creation; merge's ExcelJS load at read-back). xlsx.js split into
+  buildRows/renderFromRows; chunkparts.js streams capped detail parts; orchestrator sweeps stale
+  parts, writes parts first, summary last; merge groups parts per parent. Legacy chunk files
+  unchanged and still merge identically (T-260 pins split == legacy output). Suite 385→389.
 - 2026-08-19 · SPEC-025 adaptive details concurrency BUILT + shipped as v0.7.1. The monitored
   Sales run (13 chunks / 66,719 rows) proved the fixed CONC=40 details pool draws a 429 storm:
   all 40 workers stall on each wave, then stampede back in lockstep. Now an AIMD governor

@@ -10,6 +10,7 @@
 import { listFiles, readArrayBuffer, openWrite, readLines, remove } from './fs.js';
 import * as ms from './mergestate.js';
 import { createRotator } from './mergeout.js';
+import { CHUNK_DET_RE, detailParentOf } from './store.js';   // SPEC-027: split-chunk detail parts
 import { t } from './i18n.js';
 
 const UUID = 'الرقم الإلكترونى', SERIAL = 'مسلسل';
@@ -95,9 +96,32 @@ async function runMerge(ExcelJS, dir, { onStatus, rowCap, prefix, files, sizes, 
 
   try {
     // ---- Phase 1: read each xlsx once -> dedup -> stream JSONL ----
+    // SPEC-027: a split chunk is a summary workbook plus `_det_pNN` single-sheet part files. The
+    // loop walks PARENTS; each parent claims its parts (they extend the lines sheet). A retried
+    // chunk rewrites summary + parts together, so incremental normally reads them together — a NEW
+    // part whose parent is not being read is ambiguity, handled below via the DRIFT full-rebuild
+    // path. An orphan part with no parent in the folder at all is an incomplete chunk write: its
+    // lines have no summary to join (they contribute nothing today either), so it is skipped.
+    const isPart = (n) => CHUNK_DET_RE.test(n);
+    const partsOf = new Map();
+    for (const n of read) { if (isPart(n)) { const p = detailParentOf(n); if (!partsOf.has(p)) partsOf.set(p, []); partsOf.get(p).push(n); } }
+    for (const list of partsOf.values()) list.sort();
+    const parents = read.filter((n) => !isPart(n));
     let uniq = 0, fi = 0; const failed = [];
+    {
+      const reading = new Set(parents);
+      for (const p of [...partsOf.keys()]) {
+        if (reading.has(p)) continue;
+        // Incremental: a new part without its parent → rebuild from scratch (DRIFT path). Full:
+        // the parent isn't in the folder at all — an incomplete chunk write; its lines have no
+        // summary to join, so the parts are skipped LOUDLY and the retry will rewrite them.
+        if (base) { onStatus(t('merge.partOrphanRebuild', { name: partsOf.get(p)[0] })); return 'DRIFT'; }
+        for (const pn of partsOf.get(p)) { failed.push(pn); onStatus(t('merge.skipped', { name: pn })); }
+        partsOf.delete(p);
+      }
+    }
     sink = await openWrite(dir, jsonl);
-    for (const name of read) {
+    for (const name of parents) {
       fi++;
       let wb; try { wb = new ExcelJS.Workbook(); await wb.xlsx.load(await readArrayBuffer(dir, name)); }
       catch { failed.push(name); onStatus(t('merge.skipped', { name })); continue; }
@@ -109,10 +133,16 @@ async function runMerge(ExcelJS, dir, { onStatus, rowCap, prefix, files, sizes, 
         const hdr = nfcHdr(s0.getRow(1).values.slice(1)); const uk = uuidKeyOf(hdr); addCols(sumCols, hdr);
         s0.eachRow((row, rn) => { if (rn === 1) return; const o = toObj(hdr, row.values.slice(1)); const u = o[uk]; if (u == null || seen.has(u)) return; seen.add(u); localSum.set(u, o); order.push(u); });
       }
-      if (s1) {
-        if (!sheetNames.s1) sheetNames.s1 = s1.name;
-        const hdr = nfcHdr(s1.getRow(1).values.slice(1)); const uk = uuidKeyOf(hdr); addCols(lineCols, hdr);
-        s1.eachRow((row, rn) => { if (rn === 1) return; const o = toObj(hdr, row.values.slice(1)); const u = o[uk]; if (u == null || !localSum.has(u)) return; if (!localLines.has(u)) localLines.set(u, []); localLines.get(u).push(o); });
+      const eatLines = (ws) => {
+        if (!sheetNames.s1 && ws.name !== sheetNames.s0) sheetNames.s1 = ws.name;
+        const hdr = nfcHdr(ws.getRow(1).values.slice(1)); const uk = uuidKeyOf(hdr); addCols(lineCols, hdr);
+        ws.eachRow((row, rn) => { if (rn === 1) return; const o = toObj(hdr, row.values.slice(1)); const u = o[uk]; if (u == null || !localSum.has(u)) return; if (!localLines.has(u)) localLines.set(u, []); localLines.get(u).push(o); });
+      };
+      if (s1) { if (!sheetNames.s1) sheetNames.s1 = s1.name; eatLines(s1); }
+      for (const pn of partsOf.get(name) || []) {   // SPEC-027: the chunk's detail parts extend its lines sheet
+        let pwb; try { pwb = new ExcelJS.Workbook(); await pwb.xlsx.load(await readArrayBuffer(dir, pn)); }
+        catch { failed.push(pn); onStatus(t('merge.skipped', { name: pn })); continue; }
+        if (pwb.worksheets[0]) eatLines(pwb.worksheets[0]);
       }
       let buf = '';
       for (const u of order) {
@@ -120,7 +150,7 @@ async function runMerge(ExcelJS, dir, { onStatus, rowCap, prefix, files, sizes, 
         if (buf.length >= FLUSH_CHARS) { await sink.write(buf); buf = ''; }   // bound the in-flight string
       }
       if (buf) await sink.write(buf);
-      onStatus(t('merge.phase1', { i: fi, n: read.length, uniq }));
+      onStatus(t('merge.phase1', { i: fi, n: parents.length, uniq }));
     }
     await sink.close(); sink = null;   // must land on disk before Phase 2 reads it back
 

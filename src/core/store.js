@@ -18,6 +18,12 @@ const planSig = (plan) => hash8(`${plan.dateField || ''}|${[...(plan.statuses ||
 // — even sub-minute granular chunks with byte-identical human labels — can never map to one file, and a
 // different filter over the same range never aliases onto these files. label kept as a readable prefix.
 export const chunkFile = (plan, chunk) => `${filePrefix(plan)}_${plan.year}_${plan.dir}_${planSig(plan)}_${safeName(chunk.label || chunk.id)}_${hash8(chunk.id)}.xlsx`;
+// SPEC-027: a line-heavy chunk splits its details into single-sheet part files beside the summary
+// workbook (which keeps the chunkFile name — resume's completion marker). Parts derive from the
+// summary name so merge can claim them, and stale ones from a retried chunk can be swept by regex.
+export const CHUNK_DET_RE = /_det_p\d+\.xlsx$/i;
+export const chunkDetailFile = (plan, chunk, i) => chunkFile(plan, chunk).replace(/\.xlsx$/i, `_det_p${String(i).padStart(2, '0')}.xlsx`);
+export const detailParentOf = (name) => name.replace(CHUNK_DET_RE, '.xlsx');
 const progressName = (plan) => `eta_progress_${safeName(plan.key)}.json`;
 
 // SPEC-022: everything one uuid run's merge needs to see ONLY its own files. The prefix mirrors

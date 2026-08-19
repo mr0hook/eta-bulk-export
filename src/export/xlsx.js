@@ -45,15 +45,30 @@ function fillFor(statusEn, typeEn) {
 }
 
 // ---------------- main ----------------
-export function renderWorkbook(ExcelJS, records, source, options = {}) {
+// SPEC-027: row building and workbook building are separate stages, so a line-heavy chunk can
+// stream its line rows into capped part files instead of forcing them all through ExcelJS's
+// object model (~KBs of heap per row — the OOM behind "Invalid array length"/Aw-Snap).
+export function buildRows(records, source, options = {}) {
   // options.mapping lets a caller pin an exact mapping (tests, and any future "re-render with the
   // mapping this folder was started on"). Otherwise mappingFor() decides: validated server mapping
   // if one is cached and current, bundled otherwise. It never returns a partial mapping.
   const cfg = options.mapping || mappingFor(source);
-  const wb = new ExcelJS.Workbook();
   const built = source === 'receipts'
     ? buildReceipts(records, options, cfg)
     : buildInvoices(records, options, cfg);
+  return { ...built, cfg };
+}
+
+export function renderWorkbook(ExcelJS, records, source, options = {}) {
+  return renderFromRows(ExcelJS, buildRows(records, source, options), { includeLines: true });
+}
+
+// includeLines:false renders the lines sheet HEADER-ONLY — the split-chunk summary workbook. The
+// sheet still exists under its mapped name so the summary's "عرض" hyperlink target stays valid and
+// merge's sheet-name detection keeps working.
+export function renderFromRows(ExcelJS, built, { includeLines = true } = {}) {
+  const cfg = built.cfg;
+  const wb = new ExcelJS.Workbook();
 
   // summary sheet
   const s0 = wb.addWorksheet(cfg.summarySheet); s0.views = [RTL]; s0.columns = built.summaryCols;
@@ -66,12 +81,14 @@ export function renderWorkbook(ExcelJS, records, source, options = {}) {
 
   // line-items sheet (combineAll)
   const s1 = wb.addWorksheet(cfg.lineSheet); s1.views = [RTL]; s1.columns = built.lineCols;
-  for (const r of built.lineRows) {
-    const row = s1.addRow(cleanRow(r));
-    row.eachCell({ includeEmpty: true }, (c) => (c.border = THIN));
-    const f = fillFor(r.status, r.typeEn); if (f) row.fill = f;
+  if (includeLines) {
+    for (const r of built.lineRows) {
+      const row = s1.addRow(cleanRow(r));
+      row.eachCell({ includeEmpty: true }, (c) => (c.border = THIN));
+      const f = fillFor(r.status, r.typeEn); if (f) row.fill = f;
+    }
   }
-  s1.autoFilter = { from: 'A1', to: { row: built.lineRows.length + 1, column: built.lineCols.length } };
+  s1.autoFilter = { from: 'A1', to: { row: (includeLines ? built.lineRows.length : 0) + 1, column: built.lineCols.length } };
 
   return { workbook: wb, summaryCols: built.summaryCols, lineCols: built.lineCols, summaryRows: built.summaryRows, lineRows: built.lineRows };
 }

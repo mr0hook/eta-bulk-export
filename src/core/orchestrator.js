@@ -6,7 +6,8 @@ import { buildUrl, apiGet, probeCount, fetchAllRows, fetchDetails, fetchPdf, map
 import { planViaServer, planUuidList } from './planclient.js';   // SPEC-016: the server decides where to cut; chunker.js is now test-only
 import { listKey, rinMatch, rinIdsOf } from './listinput.js';   // SPEC-022: pasted-list runs
 import { safeName } from './time.js';
-import { renderWorkbook, XLSX_MIME } from '../export/xlsx.js';
+import { buildRows, renderFromRows, XLSX_MIME } from '../export/xlsx.js';
+import { writeDetailParts, CHUNK_LINES_INLINE_MAX } from '../export/chunkparts.js';   // SPEC-027
 import { refreshMapping } from '../export/mapsync.js';   // SPEC-021: column mapping served by the worker, bundled fallback
 import { resolveReferenceNumbers } from './refs.js';
 import * as store from './store.js';
@@ -425,7 +426,22 @@ export function createOrchestrator(hooks = {}) {
               onLookup: (n2) => onStatus(t('orch.refLookup', { i: i + 1, n: plan.chunks.length, n2 }), { level: 'run' }),
             });
             onStatus(t('orch.chunkXlsx', { i: i + 1, n: plan.chunks.length, count: records.length }), { level: 'run' });
-            const r = renderWorkbook(window.ExcelJS, records, plan.source, opts);
+            // SPEC-027: build rows first; a line-heavy chunk streams its details into capped part
+            // files (constant memory) and keeps only the summary in ExcelJS. Order is load-bearing:
+            // stale parts swept, parts written, summary LAST — the summary file is what
+            // scanDoneFromFolder treats as "chunk done", so a crash mid-chunk never looks complete.
+            const built = buildRows(records, plan.source, opts);
+            const chunkName = store.chunkFile(plan, c);
+            const partEsc = chunkName.replace(/\.xlsx$/i, '').replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+            try { for (const stale of await fs.listFiles(dirHandle, new RegExp('^' + partEsc + '_det_p\\d+\\.xlsx$', 'i'))) { try { await fs.remove(dirHandle, stale); } catch {} } } catch {}
+            let r;
+            if (built.lineRows.length > CHUNK_LINES_INLINE_MAX) {
+              const parts = await writeDetailParts(dirHandle, (pi) => store.chunkDetailFile(plan, c, pi), built);
+              onStatus(t('orch.chunkParts', { i: i + 1, parts: parts.length, count: built.lineRows.length }), { level: 'run' });
+              r = renderFromRows(window.ExcelJS, built, { includeLines: false });
+            } else {
+              r = renderFromRows(window.ExcelJS, built, { includeLines: true });
+            }
             // SPEC-022: a pasted uuid that could not be fetched must be VISIBLE in the deliverable,
             // not only in eta_failures.jsonl — a third sheet, which merge (worksheets[0]/[1]) and
             // scanDoneFromFolder both ignore by construction.
@@ -436,7 +452,6 @@ export function createOrchestrator(hooks = {}) {
               ws.getColumn(1).width = 30; ws.getColumn(2).width = 44;
             }
             const buf = await r.workbook.xlsx.writeBuffer();
-            const chunkName = store.chunkFile(plan, c);
             await fs.writeBlob(dirHandle, chunkName, new Blob([buf], { type: XLSX_MIME }));
             onChunk({ i: i + 1, n: plan.chunks.length, phase: 'write', cur: 1, max: 1 });
             if (failedRows.length) {
