@@ -77,8 +77,15 @@ export function createDetailSink(dirHandle, nameOf, { inlineMax = CHUNK_LINES_IN
   return {
     get spilled() { return spilled; },
     async add(built) {
+      const before = cols ? cols.length : 0;
       cols = unionCols(cols, built.lineCols);
       if (built.cfg?.lineSheet) sheetName = built.cfg.lineSheet;
+      // A part's header is fixed when it opens, so a column that first appears in a LATER batch — a
+      // tax type, a discount, the first foreign-currency invoice — would be written against the
+      // narrower header and its values silently dropped (2026-08-20 review, F-3: an empty tax cell
+      // is indistinguishable from an untaxed line). Column growth therefore rotates the part, the
+      // same way the row cap does; merge unions the parts' headers by name.
+      if (writer && cols.length !== before) { await writer.close(); writer = null; }
       if (!built.lineRows.length) return;
       if (spilled) { await writeRows(built.lineRows); return; }
       held.push(...built.lineRows);

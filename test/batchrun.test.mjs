@@ -37,7 +37,12 @@ const okResp = (body) => ({ status: 200, ok: true, json: async () => body, heade
 function stubPagedFetch(n) {
   // uuids starting with F answer 403. `forbidden` lets a test set the exact share of a chunk.
   const forbidden = stubPagedFetch.forbidden != null ? stubPagedFetch.forbidden : (n === 60 ? 50 : 0);
-  const rows = Array.from({ length: n }, (_, k) => ({ source: { uuid: (k < forbidden ? 'F' : 'U') + k, documentStatusEN: 'Valid' } }));
+  // forbiddenAtTail puts the refusals in the LAST documents instead of the first — the F-4 case.
+  const tail = !!stubPagedFetch.forbiddenAtTail;
+  const rows = Array.from({ length: n }, (_, k) => {
+    const isF = tail ? k >= n - forbidden : k < forbidden;
+    return { source: { uuid: (isF ? 'F' : 'U') + k, documentStatusEN: 'Valid' } };
+  });
   globalThis.fetch = async (url) => {
     const u = String(url);
     if (u.includes('/search')) {
@@ -130,6 +135,26 @@ test('T-274 the 2026-08-20 chunk-31 case: 47% forbidden must FAIL, not write a t
   assert.ok(![...dir.files.keys()].some((n) => n.endsWith('.xlsx')), 'no thin chunk file is written');
   assert.deepEqual(progress(dir).failedIds, ['c1'], 'the chunk fails so a resume refetches it whole');
   assert.ok(msgs.some((m) => /403/.test(m)), 'and says why');
+});
+
+test('T-281 a flip confined to the LAST batch still fails the chunk (F-4)', async () => {
+  // The cumulative-only rule had a hole: one batch holds at most BATCH_DOCS documents, so on a big
+  // chunk the whole-chunk threshold can exceed anything a single batch can supply and a late flip
+  // sails through, writing a short chunk that marks itself done. Scaled down here: 3,000 documents
+  // (two batches: 2,000 + 1,000) with the last 900 refused — 30% of the final batch, but only 30%
+  // of the chunk if measured cumulatively at exactly the wrong moment.
+  setToken();
+  stubPagedFetch.forbidden = 900;
+  stubPagedFetch.forbiddenAtTail = true;
+  stubPagedFetch(3000);
+  const dir = fakeDir();
+  const msgs = await run(dir, mkPlan(3000));
+  stubPagedFetch.forbidden = null;
+  stubPagedFetch.forbiddenAtTail = false;
+
+  assert.ok(![...dir.files.keys()].some((n) => n.endsWith('.xlsx')), 'no short chunk file is written');
+  assert.deepEqual(progress(dir).failedIds, ['c1'], 'the chunk fails so a resume refetches it whole');
+  assert.ok(msgs.some((m) => /403/.test(m)), 'and the mass-403 diagnosis is stated');
 });
 
 test('T-275 an ordinary trickle of 403s still completes the chunk', async () => {

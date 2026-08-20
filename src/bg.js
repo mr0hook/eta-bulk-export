@@ -64,6 +64,9 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (!msg || msg.type !== 'eta-id-store') return false;
   (async () => {
     try {
+      // Explicit, so a manifest missing "permissions": ["storage"] is a LOUD failure rather than a
+      // mirror that silently never stores anything (2026-08-20 review, F-2).
+      if (!chrome.storage || !chrome.storage.local) { sendResponse({ ok: false, error: 'no storage permission' }); return; }
       const cur = (await chrome.storage.local.get(ID_KEY))[ID_KEY] || {};
       if (msg.op === 'set') {
         const next = { ...cur };

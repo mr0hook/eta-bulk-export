@@ -1013,6 +1013,22 @@ try {
   check('T-182 a returning deviceId is never refused — clearing a cache must not cost a registration',
     c1again.ok && c1again.boundRins.includes('830000001'));
 
+  // T-282 (2026-08-20 review, F-1) — /register is unauthenticated, so a deviceId already registered
+  // to ANOTHER email must be refused outright. It used to reuse the victim's record: the caller got
+  // their live clientKey, superadmin flag, bound RINs and quota, and the record's owner was
+  // rewritten. Device ids are published in the admin CSVs and the dashboard copy button, so the
+  // only thing standing between a leaked id and permanent impersonation is this check.
+  const stolen = await call('/register', { method: 'POST', headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ name: 'Attacker', email: 'attacker@example.com', consent: true, registrationNumber: '830000009', deviceId: 'dev-c1', version: '0.5.0' }) });
+  const stolenJ = await stolen.json();
+  const victim = JSON.parse(store.get('dev:dev-c1') || 'null');
+  check('T-282 a deviceId owned by another email is refused, keeps its key and keeps its owner',
+    stolen.status === 409 && stolenJ.ok === false && stolenJ.reason === 'device_owned'
+    && !stolenJ.clientKey && !stolenJ.boundRins
+    && victim.email === 'devcap@example.com'                       // owner not rewritten
+    && victim.clientKey === c1.clientKey                           // key not rotated out from under them
+    && !victim.boundRins.includes('830000009'));                   // and no RIN of the attacker's bound
+
   // Raise the allowance, fill it, then drop it below what they hold.
   await admin('/api/user', { email: 'devcap@example.com', action: 'setDeviceQuota', value: 3 });
   const c2ok = await (await call('/register', capBody('dev-c2', '830000002'))).json();

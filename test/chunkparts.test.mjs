@@ -133,6 +133,37 @@ test('T-270 the sink keeps a chunk in ONE file until it genuinely outgrows it, t
     for (const u of seen[a]) assert.ok(!seen[b].has(u), `invoice ${u} must live in exactly one part`);
 });
 
+test('T-280 a column that first appears in a LATER batch is not silently dropped (F-3)', async () => {
+  // The 2026-08-20 review reproduced this: a part pins its header when it opens, so a tax type or a
+  // discount first seen in batch k+1 was written against batch k's narrower header and discarded —
+  // and the merged DETAILS file then shows an empty tax cell, indistinguishable from an untaxed
+  // line. Column growth must rotate the part.
+  const dir = fakeDir();
+  const nameOf = (i) => `eInvoices_g_det_p${String(i).padStart(2, '0')}.xlsx`;
+  const plain = rec('P1', 2);                                   // no taxes, no discounts
+  const taxed = rec('T1x', 2);
+  taxed.detail.taxTotals = [{ taxType: 'T1', amount: 14 }];
+  taxed.detail.invoiceLines.forEach((l) => { l.lineTaxableItems = [{ taxType: 'T1', rate: 14, amount: 7 }]; });
+
+  const sink = createDetailSink(dir, nameOf, { inlineMax: 1, rowCap: 500 });
+  await sink.add(buildRows([plain], 'invoices', { taxColumns: true }));   // opens a part with the narrow header
+  await sink.add(buildRows([taxed], 'invoices', { taxColumns: true }));   // introduces T1 + T1%
+  const out = await sink.finish();
+
+  assert.equal(out.mode, 'parts');
+  assert.ok(out.parts.length >= 2, 'the new column rotated the part instead of being written into the old header');
+  // The tax amount (7 per line) must physically exist in some part file. Before the fix the taxed
+  // batch was written against the 29-column header and the value had nowhere to go.
+  const widths = [], sawTax = [];
+  for (const p of out.parts) {
+    const ws = await loadSheet(dir, p);
+    widths.push(ws.getRow(1).values.slice(1).length);
+    ws.eachRow((row, rn) => { if (rn > 1) for (const v of row.values) if (Number(v) === 7) sawTax.push(p); });
+  }
+  assert.ok(widths.some((w) => w > widths[0]), `a wider header exists after the column appeared (${widths.join(',')})`);
+  assert.ok(sawTax.length >= 2, 'both taxed line rows carry their tax amount into a part file');
+});
+
 test('T-260 merge joins a split chunk (summary + parts) identically to the legacy single file', async () => {
   const mkLegacy = async (dir) => {
     const wb = new ExcelJS.Workbook();

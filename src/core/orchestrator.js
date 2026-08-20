@@ -501,6 +501,12 @@ export function createOrchestrator(hooks = {}) {
             // SPEC-030: a flood of per-document 403s is an entity flip's signature, not a property
             // of the documents — fail the chunk so the boundary restore heals and the whole chunk
             // refetches, instead of completing thin (2026-08-19 chunk-7: 974/1086 dropped).
+            // Checked over the WHOLE chunk and over the batch that just ran. The cumulative test
+            // alone has a hole (2026-08-20 review, F-4): a batch holds at most BATCH_DOCS documents,
+            // so on a 10,000-doc chunk the cumulative threshold (2,500) exceeds anything one batch
+            // can supply — a flip confined to the last batch could never trip it, losing up to 2,499
+            // documents from a chunk that then marked itself done. A flip is a burst, so the batch
+            // window is the honest denominator.
             const massForbidden = (failed, processed) => {
               const forb = failed.filter((f) => f.err === 'FORBIDDEN').length;
               if (forb >= MASS_FORBIDDEN_MIN && forb >= processed * MASS_FORBIDDEN_SHARE) throw new Error(t('orch.massForbidden', { n: forb, total: processed }));
@@ -518,7 +524,8 @@ export function createOrchestrator(hooks = {}) {
               const { records, failedRows } = await doBatch(rows.slice(b0, b0 + BATCH_DOCS));
               allFailed.push(...failedRows);
               processed += records.length + failedRows.length;
-              massForbidden(allFailed, processed);
+              massForbidden(failedRows, records.length + failedRows.length);   // this batch alone
+              massForbidden(allFailed, processed);                             // and the chunk so far
               const built = buildRows(records, plan.source, { ...opts, serialBase: written });
               written += records.length;
               cfg0 = built.cfg;

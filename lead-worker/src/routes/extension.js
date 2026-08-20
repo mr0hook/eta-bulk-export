@@ -60,9 +60,19 @@ export async function extensionRoutes(request, env, url, path) {
       const held = await personHeld(env, email, prev);
       let ent = null;
       try { ent = await resolveEntitlement(env, email); } catch {}
+      // SECURITY (2026-08-20 review, F-1): a deviceId already registered to a DIFFERENT email is
+      // somebody else's record, and this route is unauthenticated. Reusing it handed the caller that
+      // device's live clientKey (and its superadmin flag, bound RINs and quota) while rewriting its
+      // owner — permanent impersonation for anyone who learned a device id, which the admin CSVs,
+      // the bug feed and the dashboard copy button all publish. A device genuinely changing hands is
+      // an audited admin action, not something a stranger can do by guessing an id.
+      if (prev && String(prev.email || '').trim() && !known) {
+        await errlog(env, request, 'register_fail', { reason: 'device_owned' });
+        return json({ ok: false, error: 'this device is registered to another account — ask the admin to release it', reason: 'device_owned' }, 409);
+      }
       if (!known) {
         // Devices already on record for this person. `prev` is not one of them: either it does not
-        // exist, or it belongs to a different email and is about to change hands.
+        // exist, or it is a pre-email install being adopted by its first named owner.
         const onRecord = held.devices - (prev ? 1 : 0);
         // No D1 row for this person → NO device cap. Same contract features and quota keep: a
         // pre-migration install, or an environment with no portal at all, must degrade to what KV
@@ -77,6 +87,10 @@ export async function extensionRoutes(request, env, url, path) {
       }
 
       const dev = prev || { deviceId, clientKey: randHex(32), boundRins: [], features: [], quota: cfg.defaultQuota ?? 1, locked: false, killed: false, count: 0, firstAt: now };
+      // A pre-email record being adopted (blank email, so `known`) is the only surviving path where an
+      // existing record changes owner. Rotate its key and drop any elevated flag rather than handing
+      // the new owner whatever the old install happened to hold.
+      if (prev && !String(prev.email || '').trim()) { dev.clientKey = randHex(32); dev.superadmin = false; }
       dev.regId = String(b.regId || dev.regId || '').slice(0, 120); dev.name = String(b.name).trim().slice(0, 120); dev.email = email;
       dev.phone = String(b.phone || '').trim().slice(0, 40); dev.company = String(b.company || '').trim().slice(0, 160);
       dev.taxpayerName = String(b.taxpayerName || '').trim().slice(0, 200);
