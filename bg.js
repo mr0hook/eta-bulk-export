@@ -68,6 +68,23 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
       // mirror that silently never stores anything (2026-08-20 review, F-2).
       if (!chrome.storage || !chrome.storage.local) { sendResponse({ ok: false, error: 'no storage permission' }); return; }
       const cur = (await chrome.storage.local.get(ID_KEY))[ID_KEY] || {};
+      // SPEC-038 (2026-08-20 review, L-2): sign HERE. The clientKey is every device's authenticator,
+      // and handing it back to the MAIN world meant any script on the portal page could read it out
+      // of the mirror and impersonate this device to the backend forever. The page now sends the
+      // path and body and gets back only the headers — the key never crosses the bridge.
+      if (msg.op === 'sign') {
+        const key = cur.creds && cur.creds.clientKey;
+        if (!key) { sendResponse({ ok: false, error: 'no key' }); return; }
+        const enc = new TextEncoder();
+        const bodyHash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', enc.encode(String(msg.body || ''))))].map((b) => b.toString(16).padStart(2, '0')).join('');
+        const ts = String(Math.floor(Date.now() / 1000));
+        const nonce = crypto.randomUUID().replace(/-/g, '');
+        const ck = await crypto.subtle.importKey('raw', enc.encode(key), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+        const sigBuf = await crypto.subtle.sign('HMAC', ck, enc.encode(`${ts}\n${nonce}\nPOST\n${String(msg.path || '')}\n${bodyHash}`));
+        const signature = [...new Uint8Array(sigBuf)].map((b) => b.toString(16).padStart(2, '0')).join('');
+        sendResponse({ ok: true, ts, nonce, signature, deviceId: cur.deviceId || null });
+        return;
+      }
       if (msg.op === 'set') {
         const next = { ...cur };
         if (typeof msg.deviceId === 'string' && msg.deviceId) next.deviceId = msg.deviceId;
@@ -77,7 +94,10 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         sendResponse({ ok: true });
         return;
       }
-      sendResponse({ ok: true, deviceId: cur.deviceId || null, creds: cur.creds || null });
+      // `creds` is deliberately NOT returned (SPEC-038 / L-2). The page gets the device id and
+      // whether a key exists; to USE the key it must ask this worker to sign (op:'sign'), so the
+      // credential itself never reaches a world that page scripts can read.
+      sendResponse({ ok: true, deviceId: cur.deviceId || null, hasCreds: !!(cur.creds && cur.creds.clientKey) });
     } catch (e) {
       sendResponse({ ok: false, error: String((e && e.message) || e) });
     }

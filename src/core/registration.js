@@ -83,7 +83,9 @@ export function bridgeRequest(kind, timeoutMs = 20000, payload = null) {
 const idStore = {
   async get() {
     const r = await bridgeRequest('id-store', 8000, { op: 'get' });
-    return r && r.ok ? r : null;
+    // Only the device id is taken back into the page. The creds the worker holds stay there
+    // (SPEC-038 / L-2) — signing happens in the worker instead.
+    return r && r.ok ? { deviceId: r.deviceId } : null;
   },
   async set(patch) {
     try { await bridgeRequest('id-store', 8000, { op: 'set', ...patch }); } catch {}
@@ -120,22 +122,28 @@ export function portalProfile() {
   catch { return { rin: taxpayerId(), email: '', phone: '', company: '' }; }
 }
 
-// { clientKey, boundRins[], features[] } — localStorage first, then the SPEC-033 extension mirror.
-const creds = async () => {
-  const local = lsGet('reg_creds');
-  if (local && local.clientKey) return local;
-  const m = await idStore.get();
-  if (m && m.creds && m.creds.clientKey) { lsSet('reg_creds', m.creds); return m.creds; }
-  return null;
-};
+// { clientKey, boundRins[], features[] } — localStorage only. The extension mirror deliberately no
+// longer hands the key back to the page (SPEC-038 / L-2): if localStorage lost it, we sign in the
+// service worker instead of pulling a credential back into a world any page script can read.
+const creds = () => lsGet('reg_creds') || null;
 
-// signed extension→server request (HMAC over ts\nnonce\nPOST\npath\nsha256(body))
+// signed extension→server request (HMAC over ts\nnonce\nPOST\npath\nsha256(body)).
+//
+// Preferred path: the SERVICE WORKER signs from its own copy of the key, so the key never enters
+// the page. Fallback: sign locally from reg_creds — needed for the transition (installs whose
+// mirror predates this version) and whenever the bridge is unavailable.
 async function signedPost(path, bodyObj) {
-  const c = await creds(); const dev = await deviceId();
-  if (!c || !c.clientKey) return { ok: false, error: 'not registered' };
+  const dev = await deviceId();
   const body = (bodyObj && Object.keys(bodyObj).length) ? JSON.stringify(bodyObj) : '';
-  const ts = String(Math.floor(Date.now() / 1000)), nonce = uuid().replace(/-/g, '');
-  const sig = await hmacHex(c.clientKey, `${ts}\n${nonce}\nPOST\n${path}\n${await sha256hex(body)}`);
+  let ts, nonce, sig;
+  const signed = await bridgeRequest('id-store', 8000, { op: 'sign', path, body });
+  if (signed && signed.ok && signed.signature) { ts = signed.ts; nonce = signed.nonce; sig = signed.signature; }
+  else {
+    const c = creds();
+    if (!c || !c.clientKey) return { ok: false, error: 'not registered' };
+    ts = String(Math.floor(Date.now() / 1000)); nonce = uuid().replace(/-/g, '');
+    sig = await hmacHex(c.clientKey, `${ts}\n${nonce}\nPOST\n${path}\n${await sha256hex(body)}`);
+  }
   const res = await bridgeFetch(LEAD_URL + path, { method: 'POST', headers: { 'content-type': 'application/json', 'x-device-id': dev, 'x-ts': ts, 'x-nonce': nonce, 'x-signature': sig }, body });
   const j = res.json || {};
   if (res.ok && j.ok) return j;
