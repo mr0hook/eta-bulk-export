@@ -87,7 +87,17 @@ export async function mergeFolder(ExcelJS, dir, { onStatus = () => {}, rowCap, s
 }
 
 async function runMerge(ExcelJS, dir, { onStatus, rowCap, prefix, files, sizes, read, base, stateFile }) {
-  const jsonl = `${prefix}_COMBINED_${Date.now().toString(36)}.jsonl`;
+  // SPEC-039 — the Phase-1 scratch is written in SEGMENTS, not one file.
+  //
+  // A 250,000-invoice folder expands to ~2.3 GB of JSONL (measured 2026-08-20), and two merges died
+  // at byte-identical 2,332.6 MB with 137 GB free, no file open in Excel and no cloud sync — a
+  // deterministic wall in one very large FileSystemWritableFileStream, not a race. Each segment is
+  // opened, written and CLOSED in turn, so no single handle carries gigabytes, and Phase 2 reads
+  // them back in order — the records are consumed as a stream either way, so nothing else changes.
+  const stamp = Date.now().toString(36);
+  const segName = (i) => `${prefix}_COMBINED_${stamp}_s${String(i).padStart(3, '0')}.jsonl`;
+  const SEG_MAX_CHARS = 192 * 1024 * 1024;   // ~192M chars ≈ 200-400MB of UTF-8 with Arabic text
+  const segs = [];
   // Seeding from state is what makes the incremental pass correct: without the prior UUIDs it cannot
   // tell a genuinely new invoice from one merged last week, and without the prior column unions the
   // top-up part would be written with a narrower header than the rows already in it.
@@ -124,7 +134,16 @@ async function runMerge(ExcelJS, dir, { onStatus, rowCap, prefix, files, sizes, 
         partsOf.delete(p);
       }
     }
-    sink = await openWrite(dir, jsonl);
+    let segChars = 0;
+    const openSeg = async () => { const n = segName(segs.length); segs.push(n); sink = await openWrite(dir, n); segChars = 0; };
+    // One writer at a time; rolled over once a segment is full so no handle ever holds gigabytes.
+    const writeScratch = async (s) => {
+      if (!sink) await openSeg();
+      await sink.write(s);
+      segChars += s.length;
+      if (segChars >= SEG_MAX_CHARS) { await sink.close(); sink = null; }
+    };
+    await openSeg();
     for (const name of parents) {
       fi++;
       let wb; try { wb = new ExcelJS.Workbook(); await wb.xlsx.load(await readArrayBuffer(dir, name)); }
@@ -155,14 +174,14 @@ async function runMerge(ExcelJS, dir, { onStatus, rowCap, prefix, files, sizes, 
         // "state cached in an interface object" with no hint of which step or how far in, which
         // cost an afternoon of guessing. Say what was being written and at what size.
         if (buf.length >= FLUSH_CHARS) {
-          try { await sink.write(buf); } catch (e) { throw new Error(`scratch write failed after ${Math.round(written / 1048576)}MB while consuming ${name}: ${e?.name || ''} ${e?.message || e}`); }
+          try { await writeScratch(buf); } catch (e) { throw new Error(`scratch write failed after ${Math.round(written / 1048576)}MB (segment ${segs.length}) while consuming ${name}: ${e?.name || ''} ${e?.message || e}`); }
           written += buf.length; buf = '';
         }
       }
-      if (buf) { try { await sink.write(buf); } catch (e) { throw new Error(`scratch write failed after ${Math.round(written / 1048576)}MB while consuming ${name}: ${e?.name || ''} ${e?.message || e}`); } written += buf.length; }
+      if (buf) { try { await writeScratch(buf); } catch (e) { throw new Error(`scratch write failed after ${Math.round(written / 1048576)}MB (segment ${segs.length}) while consuming ${name}: ${e?.name || ''} ${e?.message || e}`); } written += buf.length; }
       onStatus(t('merge.phase1', { i: fi, n: parents.length, uniq }));
     }
-    await sink.close(); sink = null;   // must land on disk before Phase 2 reads it back
+    if (sink) { await sink.close(); sink = null; }   // must land on disk before Phase 2 reads it back
 
     // A column the existing parts don't have. Bail before touching the output so every part keeps
     // identical headers — mixed headers stop the parts being one dataset.
@@ -202,7 +221,9 @@ async function runMerge(ExcelJS, dir, { onStatus, rowCap, prefix, files, sizes, 
       await sumOut.addRow(sumCols.map((c) => s[c] ?? ''), day);
       for (const l of lines) await detOut.addRow(lineCols.map((c) => l[c] ?? ''), day);
     };
-    for await (const line of readLines(dir, jsonl)) { if (line.trim()) { let rec; try { rec = JSON.parse(line); } catch {} if (rec) await emit(rec); } }
+    for (const seg of segs) {
+      for await (const line of readLines(dir, seg)) { if (line.trim()) { let rec; try { rec = JSON.parse(line); } catch {} if (rec) await emit(rec); } }
+    }
     await sumOut.close();
     await detOut.close();
     const parts = { summary: sumOut.parts(), details: detOut.parts() };
@@ -223,6 +244,6 @@ async function runMerge(ExcelJS, dir, { onStatus, rowCap, prefix, files, sizes, 
   } finally {
     // The .jsonl is scratch, never a deliverable — it must not outlive the merge, error or not.
     try { await sink?.close(); } catch {}
-    try { await remove(dir, jsonl); } catch {}
+    for (const seg of segs) { try { await remove(dir, seg); } catch {} }
   }
 }
