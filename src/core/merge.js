@@ -14,7 +14,11 @@ import { CHUNK_DET_RE, detailParentOf } from './store.js';   // SPEC-027: split-
 import { t } from './i18n.js';
 
 const UUID = 'الرقم الإلكترونى', SERIAL = 'مسلسل';
-const TEMP_RE = /^e(Invoices|Receipts)_COMBINED_.*\.jsonl$/i;   // scratch only — never a deliverable
+// Scratch only — never a deliverable. `.crswap` is Chromium's swap file for an open
+// FileSystemWritableFileStream: a merge that dies mid-write leaves one behind, and the old pattern
+// (which required the name to END at .jsonl) never swept them. Three failed merges on one folder
+// left 5.3 GB of them (2026-08-20).
+const TEMP_RE = /^e(Invoices|Receipts)_COMBINED_.*\.jsonl(\.crswap)?$/i;
 const FLUSH_CHARS = 1 << 20;                                    // batch scratch writes ~1MB at a time
 
 // SPEC-013 — the issue-date column, identical in the invoice and receipt schemas. Used only to
@@ -107,7 +111,7 @@ async function runMerge(ExcelJS, dir, { onStatus, rowCap, prefix, files, sizes, 
     for (const n of read) { if (isPart(n)) { const p = detailParentOf(n); if (!partsOf.has(p)) partsOf.set(p, []); partsOf.get(p).push(n); } }
     for (const list of partsOf.values()) list.sort();
     const parents = read.filter((n) => !isPart(n));
-    let uniq = 0, fi = 0; const failed = [];
+    let uniq = 0, fi = 0, written = 0; const failed = [];
     {
       const reading = new Set(parents);
       for (const p of [...partsOf.keys()]) {
@@ -147,9 +151,15 @@ async function runMerge(ExcelJS, dir, { onStatus, rowCap, prefix, files, sizes, 
       let buf = '';
       for (const u of order) {
         uniq++; buf += JSON.stringify({ sum: localSum.get(u), lines: localLines.get(u) || [] }) + '\n';
-        if (buf.length >= FLUSH_CHARS) { await sink.write(buf); buf = ''; }   // bound the in-flight string
+        // Named on failure (2026-08-20): a merge that died here reported only Chromium's opaque
+        // "state cached in an interface object" with no hint of which step or how far in, which
+        // cost an afternoon of guessing. Say what was being written and at what size.
+        if (buf.length >= FLUSH_CHARS) {
+          try { await sink.write(buf); } catch (e) { throw new Error(`scratch write failed after ${Math.round(written / 1048576)}MB while consuming ${name}: ${e?.name || ''} ${e?.message || e}`); }
+          written += buf.length; buf = '';
+        }
       }
-      if (buf) await sink.write(buf);
+      if (buf) { try { await sink.write(buf); } catch (e) { throw new Error(`scratch write failed after ${Math.round(written / 1048576)}MB while consuming ${name}: ${e?.name || ''} ${e?.message || e}`); } written += buf.length; }
       onStatus(t('merge.phase1', { i: fi, n: parents.length, uniq }));
     }
     await sink.close(); sink = null;   // must land on disk before Phase 2 reads it back
