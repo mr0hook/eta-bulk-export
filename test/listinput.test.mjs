@@ -62,17 +62,23 @@ test('T-231 rinMatch keeps a row when issuer OR receiver is in the set, any spel
   assert.deepEqual(rinIdsOf({}), [], 'id-less rows are detectable so the run can fail loud');
 });
 
-test('T-231b the REAL portal row shape matches (live-verified 2026-08-19)', () => {
-  // Captured from api-portal /documents/search: the RINs live in recipientId / submitterId /
-  // issuerUserId's prefix — issuerTaxPayerId and recipientTaxPayerId are internal ids, NOT RINs.
+test('T-231b the REAL portal row SHAPE matches (shape live-verified 2026-08-19)', () => {
+  // The SHAPE is what was live-verified against api-portal /documents/search: the RINs live in
+  // recipientId / submitterId / issuerUserId's prefix, while issuerTaxPayerId and
+  // recipientTaxPayerId are internal ids and must never match.
+  //
+  // The values are SYNTHETIC. This row previously carried a real counterparty's name and real
+  // registration ids captured from a live session — committed to git and shipped in the source zip
+  // (2026-08-20 review, L-7). A test fixture must never carry another company's tax identifiers;
+  // the field layout is the only thing under test, and digits of the right length prove it.
   const portalRow = {
-    issuerTaxPayerId: '827787', issuerUserId: '340035072:dbcdee03-94e7-4ee2-95c0-3af454f3ec9e',
-    submitterId: '340035072', recipientTaxPayerId: '1079855', recipientId: '521230144',
-    recipientName: 'Egypt Control System', documentStatusEN: 'Valid',
+    issuerTaxPayerId: '111111', issuerUserId: '900000001:00000000-0000-4000-8000-000000000000',
+    submitterId: '900000001', recipientTaxPayerId: '222222', recipientId: '900000002',
+    recipientName: 'Synthetic Counterparty Co', documentStatusEN: 'Valid',
   };
-  assert.deepEqual(rinIdsOf(portalRow), ['521230144', '340035072', '340035072']);
-  assert.ok(rinMatch(['521230144'])(portalRow), 'receiver-side counterparty matches');
-  assert.ok(rinMatch(['340035072'])(portalRow), 'issuer-side matches (a Received doc, seen from the buyer)');
-  assert.ok(!rinMatch(['1079855'])(portalRow), 'the internal taxpayer id must NEVER match — it is not a RIN');
-  assert.ok(!rinMatch(['827787'])(portalRow), 'issuerTaxPayerId likewise');
+  assert.deepEqual(rinIdsOf(portalRow), ['900000002', '900000001', '900000001']);
+  assert.ok(rinMatch(['900000002'])(portalRow), 'receiver-side counterparty matches');
+  assert.ok(rinMatch(['900000001'])(portalRow), 'issuer-side matches (a Received doc, seen from the buyer)');
+  assert.ok(!rinMatch(['222222'])(portalRow), 'the internal taxpayer id must NEVER match — it is not a RIN');
+  assert.ok(!rinMatch(['111111'])(portalRow), 'issuerTaxPayerId likewise');
 });

@@ -42,7 +42,14 @@ console.log('✓ built dist/etaBulk.js' + (dev ? ' (dev)' : ''));
 const regSrc = readFileSync(new URL('./src/core/registration.js', import.meta.url), 'utf8');
 // For a staging build the compiled LEAD_URL comes from the define, not the literal — read the same
 // value the bundle got, or bg.js would pin production's origin and refuse every staging call.
-const leadMatch = staging ? [null, leadUrl] : regSrc.match(/:\s*['"](https?:[^'"]+)['"]/);
+// Anchored to the LEAD_URL declaration itself. It used to take the FIRST quoted http URL anywhere
+// in the file, so a documentation link in a comment above the constant repointed bg.js AND rewrote
+// manifest host_permissions while the build still printed success (2026-08-20 review, L-4).
+// Anchored to the LEAD_URL declaration (which spans lines: `export const LEAD_URL = (typeof
+// __LEAD_URL__ …) ? __LEAD_URL__ : 'https://…'`). It used to take the FIRST quoted http URL
+// anywhere in the file, so a documentation link in a comment above the constant repointed bg.js AND
+// rewrote manifest host_permissions while the build still printed success (2026-08-20 review, L-4).
+const leadMatch = staging ? [null, leadUrl] : regSrc.match(/LEAD_URL[\s\S]{0,200}?['"](https?:[^'"]+)['"]/);
 // Derive the backend origin. If LEAD_URL is the intentional REPLACE-ME placeholder the gate is OFF
 // (gateEnabled() is false), so bg.js never fetches and its origin is a harmless stub. But a LEAD_URL that
 // is set-yet-malformed means the gate is ON against an origin we can't parse — fail LOUDLY rather than ship
@@ -51,6 +58,11 @@ let leadOrigin;
 if (!leadMatch) throw new Error('LEAD_URL not found in src/core/registration.js — cannot generate bg.js.');
 if (/REPLACE-ME/.test(leadMatch[1])) { leadOrigin = 'https://replace-me.invalid'; console.log('  ⚠ LEAD_URL is the placeholder — gate is OFF; bg.js origin is a harmless stub.'); }
 else { try { leadOrigin = new URL(leadMatch[1]).origin; } catch { throw new Error(`LEAD_URL="${leadMatch[1]}" is not a valid URL — set your Worker URL in src/core/registration.js, then rebuild.`); } }
+// The bundle, the service-worker pin and the manifest host must be the SAME origin — a build where
+// they disagree is one whose backend calls fail opaquely, or worse, one pinned somewhere unintended.
+if (!/REPLACE-ME/.test(leadMatch[1]) && new URL(leadUrl).origin !== leadOrigin) {
+  throw new Error(`build origin mismatch: bundle LEAD_URL=${new URL(leadUrl).origin} but bg.js would pin ${leadOrigin}.`);
+}
 const bgOut = readFileSync(new URL('./src/bg.js', import.meta.url), 'utf8').split('__LEAD_ORIGIN__').join(leadOrigin);   // replace ALL occurrences
 writeFileSync(new URL('./bg.js', import.meta.url), bgOut);
 console.log('✓ generated bg.js (backend origin ' + leadOrigin + ')');

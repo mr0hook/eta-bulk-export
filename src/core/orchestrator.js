@@ -399,6 +399,7 @@ export function createOrchestrator(hooks = {}) {
         }
         currentCtrl = new AbortController();
         let ok = false, lastErr = null, authRetries = 0;
+        let pdfSavedChunk = 0, pdfDroppedChunk = 0;   // L-10: per-attempt, banked only when the chunk succeeds
         for (let attempt = 0; attempt < 3 && !ok && !flags.paused && !flags.halted; attempt++) {
           try {
             // SPEC-022 uuid mode: the batch IS the row list — no search. A synthetic row carries
@@ -433,7 +434,11 @@ export function createOrchestrator(hooks = {}) {
             if (!rows.length) { ok = true; break; }
             if (c.warn) {   // this span holds ≥ cap documents and can't be split finer → surplus beyond cap is unreachable
               onStatus(t('orch.overCap', { i: i + 1, cap: SRC.cap, got: rows.length }), { level: 'warn' });
-              try { await fs.appendText(dirHandle, 'eta_failures.jsonl', JSON.stringify({ at: new Date().toISOString(), chunk: c.id, kind: 'over_cap', warn: c.warn, fetched: rows.length, cap: SRC.cap }) + '\n'); } catch {}
+              // Says so when it cannot be written (2026-08-20 review, L-11). The dropped-document
+              // append fails the chunk on error; this one is a range-level note that no retry can
+              // reconstruct, so a silent catch made the two audit writes give opposite guarantees.
+              try { await fs.appendText(dirHandle, 'eta_failures.jsonl', JSON.stringify({ at: new Date().toISOString(), chunk: c.id, kind: 'over_cap', warn: c.warn, fetched: rows.length, cap: SRC.cap }) + '\n'); }
+              catch (e) { onStatus(t('orch.overCapLogFailed', { i: i + 1, msg: String(e?.name || e?.message || e).slice(0, 80) }), { level: 'err' }); }
             }
             onStatus(t('orch.chunkDetails', { i: i + 1, n: plan.chunks.length, count: rows.length }), { level: 'run' });
             let dDone = 0; const dTotal = rows.length;
@@ -479,9 +484,14 @@ export function createOrchestrator(hooks = {}) {
                   catch (e) { if (e.code === 'AUTH' || e.code === 'STOPPED') throw e; return { uuid, err: String(e?.message || e) }; }
                   finally { pDone++; onChunk({ i: i + 1, n: plan.chunks.length, phase: 'pdf', cur: pDone, max: batchRows.length }); }
                 })).filter(Boolean);
-                pdfSaved += batchRows.length - pdfFails.length;
+                // Per-ATTEMPT into a per-chunk local, folded into the run totals once the chunk
+                // actually succeeds (2026-08-20 review, L-10). Adding straight to the run counters
+                // here counted a chunk's PDFs again on every retry, so a chunk that succeeded on
+                // attempt 3 reported ~3× the files that exist on disk — in numbers shipped to the
+                // backend. droppedByChunk was already keyed per chunk for exactly this reason.
+                pdfSavedChunk += batchRows.length - pdfFails.length;
                 if (pdfFails.length) {
-                  pdfDropped += pdfFails.length;
+                  pdfDroppedChunk += pdfFails.length;
                   const lines = pdfFails.map((f) => JSON.stringify({ at: new Date().toISOString(), chunk: c.id, kind: 'pdf', uuid: f.uuid, err: f.err })).join('\n') + '\n';
                   try { await fs.appendText(dirHandle, 'eta_failures.jsonl', lines); } catch {}
                   onStatus(t('orch.pdfsUnavailable', { count: pdfFails.length, i: i + 1 }), { level: 'warn' });
@@ -571,9 +581,14 @@ export function createOrchestrator(hooks = {}) {
               onStatus(t('orch.docsDropped', { count: allFailed.length, i: i + 1, written, total: rows.length }), { level: 'warn' });
             }
             rowsFetched += rows.length; onCount(rowsFetched, plan.totalRows);
+            pdfSaved += pdfSavedChunk; pdfDropped += pdfDroppedChunk;   // L-10: banked once, on success
             ok = true; consec = 0;
           } catch (e) {
-            lastErr = e; const msg = String(e?.message || e);
+            // Bounded on purpose (2026-08-20 review, L-9): this line is SHIPPED to the backend, and
+            // splicing a raw error message into it is how document content would eventually leak
+            // through a stack trace or an API error body. The folder log keeps the full text.
+            lastErr = e;
+            const msg = String(e?.code || e?.message || e).slice(0, 160);
             if (e.code === 'AUTH') {
               // token died mid-chunk — same wait-for-renewal as the boundary guard, then retry the
               // chunk (attempt-- so the renewal itself doesn't burn one of the 3 attempts)

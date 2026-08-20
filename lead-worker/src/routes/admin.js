@@ -316,11 +316,18 @@ export async function adminRoutes(request, env, url, path, admin) {
       return new Response('﻿' + toCsv(rows), { headers: { 'content-type': 'text/csv; charset=utf-8', 'content-disposition': 'attachment; filename="' + fname + '"', 'cache-control': 'no-store', ...CORS } });
     }
 
-    // Full JSON backup — the only export that captures clientKey/deviceId/requests/bugs/voids/cfg/audit, i.e.
-    // the ONLY one you can actually restore the namespace from after an accidental wipe or bad bulk op.
+    // Full JSON backup — deviceId/requests/bugs/voids/cfg, i.e. what you restore the namespace from
+    // after an accidental wipe or bad bulk op.
+    //
+    // clientKey is deliberately NOT in it (2026-08-20 review, L-1): it is every device's live
+    // authenticator, and a single static admin bearer producing a file full of them — in a dump
+    // that gets emailed, synced and kept on laptops — is the one surface that defeats the
+    // credential redaction the audit trail and every other export enforce. A restore mints fresh
+    // keys instead; a device re-registers under its own id and is never refused (T-182).
     if (request.method === 'GET' && path === '/backup') {
       if (!admin()) return json({ ok: false, error: 'unauthorized' }, 401);
-      const dump = { at: new Date().toISOString(), users: await listPrefix(env, 'dev:'), seen: {}, requests: await listPrefix(env, 'req:'), bugs: await listPrefix(env, 'bug:'), voids: await listKeys(env, 'void:'), cfg: await getCfg(env) };
+      const users = (await listPrefix(env, 'dev:')).map((u) => { const { clientKey, ...rest } = u || {}; return { ...rest, clientKeyOmitted: !!clientKey }; });
+      const dump = { at: new Date().toISOString(), users, seen: {}, requests: await listPrefix(env, 'req:'), bugs: await listPrefix(env, 'bug:'), voids: await listKeys(env, 'void:'), cfg: await getCfg(env) };
       { let cursor; do { const l = await env.LEADS.list({ prefix: 'seen:', cursor }); const names = l.keys.map((k) => k.name); for (let i = 0; i < names.length; i += 100) { const m = await env.LEADS.get(names.slice(i, i + 100), 'json'); for (const [k, v] of m) if (v) dump.seen[k.slice(5)] = v; } cursor = l.list_complete ? null : l.cursor; } while (cursor); }
       return new Response(JSON.stringify(dump, null, 1), { headers: { 'content-type': 'application/json; charset=utf-8', 'content-disposition': 'attachment; filename="eta-bulk-backup.json"', 'cache-control': 'no-store', ...CORS } });
     }

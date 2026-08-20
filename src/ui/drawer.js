@@ -1102,7 +1102,7 @@ export function mountUI() {
         if (res.error) throw res.error;
         offerRepair(res.repair);
       }
-    } catch (e) { logLine(t('ft.mergeFailed', { msg: e?.message || e }), { level: 'err' }); setFt('err', t('ft.mergeFailedShort')); }
+    } catch (e) { logLine(t('ft.mergeFailed', { msg: mergeErrText(e) }), { level: 'err' }); setFt('err', t('ft.mergeFailedShort')); }
     setBusy(false);
   };
   // Merge is the last phase of a run: the job is not done until the output exists. Only a clean
@@ -1128,10 +1128,10 @@ export function mountUI() {
           ? () => jobCheckpoint({ jobId: p.jobId, state: 'done', done: (p.doneIds || []).length, failed: (p.failedIds || []).length })
           : null,
       });
-      if (res.error) { logLine(t('ft.mergeFailed', { msg: res.error?.message || res.error }), { level: 'err' }); setFt('err', t('ft.mergeFailedShort')); }
+      if (res.error) { logLine(t('ft.mergeFailed', { msg: mergeErrText(res.error) }), { level: 'err' }); setFt('err', t('ft.mergeFailedShort')); }
       else { logLine(t('flow.runComplete'), { level: 'ok' }); setFt('ok', t('flow.runComplete')); }
       offerRepair(res.repair);
-    } catch (e) { logLine(t('ft.mergeFailed', { msg: e?.message || e }), { level: 'err' }); setFt('err', t('ft.mergeFailedShort')); }
+    } catch (e) { logLine(t('ft.mergeFailed', { msg: mergeErrText(e) }), { level: 'err' }); setFt('err', t('ft.mergeFailedShort')); }
     finally { finishing = false; setBusy(false); refreshResume(); }
   }
   $('repair').onclick = async () => {
@@ -1163,6 +1163,17 @@ export function mountUI() {
       scrim.addEventListener('keydown', (e) => { if (e.key === 'Escape') { e.stopPropagation(); done(null); } });
     });
   }
+  // Chromium's File System Access errors are unreadable to a user. The one merge actually hits —
+  // "state cached in an interface object … had changed since it was read from disk" (an
+  // InvalidStateError, sometimes NotReadableError/NoModificationAllowedError) — means a file it
+  // needed changed or was locked underneath it, and in practice that is an output workbook still
+  // open in Excel. Say the actionable thing and keep the raw text after it.
+  const mergeErrText = (e) => {
+    const raw = String(e?.message || e || '');
+    return /state had changed|cached in an interface object|InvalidStateError|NoModificationAllowed|NotReadable/i.test(raw)
+      ? t('ft.mergeLocked') + ' — ' + raw.slice(0, 140)
+      : raw.slice(0, 200);
+  };
   // Yes/no confirm in the same in-drawer modal style (window.confirm has the same suppression problem).
   function confirmModal(title, sub) {
     return new Promise((resolve) => {
