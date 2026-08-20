@@ -50,6 +50,37 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   })();
   return true;   // async sendResponse
 });
+// SPEC-033 — identity mirror. The extension's device id and creds used to live ONLY in the
+// portal's own localStorage; a portal re-login wipes that, and the 2026-08-20 incident showed the
+// cost: a fresh device id, a "not registered" verdict, and a re-registration refused with
+// "device limit reached" because the allowance was already held by the id that had just been
+// erased. chrome.storage.local belongs to the EXTENSION — no page action can clear it.
+//
+// SECURITY: the storage key is pinned here and only two fields are ever read or written, so this
+// cannot be repurposed into general storage access from the page. The values are the same ones the
+// page already holds in its own localStorage, so nothing new is exposed to it.
+const ID_KEY = 'etaBulkIdentity';
+chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+  if (!msg || msg.type !== 'eta-id-store') return false;
+  (async () => {
+    try {
+      const cur = (await chrome.storage.local.get(ID_KEY))[ID_KEY] || {};
+      if (msg.op === 'set') {
+        const next = { ...cur };
+        if (typeof msg.deviceId === 'string' && msg.deviceId) next.deviceId = msg.deviceId;
+        if (msg.creds === null) delete next.creds;
+        else if (msg.creds && typeof msg.creds === 'object' && typeof msg.creds.clientKey === 'string') next.creds = msg.creds;
+        await chrome.storage.local.set({ [ID_KEY]: next });
+        sendResponse({ ok: true });
+        return;
+      }
+      sendResponse({ ok: true, deviceId: cur.deviceId || null, creds: cur.creds || null });
+    } catch (e) {
+      sendResponse({ ok: false, error: String((e && e.message) || e) });
+    }
+  })();
+  return true;   // async sendResponse
+});
 chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
   if (!msg || msg.type !== 'eta-lead-fetch') return false;
   (async () => {

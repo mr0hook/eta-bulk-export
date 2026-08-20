@@ -28,6 +28,23 @@
       }
       return;
     }
+    // SPEC-033: the extension-owned identity mirror. Only op/deviceId/creds cross — the service
+    // worker pins the storage key itself, so this can never become a general storage primitive.
+    if (d.kind === 'id-store') {
+      var p = d.payload || {};
+      try {
+        chrome.runtime.sendMessage(
+          { type: 'eta-id-store', op: p.op, deviceId: p.deviceId, creds: p.creds },
+          function (resp) {
+            var err1 = chrome.runtime.lastError;
+            window.postMessage({ __eta: 'res', id: d.id, result: err1 ? { ok: false, error: err1.message } : (resp || { ok: false, error: 'no response' }) }, location.origin);
+          }
+        );
+      } catch (ex1) {
+        window.postMessage({ __eta: 'res', id: d.id, result: { ok: false, error: String((ex1 && ex1.message) || ex1) } }, location.origin);
+      }
+      return;
+    }
     if (d.kind === 'lead-fetch') {
       try {
         chrome.runtime.sendMessage(

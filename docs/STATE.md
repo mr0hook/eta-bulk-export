@@ -19,7 +19,24 @@ single origin bg.js is allowed to fetch, and manifest.json's host_permissions. A
 up in `git status` (manifest.json changes) and `package-ext.mjs` refuses to zip one.
 
 ## NEXT ACTION
-→ 2026-08-20 ~02:40, SPEC-032 BUILT (v0.11.1): user caught SPEC-029 fragmenting output — it opened
+→ 2026-08-20 ~11:00 INCIDENT + SPEC-033 (v0.11.2): mid-run the tool threw the user back to the
+  REGISTRATION GATE with "device limit reached". Assessment: docs/incidents/2026-08-20-
+  registration-lockout.md. NO DATA LOST (verified on disk: 37/38 chunks, 24 detail parts,
+  291.6MB, progress says 37 done / 0 failed / 254,048 rows). NOT caused by 429/WAF: creds are
+  wiped ONLY on the literal '/session → not registered', and the refusal was /register's
+  device_limit business rule; the observed 429s were all on ETA's api-portal host.
+  Fix shipped: identity (device id + creds) is mirrored into chrome.storage.local via the bridge
+  (extension-owned; a portal re-login cannot clear it), localStorage becomes a cache restored from
+  the mirror, and the 'not registered' path clears CREDS but keeps the DEVICE ID so a re-register
+  is always the never-refused returning-device case. T-271..T-273; 401/401.
+  USER MUST: (1) Merge now — local, no backend, yields COMBINED from the 37 done chunks;
+  (2) in /admin raise the device allowance or delete the stale device, then Register & unlock;
+  (3) finish chunk 38 via "Sync new since last run" (old job is device-scoped, cannot resume under
+  a new id); (4) optional: ⟳ Load failed UUIDs for the 3,484 FORBIDDEN + 4 NOT_FOUND documents.
+  OPEN QUESTION for the owner (needs the admin token): does /admin show this account holding an
+  OLD device id (→ local id loss) or none at all (→ server-side record loss)?
+
+→ Previous (2026-08-20 ~02:40), SPEC-032 BUILT (v0.11.1): user caught SPEC-029 fragmenting output — it opened
   a part file PER 2,000-doc BATCH, so a 10k chunk became 5 files even with a few thousand detail
   rows. Batching is for MEMORY and must not decide layout. createDetailSink now holds line rows
   while the chunk may still fit one file (30k budget): under it → ONE workbook with inline lines,

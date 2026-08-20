@@ -58,19 +58,48 @@ function bridgeFetch(url, opts) {
 // Deliberately built on the SAME pending map and response listener as bridgeFetch above, but
 // bridgeFetch itself is left untouched — it is the licensing path and not worth re-plumbing for
 // this. Never rejects: the keeper is best-effort by contract.
-export function bridgeRequest(kind, timeoutMs = 20000) {
+export function bridgeRequest(kind, timeoutMs = 20000, payload = null) {
   return new Promise((resolve) => {
     if (typeof window === 'undefined' || !window.postMessage) { resolve({ ok: false, status: 0, error: 'no bridge' }); return; }
     const id = 'k' + (++_bridgeSeq) + '_' + Date.now();
     const timer = setTimeout(() => { if (_bridgePending.has(id)) { _bridgePending.delete(id); resolve({ ok: false, status: 0, error: 'timeout' }); } }, timeoutMs);
     _bridgePending.set(id, (result) => { clearTimeout(timer); resolve(result || { ok: false, status: 0, error: 'no result' }); });
-    window.postMessage({ __eta: 'req', kind, id }, window.location.origin);
+    window.postMessage({ __eta: 'req', kind, id, payload }, window.location.origin);
   });
 }
 
+// SPEC-033 — the extension's identity must survive the PORTAL clearing its own localStorage.
+//
+// 2026-08-20 incident: the portal re-authenticated mid-run and wiped page localStorage. The device
+// id and creds went with it (they lived in the portal's storage — storage the portal owns and may
+// clear at any re-login). The extension then generated a NEW device id, the server correctly said
+// "not registered", the gate reappeared, and the automatic re-register was refused with
+// "device limit reached" — because the account's allowance was already held by the OLD id, which
+// no longer existed anywhere on the device. A finished 7-hour run was locked out of its own tool.
+//
+// So identity is mirrored into chrome.storage.local through the bridge (extension-owned storage the
+// page cannot touch), and localStorage becomes a fast cache that is restored from the mirror.
+// Best-effort by contract: a missing bridge degrades to exactly the old behaviour.
+const idStore = {
+  async get() {
+    const r = await bridgeRequest('id-store', 8000, { op: 'get' });
+    return r && r.ok ? r : null;
+  },
+  async set(patch) {
+    try { await bridgeRequest('id-store', 8000, { op: 'set', ...patch }); } catch {}
+  },
+};
+
 export async function deviceId() {
   let id = lsGet('reg_device_id');
-  if (!id) { id = uuid(); lsSet('reg_device_id', id); }
+  if (id) return id;
+  // localStorage lost it — the mirror is the authority, and reusing the SAME id is what stops a
+  // wipe from burning another device slot ("a returning deviceId is never refused" — T-182).
+  const m = await idStore.get();
+  if (m && m.deviceId) { lsSet('reg_device_id', m.deviceId); return m.deviceId; }
+  id = uuid();
+  lsSet('reg_device_id', id);
+  await idStore.set({ deviceId: id });
   return id;
 }
 export function taxpayerId() {
@@ -91,7 +120,14 @@ export function portalProfile() {
   catch { return { rin: taxpayerId(), email: '', phone: '', company: '' }; }
 }
 
-const creds = () => lsGet('reg_creds') || null;   // { clientKey, boundRins[], features[] }
+// { clientKey, boundRins[], features[] } — localStorage first, then the SPEC-033 extension mirror.
+const creds = async () => {
+  const local = lsGet('reg_creds');
+  if (local && local.clientKey) return local;
+  const m = await idStore.get();
+  if (m && m.creds && m.creds.clientKey) { lsSet('reg_creds', m.creds); return m.creds; }
+  return null;
+};
 
 // signed extension→server request (HMAC over ts\nnonce\nPOST\npath\nsha256(body))
 async function signedPost(path, bodyObj) {
@@ -120,7 +156,9 @@ export async function register(form) {
     if (res.status === 0) return { ok: false, error: t('reg.unreachable', { err: res.error || 'no response' }) };
     return { ok: false, error: j.error || t('reg.serverError', { status: res.status }) };
   }
-  const saved = lsSet('reg_creds', { clientKey: j.clientKey, boundRins: j.boundRins || [rin], features: j.features || [], at: new Date().toISOString() });
+  const fresh = { clientKey: j.clientKey, boundRins: j.boundRins || [rin], features: j.features || [], at: new Date().toISOString() };
+  const saved = lsSet('reg_creds', fresh);
+  await idStore.set({ creds: fresh });   // SPEC-033: the copy the portal cannot wipe
   lsSet('reg_verdict', { registered: true, allowed: !!j.allowed, locked: false, killed: false, reason: '', boundRins: j.boundRins || [rin], features: j.features || [], rin, at: Date.now() });   // seed grace verdict
   if (!saved) return { ok: false, error: t('reg.storageBlocked') };
   return { ok: true };
@@ -149,7 +187,10 @@ export async function session() {
   }
   // Server says this device is unknown (e.g. the admin DELETED the account) → wipe local creds so the gate
   // reappears and stale grace can't keep it alive. (A transient sig/skew failure returns 'unauthorized', not this.)
-  if (j.error === 'not registered') { lsDel('reg_creds'); lsDel('reg_verdict'); return { registered: false, allowed: false, rin }; }
+  // SPEC-033: drop the CREDS from both stores, but never the device id — re-registering under the
+  // same id is always accepted, while a fresh id would spend another slot off the allowance and can
+  // strand the user behind "device limit reached" (2026-08-20).
+  if (j.error === 'not registered') { lsDel('reg_creds'); lsDel('reg_verdict'); await idStore.set({ creds: null }); return { registered: false, allowed: false, rin }; }
   // Grace: reuse the server's LAST AUTHORITATIVE verdict verbatim. Never recompute `allowed` from a subset
   // of dimensions — that would fail OPEN for version/void denials (cached.allowed already folds in
   // kill/lock/version/void). Only valid for the same logged-in RIN.
