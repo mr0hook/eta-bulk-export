@@ -33,10 +33,17 @@ const PDF_CONC = 8;   // official PDFs are larger; fetch fewer at once
 // batch (~1GB at 2,000 line-heavy received invoices, measured live 2026-08-19), so chunk size is
 // no longer bounded by tab memory and the planner's cap can stay at 10k for every direction.
 const BATCH_DOCS = 2000;
-// SPEC-030: at/above this many FORBIDDEN rows (and ≥ half the processed docs) a chunk is treated
-// as an entity-flip casualty and FAILED — never completed thin. Genuine per-document 403s
-// (intermediary/marketplace submissions) arrive in ones and fives, far under this.
+// SPEC-030: at/above this many FORBIDDEN rows AND this share of the chunk's processed documents,
+// a chunk is treated as an entity-flip casualty and FAILED — never completed thin. Genuine
+// per-document 403s (intermediary/marketplace submissions) arrive in ones and fives, far under it.
+//
+// 2026-08-20: the share was HALF, and a real flip missed it by a hair — chunk 31 lost 3,484 of
+// 7,391 documents (47.1%) to a flip that the renewal restore fixed 90 seconds later, and because
+// 47% < 50% the chunk was written "thin" with 3,907 rows and marked done. A quarter is still an
+// order of magnitude above anything organic, and a chunk shedding a quarter of its documents to
+// 403s is never healthy.
 const MASS_FORBIDDEN_MIN = 25;
+const MASS_FORBIDDEN_SHARE = 0.25;
 // SPEC-031: the SESSION host — the origin this content script runs on, and a different host from
 // the API the run talks to. Pinned as a constant (never read from location) so the warm can only
 // ever hit the portal.
@@ -489,7 +496,7 @@ export function createOrchestrator(hooks = {}) {
             // refetches, instead of completing thin (2026-08-19 chunk-7: 974/1086 dropped).
             const massForbidden = (failed, processed) => {
               const forb = failed.filter((f) => f.err === 'FORBIDDEN').length;
-              if (forb >= MASS_FORBIDDEN_MIN && forb * 2 >= processed) throw new Error(t('orch.massForbidden', { n: forb, total: processed }));
+              if (forb >= MASS_FORBIDDEN_MIN && forb >= processed * MASS_FORBIDDEN_SHARE) throw new Error(t('orch.massForbidden', { n: forb, total: processed }));
             };
 
             // SPEC-029 + SPEC-032: documents are processed in batches so raw detail JSONs never

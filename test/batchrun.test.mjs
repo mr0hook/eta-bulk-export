@@ -35,7 +35,9 @@ const okResp = (body) => ({ status: 200, ok: true, json: async () => body, heade
 // A paged synthetic portal: N rows served through real Page/PageSize params, details by uuid.
 // uuids beginning with F are FORBIDDEN (403) — the entity-flip signature.
 function stubPagedFetch(n) {
-  const rows = Array.from({ length: n }, (_, k) => ({ source: { uuid: (k < 50 && n === 60 ? 'F' : 'U') + k, documentStatusEN: 'Valid' } }));
+  // uuids starting with F answer 403. `forbidden` lets a test set the exact share of a chunk.
+  const forbidden = stubPagedFetch.forbidden != null ? stubPagedFetch.forbidden : (n === 60 ? 50 : 0);
+  const rows = Array.from({ length: n }, (_, k) => ({ source: { uuid: (k < forbidden ? 'F' : 'U') + k, documentStatusEN: 'Valid' } }));
   globalThis.fetch = async (url) => {
     const u = String(url);
     if (u.includes('/search')) {
@@ -104,11 +106,43 @@ test('T-265 a 4,500-doc chunk spans three batches but still lands in ONE file (S
 
 test('T-266 a flood of 403s FAILS the chunk (entity-flip signature) instead of completing thin', async () => {
   setToken();
-  stubPagedFetch(60);   // 50 uuids answer 403 — like the 2026-08-19 chunk-7 flip (974/1086)
+  stubPagedFetch.forbidden = null;
+  stubPagedFetch(60);   // 50 of 60 uuids answer 403 — like the 2026-08-19 chunk-7 flip (974/1086)
   const dir = fakeDir();
   const msgs = await run(dir, mkPlan(60));
 
   assert.ok(![...dir.files.keys()].some((n) => n.endsWith('.xlsx')), 'no chunk file — a thin completion is the failure mode this exists to stop');
   assert.deepEqual(progress(dir).failedIds, ['c1'], 'the chunk is marked failed so Resume retries it whole');
   assert.ok(msgs.some((m) => /403/.test(m)), 'the mass-403 diagnosis is stated in the log');
+});
+
+test('T-274 the 2026-08-20 chunk-31 case: 47% forbidden must FAIL, not write a thin chunk', async () => {
+  // The real incident: 3,484 of 7,391 documents (47.1%) were refused after an entity flip, and the
+  // old ">= half" rule let it through — the chunk was written with 3,907 rows and marked DONE, so
+  // resume never retried it and 3,484 documents silently left the export.
+  setToken();
+  stubPagedFetch.forbidden = 47;      // 47 of 100 → 47%, just under the retired 50% threshold
+  stubPagedFetch(100);
+  const dir = fakeDir();
+  const msgs = await run(dir, mkPlan(100));
+  stubPagedFetch.forbidden = null;
+
+  assert.ok(![...dir.files.keys()].some((n) => n.endsWith('.xlsx')), 'no thin chunk file is written');
+  assert.deepEqual(progress(dir).failedIds, ['c1'], 'the chunk fails so a resume refetches it whole');
+  assert.ok(msgs.some((m) => /403/.test(m)), 'and says why');
+});
+
+test('T-275 an ordinary trickle of 403s still completes the chunk', async () => {
+  // The counterweight: genuine per-document denials (intermediary/marketplace submissions) arrive
+  // in ones and fives. Those must never fail a chunk — they belong in eta_failures.jsonl.
+  setToken();
+  stubPagedFetch.forbidden = 6;       // 6 of 400 = 1.5%
+  stubPagedFetch(400);
+  const dir = fakeDir();
+  await run(dir, mkPlan(400));
+  stubPagedFetch.forbidden = null;
+
+  assert.ok([...dir.files.keys()].some((n) => n.endsWith('.xlsx')), 'the chunk is written');
+  assert.deepEqual(progress(dir).doneIds, ['c1'], 'and marked done');
+  assert.ok([...dir.files.keys()].includes('eta_failures.jsonl'), 'the few refusals are recorded for the retry button');
 });

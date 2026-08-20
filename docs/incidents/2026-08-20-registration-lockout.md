@@ -23,10 +23,32 @@ Inventory of `C:\Users\MRGho\Desktop\Amazon\Pr2\2023` taken after the lockout:
 that turns them into the COMBINED deliverables is a purely local operation that never contacts the
 backend. Only chunk 38 of 38 (4,753 documents) is unfinished.
 
-Also on disk: `eta_failures.jsonl`, 3,488 entries — **3,484 FORBIDDEN, 4 NOT_FOUND**. Those are
-documents ETA lists in search but refuses to serve on `/details` (~1.4% of the run). They are
-spread thinly across chunks — no chunk crossed the SPEC-030 mass-403 threshold, which is why none
-failed — so they read as genuine per-document permission denials, not an entity flip.
+Also on disk: `eta_failures.jsonl`, 3,488 entries — **3,484 FORBIDDEN, 4 NOT_FOUND**.
+
+**Correction after reading the run log:** these were NOT spread thinly, and they were NOT genuine
+denials. Every one of the 3,484 came from **chunk 31 alone**, in the ninety seconds around an
+entity flip:
+
+```
+07:11:20 ⚠️ 2000 detail(s) failed in chunk 31 — retrying once…
+07:14:01 ⚠️ 1391 detail(s) failed in chunk 31 — retrying once…
+07:14:34 🔄 The portal refreshed the session token by itself — no tab needed.
+07:14:34 ⏳ Portal session running low — refreshing it in the background…
+07:14:46 🛡 The session renewal landed on the wrong company — switching back…
+07:14:58 🛡 Company restored right after the renewal.
+07:15:21 ⚠️ 3484 document(s) in chunk 31 unavailable after retries (3907/7391 written).
+```
+
+The flip was detected and repaired in **12 seconds** — SPEC-030/031 working exactly as designed,
+verified live for the first time. But the damage was already done inside chunk 31, and the
+mass-403 guard **missed it by a hair**: it required forbidden ≥ *half* of processed, and this was
+3,484/7,391 = **47.1%**. So the chunk was written thin (3,907 of 7,391 rows) and marked **done** —
+which means resume will never retry it. That is a real data-completeness defect, not a portal
+behaviour.
+
+**Fixed in v0.11.3:** the guard now fires at **25%** of processed documents (still an order of
+magnitude above anything organic). T-274 pins the exact 47% case; T-275 pins that an ordinary
+trickle of genuine 403s still completes normally.
 
 ## 2. The 429s were ETA's, and they did not log anyone out
 
