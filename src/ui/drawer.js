@@ -346,6 +346,11 @@ export function mountUI() {
                to be mergeable. Repair is NOT here — it appears only when merge reports a file it
                could not read (see #repairOffer). -->
           <div class="tools"><button class="btn" id="merge" data-i18n="ui.merge">⧉ Merge folder</button><button class="btn" id="sync" data-i18n="ui.sync" data-i18n-title="ui.syncTitle" title="Re-exports from 3 days before the last run's end through today, into the same folder.">⟳ Sync new since last run</button></div>
+          <!-- SPEC-034: resume straight from the folder's own progress file. The Resume entry above
+               only appears when the SERVER still lists the job, and a job is device-scoped — so a
+               device that lost its identity (2026-08-20) could not continue a run whose plan was
+               sitting complete in the folder the whole time. -->
+          <button class="btn sm" id="resumeFolder" style="width:100%;margin-top:8px" data-i18n="ui.resumeFolder" data-i18n-title="ui.resumeFolderTitle" title="Continues an interrupted run using the plan saved in the export folder — no server job needed.">⏵ Resume from folder</button>
           <button class="btn sm" id="bug" style="width:100%;margin-top:8px" data-i18n="ui.bug">🐞 Report a bug</button>
           <button class="btn sm" id="reqrin" style="width:100%;margin-top:8px" hidden data-i18n="ui.reqrin">＋ Request access for another account</button>
         </section>
@@ -933,6 +938,34 @@ export function mountUI() {
         if (local && local.key === p.key) p = { ...local, jobId: p.jobId };
         setKind(kindOf(p.source, p.dir));
         renderPlan(p);   // paints the chunk map's finished squares before a single fetch goes out
+        await orch.start(p);
+      },
+    });
+    if (r.error) { logLine(t('ft.resumeFailed', { msg: r.error?.message || r.error }), { level: 'err' }); setFt('err', t('ft.resumeFailed', { msg: r.error?.message || r.error })); }
+  };
+  // SPEC-034 — resume from the folder alone. Same run path as #resumeEntry, minus the server: the
+  // progress file already holds the server-minted plan, the column/PDF choices and the done list,
+  // and orch.resume() re-derives the done list from the chunk files actually on disk. Checkpoints
+  // stay best-effort (mark() swallows a 404), so a job the server no longer associates with this
+  // device does not stop the export from finishing.
+  $('resumeFolder').onclick = async () => {
+    if (busy) { refuseRun(); return; }
+    const d = await ensureFolder();
+    if (!d) { setFt('', t('orch.pickResume')); return; }
+    await refreshLicense(); if (!licensed) { $('gate').hidden = false; $('rg-name').focus(); return; }
+    let p = null;
+    try { p = await orch.resume(); } catch (e) { setFt('err', t('ft.resumeFailed', { msg: e?.message || e })); return; }
+    if (!p) return;   // orch.resume() has already said why (no folder / no progress / wrong owner)
+    const done = (p.doneIds || []).length, n = (p.chunks || []).length;
+    if (!(await confirmModal(t('flow.resumeFolderTitle'), t('flow.resumeFolderBody', {
+      kind: t('flow.' + kindOf(p.source, p.dir)), from: p.from || '', to: p.to || '', done: fmt(done), n: fmt(n), left: fmt(Math.max(0, n - done)),
+    })))) return;
+    const r = await runGuarded({
+      isBusy: () => busy, setBusy, onRefused: refuseRun,
+      run: async () => {
+        lastChunk = null; setStep('run');
+        setKind(kindOf(p.source, p.dir));
+        renderPlan(p);   // paints the finished squares before a single fetch goes out
         await orch.start(p);
       },
     });

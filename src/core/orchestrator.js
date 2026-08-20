@@ -5,6 +5,7 @@ import { tokenStatus, profileStamp, profileInfo } from './token.js';
 import { buildUrl, apiGet, probeCount, fetchAllRows, fetchDetails, fetchPdf, mapLimit, mapAdaptive, makeGovernor, switchTaxpayer } from '../api/client.js';
 import { planViaServer, planUuidList } from './planclient.js';   // SPEC-016: the server decides where to cut; chunker.js is now test-only
 import { listKey, rinMatch, rinIdsOf } from './listinput.js';   // SPEC-022: pasted-list runs
+import { pruneFailureLines } from './failures.js';   // SPEC-035: a retry run prunes what it recovered
 import { safeName } from './time.js';
 import { buildRows, renderFromRows, XLSX_MIME } from '../export/xlsx.js';
 import { createDetailSink } from '../export/chunkparts.js';   // SPEC-027/032
@@ -319,6 +320,7 @@ export function createOrchestrator(hooks = {}) {
     // (floor 3), 25 clean fetches grow it by 1 back toward the old static maximum. Run-scoped on
     // purpose: what the portal taught us on chunk 1 is still true on chunk 13.
     const detGov = makeGovernor({ start: DETAIL_START[SRC.key] || 10, min: 3, max: CONC[SRC.key] || 30 });
+    const recovered = new Set();   // SPEC-035: uuids this run exported — pruned from eta_failures.jsonl at the end
     let pdfDropped = 0;   // official-PDF fetch failures (supplementary, best-effort — never fails the chunk)
     let pdfSaved = 0;     // PDFs actually written this session (usage counter)
     // Poll localStorage for a renewed token (portal renews from its session; another portal tab shares
@@ -489,6 +491,8 @@ export function createOrchestrator(hooks = {}) {
                 signal: currentCtrl.signal, onRate: rate,
                 onLookup: (n2) => onStatus(t('orch.refLookup', { i: i + 1, n: plan.chunks.length, n2 }), { level: 'run' }),
               });
+              // SPEC-035: remember what this run actually got, so a retry can prune the failures log.
+              for (const r of records) { const u = r?.detail?.uuid || SRC.rowUuid(r?.search) || ''; if (u) recovered.add(u); }
               return { records, failedRows };
             };
             // SPEC-030: a flood of per-document 403s is an entity flip's signature, not a property
@@ -607,6 +611,21 @@ export function createOrchestrator(hooks = {}) {
       const droppedTotal = [...droppedByChunk.values()].reduce((a, b) => a + b, 0);
       const dropMsg = droppedTotal ? t(isUuids ? 'orch.uuidMissedTail' : 'orch.dropTail', { n: droppedTotal }) : '';
       const pdfMsg = pdfDropped ? t('orch.pdfTail', { n: pdfDropped }) : '';
+      // SPEC-035: a retry run recovered some of the documents listed in eta_failures.jsonl — take
+      // exactly those lines out, so the file keeps meaning "still missing" instead of "ever
+      // failed", and the next Load-failed-UUIDs does not hand back documents already exported.
+      // Documents dropped by THIS run were appended during it and are correctly absent from
+      // `recovered`, so they survive the prune. Best-effort: never fail a finished run over it.
+      if (recovered.size) {
+        try {
+          const before = await fs.readText(dirHandle, 'eta_failures.jsonl');
+          const pruned = pruneFailureLines(before, recovered);
+          if (pruned.text !== null) {
+            await fs.writeText(dirHandle, 'eta_failures.jsonl', pruned.text);
+            onStatus(t('orch.failuresPruned', { n: pruned.removed, left: pruned.kept }), { level: 'ok' });
+          }
+        } catch {}
+      }
       onStatus(t('orch.doneSummary', { word: t(complete ? 'orch.doneOk' : 'orch.doneIncomplete'), done: done.size, n: plan.chunks.length, failed: failed.size, drops: dropMsg, pdfs: pdfMsg }), { level: complete && !failed.size ? 'ok' : 'warn', terminal: true, kind: 'done' });   // kind:'done' + level:'ok' = clean finish (drawer zeroes the timer & closes the persisted log)
       // mark(), not writeProgress(): every other terminal path checkpoints and this one did not, so
       // a run that fetched cleanly stayed 'running' on the portal until the user got around to

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "ETA Bulk Export",
-  "version": "0.11.3",
+  "version": "0.12.0",
   "description": "Bulk-export your own Egyptian Tax Authority e-invoices and e-receipts to Excel/JSON, past the portal's per-search caps.",
   "minimum_chrome_version": "111",
   "icons": {
