@@ -8,7 +8,11 @@ function hash8(s) { let h = 5381; for (let i = 0; i < String(s).length; i++) h =
 export const runKey = (source, year, dir, field, from, to) => (source === 'receipts' ? 'receipts_' : '') + `${year}_${dir}_${field}_${from}_${to}`;
 // SPEC-022: uuid-list runs get their own prefix — the folder-wide merge regex requires the
 // underscore right after e(Invoices|Receipts), so these files never leak into a range COMBINED.
-export const filePrefix = (plan) => (plan.mode === 'uuids' ? 'eInvoicesUuid' : plan.source === 'receipts' ? 'eReceipts' : 'eInvoices');
+// SPEC-036: a RECOVERY run — the "⟳ Load failed UUIDs" retry of documents this folder's own range
+// run dropped — is not a foreign list. Those documents belong to the range export that lost them,
+// so its files take the ordinary prefix and land in the same COMBINED output. An arbitrary pasted
+// list keeps the separate eInvoicesUuid prefix, which is what stops it polluting a range export.
+export const filePrefix = (plan) => ((plan.mode === 'uuids' && !plan.recovery) ? 'eInvoicesUuid' : plan.source === 'receipts' ? 'eReceipts' : 'eInvoices');
 // Filter signature: date field + selected statuses (order-independent) + for list runs the list
 // identity itself and any RIN filter. Distinguishes runs that share year/dir/source but filter
 // differently, so a stale file from another filter can't be counted as done — two different UUID

@@ -234,7 +234,10 @@ export function createOrchestrator(hooks = {}) {
     });
     ship.setJob(jobId);
     const p = {
-      v: 1, mode: 'uuids', jobId, key: 'uuids_' + listKey(uuids), source: 'invoices', createdAt: new Date().toISOString(),
+      // SPEC-036: `recovery` marks a retry of THIS folder's own dropped documents — it changes the
+      // file prefix (store.filePrefix) so the recovered rows merge into the range export's COMBINED
+      // files instead of a separate uuid-scoped set.
+      v: 1, mode: 'uuids', recovery: !!sel.recovery, jobId, key: 'uuids_' + listKey(uuids), source: 'invoices', createdAt: new Date().toISOString(),
       year: String(new Date().getFullYear()), dir: 'uuids', dateField: 'Uuid', downloadDetails: true, statuses: ALL_STATUSES,
       from: '', to: '', cap: SOURCES.invoices.cap, totalRows: uuids.length,
       biggest: chunks.reduce((m, c) => Math.max(m, c.count), 0), chunks, doneIds: [], failedIds: [],

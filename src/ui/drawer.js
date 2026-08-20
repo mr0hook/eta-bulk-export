@@ -490,6 +490,7 @@ export function mountUI() {
   // derived from it — the two are never set independently. `step` is which of the three screens is up.
   let kind = 'sales', step = 'home';
   let resumeJob = null;              // the one entry /job/resumable offered, or null
+  let recoveryList = null;           // SPEC-036: the exact list loaded from eta_failures.jsonl, while unedited
   let finishing = false;             // inside the post-run merge → checkpoint sequence
   let poState = { pos: [], warnings: [], fileName: '', analysis: null };   // uploaded PO sheet + last analysis
   let lastSession = null;        // last /session verdict (drives the request-RIN prefill)
@@ -885,15 +886,44 @@ export function mountUI() {
         currentPlan = null; lastChunk = null;
         setStep('run'); renderChunkMap();
         const p = parsed.kind === 'uuid'
-          ? await orch.planUuids({ uuids: parsed.items, downloadPdf: adv.downloadPdf, excludeColumns: [...adv.excludeColumns] })
+          ? await orch.planUuids({ uuids: parsed.items, downloadPdf: adv.downloadPdf, excludeColumns: [...adv.excludeColumns], recovery: recoveryList !== null && $('lst').value === recoveryList })
           : await orch.plan(sel);
-        if (p) await orch.start(p);
+        if (p) { await orch.start(p); await autoRecover(p); }
       },
     });
     if (r.error) { logLine(t('ft.planFailed', { msg: r.error?.message || r.error }), { level: 'err' }); setFt('err', t('ft.planFailedShort')); }
   };
+  // SPEC-037 — automatic recovery passes. A range run that dropped documents (per-document 403s
+  // during an entity flip, timeouts under a rate-limit storm) used to leave them in
+  // eta_failures.jsonl for the user to notice and retry by hand. Now the run does it itself: up to
+  // AUTO_RECOVER_PASSES retries of exactly the still-missing documents, BEFORE the merge, so the
+  // COMBINED output is as complete as the portal will allow in one sitting.
+  //
+  // Stops early when a pass recovers nothing — three attempts at documents the portal genuinely
+  // refuses is enough; hammering it further is how a rate-limit storm starts.
+  const AUTO_RECOVER_PASSES = 3;
+  async function autoRecover(plan) {
+    if (!plan || plan.mode === 'uuids') return;            // a recovery run must never recurse
+    const d = orch.dir(); if (!d) return;
+    for (let pass = 1; pass <= AUTO_RECOVER_PASSES; pass++) {
+      let txt = null; try { txt = await readText(d, 'eta_failures.jsonl'); } catch {}
+      const f = parseFailureUuids(txt);
+      if (!f.uuids.length) { if (pass > 1) logLine(t('flow.autoRetryClean'), { level: 'ok' }); return; }
+      const batch = f.uuids.slice(0, 10000);              // the server's list cap; the next pass takes the rest
+      logLine(t('flow.autoRetry', { pass, max: AUTO_RECOVER_PASSES, n: fmt(batch.length) }), { level: 'run' });
+      let rp = null;
+      try { rp = await orch.planUuids({ uuids: batch, downloadPdf: !!plan.downloadPdf, excludeColumns: plan.excludeColumns || [], recovery: true }); }
+      catch { logLine(t('flow.autoRetryStop'), { level: 'warn' }); return; }
+      if (!rp) return;
+      await orch.start(rp);
+      let after = 0;
+      try { after = parseFailureUuids(await readText(d, 'eta_failures.jsonl')).uuids.length; } catch {}
+      if (after >= f.uuids.length) { logLine(t('flow.autoRetryStuck', { n: fmt(after) }), { level: 'warn' }); return; }
+    }
+  }
   // Live classification under the By-list summary: what the paste is, how many, how many typos.
   $('lst').addEventListener('input', () => {
+    if (recoveryList !== null && $('lst').value !== recoveryList) recoveryList = null;   // SPEC-036: edited → no longer a recovery
     const p = parseList($('lst').value);
     const bad = p.invalid.length ? t('flow.listBad', { m: p.invalid.length }) : '';
     $('lsteraRow').hidden = p.kind !== 'rin';
@@ -916,6 +946,10 @@ export function mountUI() {
     if (!p.uuids.length) { setFt('warn', t('flow.failsNone')); return; }
     $('lstbox').open = true;
     $('lst').value = p.uuids.join('\n');
+    // SPEC-036: remember that THIS list is a recovery of the folder's own dropped documents, so the
+    // run writes into the range export's file set. Any later hand-edit clears the mark (see the
+    // input listener) — an edited list is no longer provably that folder's own failures.
+    recoveryList = $('lst').value;
     $('lst').dispatchEvent(new Event('input'));
     setFt('ok', t('flow.failsLoaded', { n: p.uuids.length }));
   };
@@ -1087,7 +1121,9 @@ export function mountUI() {
       const res = await finishRun({
         // SPEC-022: a uuid run merges ONLY its own files, under its own state — the folder-wide
         // sweep neither sees them nor is touched by them.
-        merge: (onMsg) => runMergeInto(d, onMsg, p.mode === 'uuids' ? uuidMergeScope(p) : undefined),
+        // SPEC-036: a recovery run's files carry the ordinary prefix, so it merges FOLDER-WIDE —
+        // its rows join the range export's COMBINED files, which is the whole point of it.
+        merge: (onMsg) => runMergeInto(d, onMsg, (p.mode === 'uuids' && !p.recovery) ? uuidMergeScope(p) : undefined),
         checkpoint: (runClean(meta) && p.jobId)
           ? () => jobCheckpoint({ jobId: p.jobId, state: 'done', done: (p.doneIds || []).length, failed: (p.failedIds || []).length })
           : null,
