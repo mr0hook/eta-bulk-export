@@ -409,7 +409,14 @@ because every other phase adds code to the file it breaks up.
 - 2026-08-21 · KNOWN FLAKE, not chased: during one full `npm test` under heavy CPU contention a
   single test asserting `progress(dir).failedIds === ['c1']` saw `[]`. Not reproducible — 6
   consecutive full-suite runs and 5 isolated runs of batchrun.test.mjs since are clean (421/421).
-  Four tests share that assertion (T-266, T-274, T-281, T-285), so the likely cause is the test
-  reading the progress file before the run's final state write lands rather than anything in the
-  guards. Worth confirming whether the final writeProgress at run end is awaited — if it is not,
-  a tab closed the instant a run ends could lose the failed-chunk record for real.
+  Four tests share that assertion (T-266, T-274, T-281, T-285).
+  RULED OUT: it is not the progress write racing the assertion. Every mark() is awaited, including
+  the terminal one (orchestrator.js:687), and mark() awaits store.writeProgress. (An earlier version
+  of this note guessed otherwise — wrong.)
+  LIVE SUSPECT: orchestrator.js:654 deliberately suppresses the failed-marking when a Pause/Halt
+  lands mid-attempt, so an async pause from the session keeper or the profile guard — both on timers
+  these tests stub to fire at 0ms — would leave failedIds empty and end the run 'paused'/'halted'.
+  NOT a data-integrity issue either way: done.add() runs only when a chunk SUCCEEDS, so a chunk in
+  neither set is still refetched by a resume. The distinction only affects the retry UI.
+  DONE instead of chasing it: assertChunkFailed() now asserts the terminal status too and prints the
+  run's last log lines in the assertion message, so the next occurrence names its own cause.

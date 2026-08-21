@@ -74,6 +74,20 @@ function run(dir, plan) {
   return orch.start(plan).then(() => msgs);
 }
 const progress = (dir) => { const k = [...dir.files.keys()].find((n) => /^eta_progress.*\.json$/.test(n)); return JSON.parse(new TextDecoder().decode(dir.files.get(k))); };
+// One full suite run on 2026-08-21 saw `failedIds` come back [] here, and `actual: []` on its own
+// could not say whether the guard failed to fire or the run ended some other way. It cannot be the
+// progress write racing the assertion — every mark() is awaited, including the terminal one
+// (orchestrator.js:687). The live suspect is orchestrator.js:654: an async Pause/Halt mid-attempt
+// (session keeper, profile guard — both on timers these tests stub to 0ms) DELIBERATELY suppresses
+// the failed-marking, and then the run ends 'paused'/'halted' rather than 'incomplete'. So assert
+// the terminal status too, and put the log in the message: the next occurrence explains itself.
+// Note this is a reporting distinction only — `done.add` runs solely when the chunk succeeds, so a
+// chunk in neither set is still refetched by a resume and no documents are at risk either way.
+const assertChunkFailed = (dir, msgs, why) => {
+  const p = progress(dir), tail = msgs.slice(-4).join(' | ');
+  assert.equal(p.status, 'incomplete', `run ended '${p.status}', not 'incomplete' — a pause/halt would suppress the failed-marking · log: ${tail}`);
+  assert.deepEqual(p.failedIds, ['c1'], `${why} · log: ${tail}`);
+};
 const loadSheet = async (dir, nm, i = 0) => { const wb = new ExcelJS.Workbook(); await wb.xlsx.load((await (await dir.getFileHandle(nm)).getFile()).arrayBuffer()); return wb.worksheets[i]; };
 
 test('T-264 buildRows serialBase: batches of one chunk keep one continuous index', () => {
@@ -117,7 +131,7 @@ test('T-266 a flood of 403s FAILS the chunk (entity-flip signature) instead of c
   const msgs = await run(dir, mkPlan(60));
 
   assert.ok(![...dir.files.keys()].some((n) => n.endsWith('.xlsx')), 'no chunk file — a thin completion is the failure mode this exists to stop');
-  assert.deepEqual(progress(dir).failedIds, ['c1'], 'the chunk is marked failed so Resume retries it whole');
+  assertChunkFailed(dir, msgs, 'the chunk is marked failed so Resume retries it whole');
   assert.ok(msgs.some((m) => /403/.test(m)), 'the mass-403 diagnosis is stated in the log');
 });
 
@@ -133,7 +147,7 @@ test('T-274 the 2026-08-20 chunk-31 case: 47% forbidden must FAIL, not write a t
   stubPagedFetch.forbidden = null;
 
   assert.ok(![...dir.files.keys()].some((n) => n.endsWith('.xlsx')), 'no thin chunk file is written');
-  assert.deepEqual(progress(dir).failedIds, ['c1'], 'the chunk fails so a resume refetches it whole');
+  assertChunkFailed(dir, msgs, 'the chunk fails so a resume refetches it whole');
   assert.ok(msgs.some((m) => /403/.test(m)), 'and says why');
 });
 
@@ -153,7 +167,7 @@ test('T-281 a flip confined to the LAST batch still fails the chunk (F-4)', asyn
   stubPagedFetch.forbiddenAtTail = false;
 
   assert.ok(![...dir.files.keys()].some((n) => n.endsWith('.xlsx')), 'no short chunk file is written');
-  assert.deepEqual(progress(dir).failedIds, ['c1'], 'the chunk fails so a resume refetches it whole');
+  assertChunkFailed(dir, msgs, 'the chunk fails so a resume refetches it whole');
   assert.ok(msgs.some((m) => /403/.test(m)), 'and the mass-403 diagnosis is stated');
 });
 
@@ -201,7 +215,7 @@ test('T-285 a chunk short of its planned count FAILS when the portal still claim
   const msgs = await run(dir, mkPlan(500));
 
   assert.ok(![...dir.files.keys()].some((n) => n.endsWith('.xlsx')), 'no short chunk file is written');
-  assert.deepEqual(progress(dir).failedIds, ['c1'], 'the chunk fails so a resume refetches it whole');
+  assertChunkFailed(dir, msgs, 'the chunk fails so a resume refetches it whole');
   assert.ok(msgs.some((m) => /120 of the 500/.test(m)), 'and the log names the shortfall, not just "done"');
 });
 
