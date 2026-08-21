@@ -10,7 +10,7 @@
 import { listFiles, readArrayBuffer, readText, openWrite, readLines, remove } from './fs.js';
 import * as ms from './mergestate.js';
 import { createRotator } from './mergeout.js';
-import { CHUNK_DET_RE, detailParentOf, chunkFile } from './store.js';   // SPEC-027: split-chunk detail parts
+import { CHUNK_DET_RE, detailParentOf, chunkFile, markShortChunks } from './store.js';   // SPEC-027: split-chunk detail parts
 import { ALL_STATUSES } from '../api/sources.js';
 import { t } from './i18n.js';
 
@@ -20,6 +20,9 @@ const UUID = 'الرقم الإلكترونى', SERIAL = 'مسلسل';
 // (which required the name to END at .jsonl) never swept them. Three failed merges on one folder
 // left 5.3 GB of them (2026-08-20).
 const TEMP_RE = /^e(Invoices|Receipts)_COMBINED_.*\.jsonl(\.crswap)?$/i;
+// SPEC-040/041 — same tolerance the run-time shortfall guard uses (orchestrator.js), so the merge
+// and the run agree on what "short" means. Drift between the two would be its own bug.
+const SHORT_MIN = 2, SHORT_RATIO = 0.005;
 const FLUSH_CHARS = 1 << 20;                                    // batch scratch writes ~1MB at a time
 
 // SPEC-013 — the issue-date column, identical in the invoice and receipt schemas. Used only to
@@ -51,9 +54,10 @@ const nfcHdr = (arr) => arr.map((h) => (typeof h === 'string' ? h.normalize('NFC
 // accounted for: the planner cuts on an inclusive shared boundary, so a document sitting exactly on
 // a cut is fetched by both neighbours, and the count compared here is summary ROWS READ (unique +
 // deduped), not unique — the one comparison in which boundary duplicates cannot masquerade as loss.
-async function reconcile(dir, prefix, files, rowsRead, onStatus) {
+async function reconcile(dir, prefix, files, rowsRead, fileRows, onStatus) {
   const present = new Set(files.map((n) => n.toLowerCase()));
-  let planned = 0, missing = 0, plans = 0;
+  const rowsOf = new Map(Object.entries(fileRows || {}).map(([k, v]) => [k.toLowerCase(), v]));
+  let planned = 0, missing = 0, plans = 0, healed = 0;
   for (const n of await listFiles(dir, /^eta_progress.*\.json$/i)) {
     let p; try { p = JSON.parse((await readText(dir, n)) || ''); } catch { continue; }
     if (!p || !Array.isArray(p.chunks) || !p.chunks.length) continue;
@@ -68,9 +72,40 @@ async function reconcile(dir, prefix, files, rowsRead, onStatus) {
     if (plan.mode === 'uuids' || (p.rinFilter || []).length) continue;
     if (Array.isArray(p.statuses) && p.statuses.length && p.statuses.length < ALL_STATUSES.length) continue;
     plans++;
+    // SPEC-041 — attribute the shortfall to the CHUNKS it came from, not just a folder total.
+    // A total tells the user the folder is incomplete and leaves them nowhere to go; the ids are
+    // what makes a Resume able to fix it, because resume() rebuilds doneIds from file PRESENCE and
+    // will otherwise count a 9-row file for a 7,052-document window as done for ever.
+    const shortIds = [], shortFiles = [];
     for (const c of plan.chunks) {
-      try { if (present.has(chunkFile(plan, c).toLowerCase())) planned += c.count | 0; else missing += c.count | 0; }
-      catch {}
+      let fname; try { fname = chunkFile(plan, c); } catch { continue; }
+      if (!present.has(fname.toLowerCase())) { missing += c.count | 0; continue; }
+      planned += c.count | 0;
+      const got = rowsOf.get(fname.toLowerCase());
+      if (got === undefined) continue;             // not read this pass and not in the state — can't judge
+      const want = c.count | 0;
+      const slack = Math.max(SHORT_MIN, Math.ceil(want * SHORT_RATIO));
+      if (want && got < want - slack) { shortIds.push(c.id); shortFiles.push(fname); }
+    }
+    if (shortIds.length) {
+      // The file is DELETED, not just recorded. Two reasons it has to go: resume() rebuilds doneIds
+      // from file PRESENCE, so a surviving 9-row file for a 7,052-document window is counted done
+      // again the moment anything rewrites the progress list; and the rows in it are a fragment of a
+      // window that is about to be refetched whole, so keeping them only risks a stale file being
+      // merged. Phase 1 has already consumed them into this merge's output, so nothing in flight is
+      // lost, and the id list below is what makes the refetch happen even if a delete fails.
+      const ok = await markShortChunks(dir, n, shortIds);
+      let gone = 0;
+      for (const f of shortFiles) {
+        const stem = f.replace(/\.xlsx$/i, '');
+        try { await remove(dir, f); gone++; } catch {}
+        // its SPEC-027 detail parts go too — orphaned parts have no summary to join and the next
+        // merge would only skip them loudly.
+        for (const pn of files) if (pn !== f && pn.startsWith(stem) && CHUNK_DET_RE.test(pn)) { try { await remove(dir, pn); } catch {} }
+      }
+      healed += shortIds.length;
+      onStatus(t(ok ? 'merge.reconcileHealed' : 'merge.reconcileHealFailed', { n: shortIds.length }));
+      if (gone !== shortFiles.length) onStatus(t('merge.reconcileDeleteFailed', { n: shortFiles.length - gone }));
     }
   }
   if (!plans || !planned) return;   // no comparable plan in this folder — say nothing rather than guess
@@ -167,6 +202,9 @@ async function runMerge(ExcelJS, dir, { onStatus, rowCap, prefix, files, sizes, 
     for (const list of partsOf.values()) list.sort();
     const parents = read.filter((n) => !isPart(n));
     let uniq = 0, fi = 0, written = 0, extra = 0; const failed = [];
+    // SPEC-041: summary rows per chunk FILE — the merge already reads every one, so per-chunk
+    // attribution costs nothing beyond a counter. Carried across incremental merges.
+    const fileRows = base?.fileRows ? { ...base.fileRows } : {};
     {
       const reading = new Set(parents);
       for (const p of [...partsOf.keys()]) {
@@ -202,7 +240,9 @@ async function runMerge(ExcelJS, dir, { onStatus, rowCap, prefix, files, sizes, 
         // `extra` = summary rows read that did NOT become a new unique row (a boundary duplicate, or
         // a row with no UUID). unique + extra is the true number of documents these files hold, which
         // is what reconcile() has to compare against the plan — see SPEC-040.
-        s0.eachRow((row, rn) => { if (rn === 1) return; const o = toObj(hdr, row.values.slice(1)); const u = o[uk]; if (u == null || seen.has(u)) { extra++; return; } seen.add(u); localSum.set(u, o); order.push(u); });
+        let fRows = 0;
+        s0.eachRow((row, rn) => { if (rn === 1) return; fRows++; const o = toObj(hdr, row.values.slice(1)); const u = o[uk]; if (u == null || seen.has(u)) { extra++; return; } seen.add(u); localSum.set(u, o); order.push(u); });
+        fileRows[name] = fRows;
       }
       const eatLines = (ws) => {
         if (!sheetNames.s1 && ws.name !== sheetNames.s0) sheetNames.s1 = ws.name;
@@ -285,7 +325,7 @@ async function runMerge(ExcelJS, dir, { onStatus, rowCap, prefix, files, sizes, 
     await ms.writeState(dir, {
       prefix, sumCols, lineCols, sheetNames, nextSerial: serial, parts, writer: 'stream-v1',
       consumed: files.filter((n) => sizes.get(n) >= 0).map((n) => ({ name: n, size: sizes.get(n) })),
-      uuids: [...seen], extraRows,
+      uuids: [...seen], extraRows, fileRows,
     }, stateFile);
 
     const total = base ? base.uuids.length + uniq : uniq;
@@ -300,7 +340,7 @@ async function runMerge(ExcelJS, dir, { onStatus, rowCap, prefix, files, sizes, 
     // reconciliation would report an entirely healthy folder as short. It self-heals — the next
     // full rebuild, or any later incremental, counts correctly.
     const canCount = !base || base.extraRows !== undefined;
-    try { if (canCount) await reconcile(dir, prefix, files, total + extraRows, onStatus); }
+    try { if (canCount) await reconcile(dir, prefix, files, total + extraRows, fileRows, onStatus); }
     catch (e) { onStatus(t('merge.reconcileFailed', { msg: String(e?.message || e).slice(0, 80) })); }
   } finally {
     // The .jsonl is scratch, never a deliverable — it must not outlive the merge, error or not.

@@ -150,3 +150,33 @@ test('T-296 an incremental merge over a pre-SPEC-040 state does not cry loss', a
   // makes it look like 5 of 6 and the merge reports a document lost that was never lost.
   assert.ok(!log.some((m) => /INCOMPLETE/.test(m)), `no false loss report · log: ${log.join(' | ')}`);
 });
+
+test('T-297 a short chunk is DELETED and recorded, so a Resume actually refetches it', async () => {
+  // The gap this closes, reported 2026-08-21: the merge said "INCOMPLETE" and stopped there. The
+  // user could see the folder was short and had no way to fix it — because resume() rebuilds
+  // doneIds from file PRESENCE (orchestrator.js:737) for an unfiltered run, so the 9-row file for a
+  // 7,052-document window counted as done no matter what the progress file said. Q2 2024 lost
+  // 13,182 documents to exactly two chunks shaped like that.
+  const dir = fakeDir();
+  const mk = (i, n) => ({ id: 'c' + i, label: '2025-0' + (i + 1), count: n, fromISO: `2025-0${i + 1}-01T00:00:00Z`, toISO: `2025-0${i + 1}-28T23:59:59Z` });
+  const plan = {
+    v: 1, key: 'short_key', source: 'invoices', year: '2025', dir: 'Sent', dateField: 'Issue',
+    statuses: ['Valid', 'Invalid', 'Rejected', 'Cancelled'], mode: 'range',
+    from: '2025-01-01', to: '2025-02-28', cap: 10000, rinFilter: [], totalRows: 1002,
+    chunks: [mk(0, 2), mk(1, 1000)], doneIds: ['c0', 'c1'], failedIds: [],
+  };
+  const goodName = chunkFile(plan, plan.chunks[0]), shortName = chunkFile(plan, plan.chunks[1]);
+  await putChunk(dir, goodName, ['U1', 'U2']);
+  await putChunk(dir, shortName, ['U3']);            // 1 row where the plan says 1,000
+  await writeProgress(dir, plan, 'complete');
+  const log = [];
+  await mergeFolder(ExcelJS, dir, { onStatus: (m) => log.push(m) });
+
+  assert.ok(!dir.files.has(shortName), 'the short chunk file is gone');
+  assert.ok(dir.files.has(goodName), 'the healthy one is untouched');
+  const pn = [...dir.files.keys()].find((n) => /^eta_progress/.test(n));
+  const prog = JSON.parse(new TextDecoder().decode(dir.files.get(pn)));
+  assert.deepEqual(prog.shortIds, ['c1'], 'the short chunk is named in the progress file');
+  assert.equal(prog.status, 'incomplete');
+  assert.ok(log.some((m) => /DELETED and recorded/.test(m)), `and the log says so · ${log.join(' | ')}`);
+});

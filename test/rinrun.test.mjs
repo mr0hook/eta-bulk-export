@@ -200,3 +200,37 @@ test('T-239 a mid-run taxpayer-PROFILE switch pauses the run before the next chu
   assert.ok([...calls.details].every((u) => ['U1','U2','U3','U4','U5'].includes(u)), 'chunk 2 was never fetched');
   assert.ok(msgs.some((m) => /profile changed|الملف الضريبى/.test(m)), 'the reason is named');
 });
+
+test('T-298 resume subtracts shortIds even though the file-scan calls them done', async () => {
+  // T-238 above pins the rule that makes this necessary: for an unfiltered run resume REBUILDS
+  // doneIds from file PRESENCE and discards the progress file's list. So a chunk whose file exists
+  // but holds a fraction of its documents — Q2 2024 had one with 9 rows of a planned 7,052 — counted
+  // as done for ever, and editing doneIds could not change it. shortIds is the one list resume must
+  // honour over the files on disk.
+  setToken(); stubFetch();
+  const { writeProgress, readProgress, markShortChunks, chunkFile } = await import('../src/core/store.js');
+  const dir = fakeDir();
+  // confirmFolder: the folder already holds an xlsx, so SPEC-010 asks who owns it before resuming.
+  const orch = createOrchestrator({ onStatus: () => {}, confirmFolder: async () => true });
+  orch.setFolder(dir);
+
+  const plan = { ...makePlan(), key: 'short_run', doneIds: [CHUNK.id], jobId: 'j-s' };
+  // The chunk FILE exists — this is the case that used to be unfixable, because scanDoneFromFolder
+  // reads presence, not contents.
+  const fh = await dir.getFileHandle(chunkFile(plan, CHUNK), { create: true });
+  const w = await fh.createWritable(); await w.write(new Uint8Array([1])); await w.close();
+  await writeProgress(dir, plan, 'complete');
+  assert.deepEqual((await orch.resume()).doneIds, [CHUNK.id], 'baseline: the file alone makes it done');
+
+  // now the merge records it as short, exactly as reconcile() does
+  const pn = [...dir.files.keys()].find((n) => /^eta_progress/.test(n));
+  assert.equal(await markShortChunks(dir, pn, [CHUNK.id]), true);
+  const p = await orch.resume();
+  assert.deepEqual(p.doneIds, [], 'the short chunk is not done, whatever the folder scan says');
+  assert.deepEqual(p.shortIds, [CHUNK.id], 'and the list rides along so a later write can clear it');
+
+  // self-clearing: once the chunk really is fetched, the next progress write drops it
+  await writeProgress(dir, { ...p, doneIds: [CHUNK.id] }, 'done');
+  const back = await readProgress(dir, p);
+  assert.deepEqual(back.shortIds, [], 'a refetched chunk stops being short');
+});

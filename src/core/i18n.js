@@ -33,6 +33,7 @@ export const EN = {
   'orch.emptyChunk': 'chunk {i} was planned with {count} documents but the portal returned an empty page (re-probe now says {re}) — refusing to mark it done; will retry',
   'orch.shortChunk': 'chunk {i} returned {got} of the {want} documents it was planned with (re-probe still says {re}) — refusing to mark it done; will retry',
   'orch.shortChunkStale': '⚠️ Chunk {i}: {got} of the {want} planned — the portal now says {re}, so the window itself shrank. Accepting.',
+  'orch.resumeShort': '⚠️ {n} chunk(s) came back short last time — this resume will fetch them again.',
   'orch.shortPage': '⚠️ Chunk {i}: page {page} came back short, the portal returned {got} on retry {tries} — kept going.',
   'orch.profileSwitched': "⏸ Paused — the portal's active taxpayer profile changed since this run started (another portal tab can do this). Switch the portal back to the same company, then Resume.",
   'orch.profileRestoring': '⏳ The active company changed (a session renewal can do this) — switching back automatically…',
@@ -88,6 +89,9 @@ export const EN = {
   // SPEC-040 — reconciliation against the run's own plan
   'merge.reconcileOk': '✅ Reconciled against the plan: {planned} documents planned, {got} present.',
   'merge.reconcileShort': '⚠️ INCOMPLETE — the plan says {planned} documents, the files hold {got}. Short in files that ARE here: {short}. In chunks with no file at all: {missing}. Resume this folder to fetch them, then merge again.',
+  'merge.reconcileHealed': '✅ {n} short chunk file(s) DELETED and recorded in eta_progress — Resume from this folder will fetch them again.',
+  'merge.reconcileHealFailed': '⚠️ {n} short chunk(s) found but eta_progress could NOT be updated — Resume will not know to refetch them.',
+  'merge.reconcileDeleteFailed': '⚠️ {n} short chunk file(s) could not be deleted (open elsewhere?) — delete them by hand before you Resume.',
   'merge.reconcileFailed': "⚠️ Couldn't reconcile against the plan ({msg}) — the merged output was written, but it has NOT been checked for completeness.",
   // SPEC-012 — incremental merge
   'merge.upToDate': '✅ Already up to date — no new files since the last merge ({n} in folder).',
@@ -352,6 +356,7 @@ export const AR = {
   'orch.emptyChunk': 'الدفعة {i} خُطط لها بـ {count} مستنداً لكن البوابة أعادت صفحة فارغة (إعادة الفحص الآن تقول {re}) — رفض اعتبارها منتهية؛ ستُعاد المحاولة',
   'orch.shortChunk': 'الدفعة {i} أعادت {got} من {want} مستنداً مخططاً لها (إعادة الفحص ما زالت تقول {re}) — رفض اعتبارها منتهية؛ ستُعاد المحاولة',
   'orch.shortChunkStale': '⚠️ الدفعة {i}: {got} من {want} مخطط — البوابة الآن تقول {re}، أي أن النطاق نفسه تقلّص. تم القبول.',
+  'orch.resumeShort': '⚠️ {n} دفعة عادت ناقصة سابقًا — هذا الاستئناف سيعيد جلبها.',
   'orch.shortPage': '⚠️ الدفعة {i}: الصفحة {page} عادت ناقصة، وأعادت البوابة {got} في المحاولة {tries} — تم المتابعة.',
   'orch.profileSwitched': '⏸ توقف مؤقت — تغيّر الملف الضريبى النشط فى البوابة منذ بداية هذا التصدير (فتح تبويب آخر للبوابة قد يسبب ذلك). أعد البوابة لنفس الشركة ثم استأنف.',
   'orch.profileRestoring': '⏳ تغيّرت الشركة النشطة (تجديد الجلسة قد يسبب ذلك) — جارٍ الرجوع تلقائياً…',
@@ -405,6 +410,11 @@ export const AR = {
   'merge.summary': '{icon} تم دمج {read}/{n} ملف ← {uniq} فريد ← {parts} جزء · {cols} عمود.{warn}',
   'merge.reconcileOk': '✅ تمت المطابقة مع الخطة: {planned} مستنداً مخططاً، و{got} موجوداً.',
   'merge.reconcileShort': '⚠️ غير مكتمل — الخطة تقول {planned} مستنداً، والملفات تحتوي {got}. نقص داخل الملفات الموجودة: {short}. وفي دفعات بلا ملف إطلاقاً: {missing}. استأنف هذا المجلد لجلبها ثم أعد الدمج.',
+  'merge.reconcileHealed': '✅ تم تسجيل {n} دفعة ناقصة في eta_progress — الاستئناف من هذا المجلد سيعيد جلبها (لم يُحذف أي شيء).',
+  'merge.reconcileHealFailed': '⚠️ عُثر على {n} دفعة ناقصة لكن تعذّر تحديث eta_progress — لن يعرف الاستئناف أنه يجب إعادة جلبها.',
+  'merge.reconcileHealed': '✅ تم حذف {n} دفعة ناقصة وتسجيلها في eta_progress — الاستئناف من هذا المجلد سيعيد جلبها.',
+  'merge.reconcileHealFailed': '⚠️ عُثر على {n} دفعة ناقصة لكن تعذّر تحديث eta_progress — لن يعرف الاستئناف أنه يجب إعادة جلبها.',
+  'merge.reconcileDeleteFailed': '⚠️ تعذّر حذف {n} ملف دفعة ناقصة (مفتوح في مكان آخر؟) — احذفها يدويًا قبل الاستئناف.',
   'merge.reconcileFailed': '⚠️ تعذّرت المطابقة مع الخطة ({msg}) — تمت كتابة المخرجات لكن لم يُتحقق من اكتمالها.',
   // SPEC-012 — الدمج التزايدي
   'merge.upToDate': '✅ محدَّث بالفعل — لا ملفات جديدة منذ آخر دمج ({n} في المجلد).',

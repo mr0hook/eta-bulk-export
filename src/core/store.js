@@ -3,6 +3,12 @@ import { writeText, readText, listFiles } from './fs.js';
 import { safeName } from './time.js';
 
 const PREFIX = '__etaBulk_v1_';
+// Two progress writes inside the same millisecond produce an IDENTICAL updatedAt, and readProgress
+// picks "most recently updated" by string compare — so a tie was broken by directory order, which
+// is to say arbitrarily. Rare in the field (real writes are seconds apart) but not impossible with
+// two runs sharing a folder, and it made T-238 flaky under load. seq orders writes within a page
+// load; across page loads the millisecond already separates them.
+let writeSeq = 0;
 // short deterministic hash (djb2) — for collision-free, filter-aware filenames
 function hash8(s) { let h = 5381; for (let i = 0; i < String(s).length; i++) h = ((h * 33) ^ String(s).charCodeAt(i)) >>> 0; return h.toString(36).padStart(7, '0').slice(-7); }
 export const runKey = (source, year, dir, field, from, to) => (source === 'receipts' ? 'receipts_' : '') + `${year}_${dir}_${field}_${from}_${to}`;
@@ -78,7 +84,11 @@ export async function writeProgress(dir, plan, status) {
     totalChunks: plan.chunks.length, totalRows: plan.totalRows, excludeColumns: plan.excludeColumns || [], downloadPdf: !!plan.downloadPdf,
     doneChunks: doneChunks.length, remainingChunks: plan.chunks.length - doneChunks.length,
     doneRows: doneChunks.reduce((s, c) => s + Math.min(c.count, plan.cap || 1e12), 0),
+    seq: ++writeSeq,
     doneIds: [...done], failedIds: plan.failedIds || [], chunks: plan.chunks,
+    // SPEC-041: chunks the merge found short. Self-clearing — an id that has since been fetched is
+    // in `done`, so it drops out here and resume stops subtracting it.
+    shortIds: (plan.shortIds || []).filter((id) => !done.has(id)),
   };
   try { await writeText(dir, progressName(plan), JSON.stringify(p, null, 1)); } catch {}
 }
@@ -90,8 +100,42 @@ export async function readProgress(dir, plan) {
   let best = null;
   for (const n of names) {
     const t = await readText(dir, n); if (!t) continue;
-    try { const j = JSON.parse(t); if (!best || (j.updatedAt || '') > (best.updatedAt || '')) best = j; } catch {}
+    try {
+      const j = JSON.parse(t);
+      const newer = !best || (j.updatedAt || '') > (best.updatedAt || '')
+        || ((j.updatedAt || '') === (best.updatedAt || '') && (j.seq | 0) > (best.seq | 0));
+      if (newer) best = j;
+    } catch {}
   }
   return best;
 }
+// SPEC-041 — record chunks whose FILE exists but holds materially fewer documents than the plan.
+//
+// Why this has to exist at all: for an unfiltered range run, resume() REBUILDS doneIds from file
+// PRESENCE and discards the progress file's own list (orchestrator.js:737). So detecting a short
+// chunk and editing doneIds accomplishes exactly nothing — the file is still on disk, so resume
+// counts it done again. That is what made the merge's shortfall warning a dead end: it told the
+// user the folder was incomplete and left no way to act on it.
+//
+// This records the ids explicitly instead, so resume can SUBTRACT them. Nothing is deleted: the
+// short files stay until the refetch overwrites them, so a failed resume never leaves the user with
+// less than they started with. The list clears itself — writeProgress drops any id that has since
+// been fetched (see below).
+export async function markShortChunks(dir, name, ids) {
+  if (!dir || !name || !ids?.length) return false;
+  const txt = await readText(dir, name);
+  if (!txt) return false;
+  let p; try { p = JSON.parse(txt); } catch { return false; }
+  const set = new Set(p.shortIds || []);
+  const before = set.size;
+  for (const id of ids) set.add(id);
+  if (set.size === before && p.status === 'incomplete') return false;   // nothing new to say
+  p.shortIds = [...set];
+  p.status = 'incomplete';
+  p.updatedAt = new Date().toISOString();
+  try { await writeText(dir, name, JSON.stringify(p, null, 1)); } catch { return false; }
+  return true;
+}
+export async function progressNames(dir) { return listFiles(dir, /^eta_progress.*\.json$/i); }
+
 export async function scanDoneFromFolder(dir, plan) { const present = new Set(await listFiles(dir, /\.xlsx$/i)); return plan.chunks.filter((c) => present.has(chunkFile(plan, c))).map((c) => c.id); }

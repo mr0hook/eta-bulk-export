@@ -723,7 +723,7 @@ export function createOrchestrator(hooks = {}) {
       // SPEC-022: uuid batches ride inside prog.chunks; mode/rinFilter restore the run's identity.
       mode: prog.mode || 'range', rinFilter: prog.rinFilter || [],
       statuses: prog.statuses, from: prog.from, to: prog.to, cap: SRC.cap, totalRows: prog.totalRows,
-      chunks: prog.chunks, doneIds: prog.doneIds || [], failedIds: prog.failedIds || [],
+      chunks: prog.chunks, doneIds: prog.doneIds || [], failedIds: prog.failedIds || [], shortIds: prog.shortIds || [],
       excludeColumns: prog.excludeColumns || [], downloadPdf: !!prog.downloadPdf,
     };
     try {
@@ -735,6 +735,16 @@ export function createOrchestrator(hooks = {}) {
       // Filtered runs and uuid runs keep the union: their legitimately-empty chunks have no file.
       const filtered = (Array.isArray(p.statuses) && p.statuses.length > 0 && p.statuses.length < ALL_STATUSES.length) || (p.rinFilter && p.rinFilter.length);
       p.doneIds = (p.mode !== 'uuids' && !filtered) ? fileDone : [...new Set([...p.doneIds, ...fileDone])];
+      // SPEC-041: ...minus the chunks the merge found SHORT. Because the line above rebuilds doneIds
+      // from file PRESENCE, a chunk whose file exists but holds a fraction of its documents (Q2 2024:
+      // 9 rows of a planned 7,052) counts as done forever and no amount of editing doneIds changes
+      // that. This is the one list resume must honour over the files on disk. The short files are
+      // left alone — the refetch overwrites them, so a resume that fails leaves nothing worse.
+      const short = new Set(p.shortIds || []);
+      if (short.size) {
+        p.doneIds = p.doneIds.filter((id) => !short.has(id));
+        onStatus(t('orch.resumeShort', { n: short.size }), { level: 'warn' });
+      }
     } catch {}
     store.saveState(p); onPlan(p);
     onStatus(t('orch.resumed', { done: p.doneIds.length, n: p.chunks.length }), { level: 'info' });
