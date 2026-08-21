@@ -844,6 +844,13 @@ export function mountUI() {
     if (d) setFolderName(d.name);
     return d;
   }
+  // ensureDir() returns null for five different reasons and only ONE of them is "no folder chosen":
+  // not logged in (the owner stamp can't be verified), the folder belongs to another company, the
+  // confirm was declined, the stamp read failed, or there really is no handle. folderAllowed() logs
+  // the real reason — and then the footer overwrote it with "Pick an output folder first.", sending
+  // the user off to re-pick a folder that was never the problem. Reported 2026-08-21: the picker
+  // "kept saying pick a folder" on a folder that was already picked. Name the case instead.
+  const folderFailKey = () => (orch.dir() ? 'flow.folderRefused' : 'orch.pickFolder');
   // A run refused because the previous one has not finished winding down must say so. The silent
   // `return` this replaces is the visible half of the pause → re-run bug.
   const refuseRun = () => { setFt('wait', t('flow.runBusy')); logLine(t('flow.runBusy'), { level: 'wait' }); };
@@ -855,7 +862,7 @@ export function mountUI() {
     // the folder inside the gesture, and only then the fresh verdict — see ensureFolder.
     if (!licensed) { $('gate').hidden = false; $('rg-name').focus(); await refreshLicense(); if (!licensed) return; }
     const d = await ensureFolder();
-    if (!d) { setFt('', t('orch.pickFolder')); return; }
+    if (!d) { setFt('', t(folderFailKey())); return; }
     await refreshLicense(); if (!licensed) { $('gate').hidden = false; $('rg-name').focus(); return; }
     const r = defaultRange(todayYmd());   // 1 Jan of the current year → today
     $('from').value = r.from; $('to').value = r.to;
@@ -939,7 +946,7 @@ export function mountUI() {
   $('lstFails').onclick = async () => {
     if (busy) { refuseRun(); return; }
     const d = await ensureFolder();
-    if (!d) { setFt('', t('orch.pickFolder')); return; }
+    if (!d) { setFt('', t(folderFailKey())); return; }
     let txt = '';
     try { txt = await readText(d, 'eta_failures.jsonl'); } catch {}   // absent file = nothing recorded
     const p = parseFailureUuids(txt);
@@ -1116,7 +1123,7 @@ export function mountUI() {
     offerRepair(false);
     try {
       const d = await ensureFolder({ allowUnverified: true });
-      if (!d) { setFt('warn', t('orch.pickFolder')); return; }
+      if (!d) { setFt('warn', t(folderFailKey())); return; }
       logLine(t('flow.merging'), { level: 'run' }); setFt('run', t('flow.merging'));
       const res = await finishRun({
         // SPEC-022: a uuid run merges ONLY its own files, under its own state — the folder-wide
@@ -1396,7 +1403,7 @@ export function mountUI() {
     if (busy) return;
     if (!window.ExcelJS) { setFt('err', t('orch.noExcel')); return; }
     const d = await ensureFolder();   // permission is re-requested inside the click gesture
-    if (!d) { setFt('', t('orch.pickFolder')); return; }
+    if (!d) { setFt('', t(folderFailKey())); return; }
     try {
       const buf = await renderPoTemplate(window.ExcelJS).workbook.xlsx.writeBuffer();
       await writeBlob(d, 'PO_Template.xlsx', new Blob([buf], { type: XLSX_MIME }));
@@ -1409,7 +1416,7 @@ export function mountUI() {
     if (!window.ExcelJS) { setFt('err', t('orch.noExcel')); return; }
     // folder + permission FIRST, inside the gesture — after minutes of fetching the re-request would fail
     const d = await ensureFolder();
-    if (!d) { setFt('', t('orch.pickFolder')); return; }
+    if (!d) { setFt('', t(folderFailKey())); return; }
     setBusy(true);
     const ctrl = new AbortController(); rjCtrl = ctrl;   // shared controller: Pause aborts analyze too
     try {

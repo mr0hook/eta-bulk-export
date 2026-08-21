@@ -315,6 +315,7 @@ export const EN = {
   'flow.rejLocked': 'Auto-Reject isn’t enabled for your account.',
   // ── run lifecycle: stopping, and getting out of a stuck one ──
   'flow.runBusy': 'The previous run is still stopping (saving progress) — try again in a moment.',
+  'flow.folderRefused': "That folder is picked but can't be used — the reason is the line above in the log (most often: not logged in to the portal, so the folder's owner can't be checked).",
   'flow.stopping': 'Stopping — saving progress…',
   'flow.discardTitle': 'Discard this interrupted run',
   'flow.discardConfirm': 'Discard the interrupted run?',
@@ -615,6 +616,7 @@ export const AR = {
   'flow.repairOffer': 'تعذّرت قراءة بعض الملفات. كُتبت ببرنامج آخر؛ يمكن لأداة الإصلاح معالجة المحارف غير الصالحة بها — ثم أعد الدمج.',
   'flow.rejLocked': 'خاصية الرفض التلقائي غير مفعَّلة لحسابك.',
   'flow.runBusy': 'التشغيل السابق ما زال يتوقف (يتم حفظ التقدم) — أعد المحاولة بعد لحظة.',
+  'flow.folderRefused': 'المجلد مُختار لكن لا يمكن استخدامه — السبب في السطر السابق بالسجل (غالبًا: لم يتم تسجيل الدخول إلى البوابة، فتعذّر التحقق من مالك المجلد).',
   'flow.stopping': 'جارٍ الإيقاف — يتم حفظ التقدم…',
   'flow.discardTitle': 'تجاهل هذا التشغيل المتوقف',
   'flow.discardConfirm': 'هل تريد تجاهل التشغيل المتوقف؟',
