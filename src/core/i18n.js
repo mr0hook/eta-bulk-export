@@ -410,8 +410,6 @@ export const AR = {
   'merge.summary': '{icon} تم دمج {read}/{n} ملف ← {uniq} فريد ← {parts} جزء · {cols} عمود.{warn}',
   'merge.reconcileOk': '✅ تمت المطابقة مع الخطة: {planned} مستنداً مخططاً، و{got} موجوداً.',
   'merge.reconcileShort': '⚠️ غير مكتمل — الخطة تقول {planned} مستنداً، والملفات تحتوي {got}. نقص داخل الملفات الموجودة: {short}. وفي دفعات بلا ملف إطلاقاً: {missing}. استأنف هذا المجلد لجلبها ثم أعد الدمج.',
-  'merge.reconcileHealed': '✅ تم تسجيل {n} دفعة ناقصة في eta_progress — الاستئناف من هذا المجلد سيعيد جلبها (لم يُحذف أي شيء).',
-  'merge.reconcileHealFailed': '⚠️ عُثر على {n} دفعة ناقصة لكن تعذّر تحديث eta_progress — لن يعرف الاستئناف أنه يجب إعادة جلبها.',
   'merge.reconcileHealed': '✅ تم حذف {n} دفعة ناقصة وتسجيلها في eta_progress — الاستئناف من هذا المجلد سيعيد جلبها.',
   'merge.reconcileHealFailed': '⚠️ عُثر على {n} دفعة ناقصة لكن تعذّر تحديث eta_progress — لن يعرف الاستئناف أنه يجب إعادة جلبها.',
   'merge.reconcileDeleteFailed': '⚠️ تعذّر حذف {n} ملف دفعة ناقصة (مفتوح في مكان آخر؟) — احذفها يدويًا قبل الاستئناف.',

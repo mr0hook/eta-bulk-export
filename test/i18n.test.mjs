@@ -51,3 +51,23 @@ test('string-freeze: test-coupled EN values are verbatim', () => {
   assert.equal(t('merge.skipped', { name: 'f.xlsx' }), '⚠️ SKIPPED (unreadable): f.xlsx');
   assert.equal(t('orch.rinMismatch').includes('no longer matches your registration'), true);
 });
+
+test('T-299 no duplicate literal keys — the parsed object cannot show them', async () => {
+  // v0.16.0 shipped merge.reconcileHealed TWICE in AR: an earlier insert I believed had failed,
+  // plus the corrected one. JS keeps the LAST literal so the right text won at runtime, but the
+  // stale copy said "nothing was deleted" about a merge that now deletes — one reorder away from
+  // the Arabic UI stating the opposite of what the code does. Object.keys() dedupes, so the parity
+  // test above is blind to it; only the source text can tell.
+  const src = await (await import('node:fs/promises')).readFile(new URL('../src/core/i18n.js', import.meta.url), 'utf8');
+  const dupes = [];
+  const tables = [['EN', src.slice(src.indexOf('export const EN'), src.indexOf('export const AR'))],
+                  ['AR', src.slice(src.indexOf('export const AR'))]];
+  for (const [name, body] of tables) {
+    const seen = new Set();
+    for (const m of body.matchAll(/^  '([^']+)':/gm)) {
+      if (seen.has(m[1])) dupes.push(`${name} ${m[1]}`);
+      seen.add(m[1]);
+    }
+  }
+  assert.deepEqual(dupes, [], `duplicate i18n keys: ${dupes.join(', ')}`);
+});
