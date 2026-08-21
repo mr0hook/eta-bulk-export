@@ -19,7 +19,25 @@ single origin bg.js is allowed to fetch, and manifest.json's host_permissions. A
 up in `git status` (manifest.json changes) and `package-ext.mjs` refuses to zip one.
 
 ## NEXT ACTION
-→ 2026-08-20 ~11:00 INCIDENT + SPEC-033 (v0.11.2): mid-run the tool threw the user back to the
+→ **Reload the extension to v0.15.0, then Resume + re-merge the two damaged exports, in this order:**
+  1. `Pr2\2024\Q1` — its 3 short chunks were deleted and `doneIds` healed on 2026-08-20 (34/37,
+     status=incomplete, `.bak` written). Resume refetches exactly those windows. Then Merge: the
+     new closing line must read `Reconciled against the plan: 240,351 … 240,351 present`.
+  2. `Pr2\2023R` — **not yet touched.** `tools/verify-chunks.mjs` found 4,748 documents missing:
+     chunk 38 holds **5** of a planned 4,753. (Chunks 2 and 16 are short by 3 and 1 — 0.06% and
+     0.01%, benign probe drift, inside the 0.5% tolerance; leave them.) Chunk 38 is the tail of the
+     run that was interrupted by the registration lockout and later "synced"; the sync marked it
+     done with 5 rows. Fix: `node tools/drop-short-chunks.mjs "…\2023R" 38`, then Resume, then
+     re-merge. The already-merged COMBINED files for 2023R are 4,748 documents short — do not ship
+     them to anyone until this is redone.
+  Run `tools/verify-chunks.mjs` on every OTHER previously-exported folder too. Every export made
+  before v0.15.0 could carry this loss and none of them were checked.
+
+  Still open from earlier, unrelated: F-5 (unverified registration emails), F-6 (entitlement on
+  post-start plan routes), L-3, L-5, L-6, L-8 from docs/security-review-2026-08-20.md.
+
+### Superseded (kept for the record)
+2026-08-20 ~11:00 INCIDENT + SPEC-033 (v0.11.2): mid-run the tool threw the user back to the
   REGISTRATION GATE with "device limit reached". Assessment: docs/incidents/2026-08-20-
   registration-lockout.md. NO DATA LOST (verified on disk: 37/38 chunks, 24 detail parts,
   291.6MB, progress says 37 done / 0 failed / 254,048 rows). NOT caused by 429/WAF: creds are
@@ -369,3 +387,29 @@ because every other phase adds code to the file it breaks up.
   scratch .jsonl was unlinked only on the happy path, so every crash stranded it; cleanup is now
   in a finally and stale ones are swept at merge start. Trade-off accepted: parts are smaller, so
   big folders produce more COMBINED files — a merge that finishes beats one that kills the tab.
+- 2026-08-21 · SPEC-040 (v0.15.0) — SILENT PARTIAL DATA LOSS, found and closed. 2024 Q1 planned
+  240,351 documents and the chunk files held 230,545: 0 duplicates, 0 failed chunks, no failures
+  file, and a merge that ended "Merged 69/69 files → 230,545 unique". Mechanism: fetchAllRows ended
+  pagination on `r.length < ps`, and the portal answers 200 with a short/empty page while the window
+  still holds documents. Three chunks stopped early (3 of 8,879 · 5,200 of 5,847 · 5,900 of 6,183),
+  every actual count an exact multiple of the 100-row page size. Neither existing guard could see
+  it: the empty-chunk guard fires only on EXACTLY zero rows, and the merge summary counts FILES —
+  "69/69 files" only ever meant every file was read, never that every document was in it.
+  Three layers shipped: (1) a short page is re-asked up to 3× while still short of the planned
+  count, page REPLACED not appended; (2) below max(2, 0.5%) of its planned count a chunk re-probes
+  and the probe decides — still claiming the count → FAIL and resume refetches whole; agreeing →
+  the window shrank, accept with a warning; (3) every merge ends with planned-vs-present, compared
+  against summary ROWS READ so inclusive-boundary duplicates cannot masquerade as loss, with
+  no-file-at-all chunks reported separately. T-285..T-294, 421/421.
+  Validated on real data: verify-chunks.mjs on 2023R (already merged, believed complete, never
+  checked) found 4,748 missing — chunk 38 holds 5 of 4,753 — while correctly ignoring two chunks
+  short by 3 and 1. The guard fires on the real loss and stays quiet on both benign drifts.
+  LIMIT: the run-time guards protect new/resumed fetching only. The merge reconciliation DOES apply
+  retroactively — re-merging any old folder now states whether it is complete.
+- 2026-08-21 · KNOWN FLAKE, not chased: during one full `npm test` under heavy CPU contention a
+  single test asserting `progress(dir).failedIds === ['c1']` saw `[]`. Not reproducible — 6
+  consecutive full-suite runs and 5 isolated runs of batchrun.test.mjs since are clean (421/421).
+  Four tests share that assertion (T-266, T-274, T-281, T-285), so the likely cause is the test
+  reading the progress file before the run's final state write lands rather than anything in the
+  guards. Worth confirming whether the final writeProgress at run end is awaited — if it is not,
+  a tab closed the instant a run ends could lose the failed-chunk record for real.
