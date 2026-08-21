@@ -242,3 +242,37 @@ test('T-287 a chunk that fetches its full planned count says nothing new', async
   assert.deepEqual(progress(dir).doneIds, ['c1']);
   assert.ok(!msgs.some((m) => /shrank|of the 400 documents/.test(m)), 'a healthy chunk is not warned about');
 });
+
+test('T-295 a Pause mid-chunk is not reported as a short chunk', async () => {
+  // A pause hands the SPEC-040 shortfall guard a window it never finished fetching, and claiming
+  // "returned 200 of the 500 documents it was planned with" there would be a lie.
+  // Today this passes WITHOUT the guard's abort check, and honesty about why matters: sleep(ms,
+  // signal) REJECTS with STOPPED (client.js:22), so an abort makes fetchAllRows throw rather than
+  // return the partial rows, and the guard is never reached. The check is defence for the one path
+  // that does return partial — an abort landing at the top of the pagination loop — and this test
+  // is here so that a future change making fetchAllRows swallow aborts cannot quietly turn every
+  // Pause into a shortfall report.
+  setToken();
+  const rows = Array.from({ length: 500 }, (_, k) => ({ source: { uuid: 'U' + k, documentStatusEN: 'Valid' } }));
+  let orch = null;
+  globalThis.fetch = async (url) => {
+    const u = String(url);
+    if (u.includes('/search')) {
+      const p = new URL(u).searchParams;
+      const page = parseInt(p.get('Page') || '1', 10), ps = parseInt(p.get('PageSize') || '100', 10);
+      if (page === 2) orch.pause();               // the user hits Pause partway through the window
+      return okResp({ result: rows.slice((page - 1) * ps, page * ps), metadata: { totalCount: 500 } });
+    }
+    if (u.includes('/details')) return okResp({ ...GOOD_DETAIL, uuid: u.split('/documents/')[1].split('/details')[0] });
+    return okResp({});
+  };
+  const dir = fakeDir();
+  const msgs = [];
+  orch = createOrchestrator({ onStatus: (m) => msgs.push(m) });
+  orch.setFolder(dir);
+  await orch.start(mkPlan(500));
+
+  assert.ok(!msgs.some((m) => /of the 500 documents it was planned with/.test(m)),
+    `a pause must not masquerade as a shortfall · log: ${msgs.slice(-4).join(' | ')}`);
+  assert.deepEqual(progress(dir).failedIds, [], 'and the paused chunk is not marked failed');
+});

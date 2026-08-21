@@ -295,7 +295,12 @@ async function runMerge(ExcelJS, dir, { onStatus, rowCap, prefix, files, sizes, 
     onStatus(t('merge.summary', { icon: failed.length ? '⚠️' : '✅', read: readN, n: read.length, uniq: total, parts: nFiles, cols: sumCols.length, warn }));
     // Last word of the merge, and deliberately after the ✅ — the summary line above says the files
     // were read, this one says whether they held the documents the run promised.
-    try { await reconcile(dir, prefix, files, total + extraRows, onStatus); }
+    // Skipped on the first incremental merge over a PRE-SPEC-040 state: that state carries no
+    // extraRows, so every boundary duplicate the earlier passes deduped is invisible here and the
+    // reconciliation would report an entirely healthy folder as short. It self-heals — the next
+    // full rebuild, or any later incremental, counts correctly.
+    const canCount = !base || base.extraRows !== undefined;
+    try { if (canCount) await reconcile(dir, prefix, files, total + extraRows, onStatus); }
     catch (e) { onStatus(t('merge.reconcileFailed', { msg: String(e?.message || e).slice(0, 80) })); }
   } finally {
     // The .jsonl is scratch, never a deliverable — it must not outlive the merge, error or not.

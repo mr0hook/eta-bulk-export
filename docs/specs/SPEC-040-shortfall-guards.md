@@ -80,3 +80,29 @@ disk: for that, `tools/verify-chunks.mjs` locates the short chunks and `tools/dr
 deletes them and heals `doneIds` so a Resume refetches exactly those windows. The merge
 reconciliation *does* apply retroactively — it reads the plan already in the folder, so re-merging
 any past export now states whether it is complete.
+
+## Self-review findings (2026-08-21, /code-review on this spec's own diff)
+
+**R-1 · Real, shipped in v0.15.0, fixed in v0.15.2 — the first incremental merge after upgrading
+reported a healthy folder as INCOMPLETE.** Every state file written by ≤v0.14.2 has no `extraRows`,
+so the boundary duplicates its earlier passes deduped are invisible to the reconciliation. It counts
+`unique + 0`, under-counts by exactly those duplicates, and reports documents lost that were never
+lost — on the first merge the user runs after installing the fix. `canCount` now skips the
+reconciliation entirely on a pre-SPEC-040 base; it self-heals on the next full rebuild. **T-296**
+reproduces it: without the guard the log reads `the plan says 6 documents, the files hold 5`.
+
+**R-2 · Not a defect — the shortfall guard on Pause.** `fetchAllRows` breaks out of pagination on
+`signal.aborted` and returns partial rows, which would let a Pause be reported as a shortfall. It
+does not, because `sleep(ms, signal)` REJECTS with STOPPED (`client.js:22`), so an abort makes
+`fetchAllRows` throw and the guard is never reached. The abort check added in v0.15.2 is defence for
+the one path that does return partial — an abort landing at the top of the loop — and **T-295**
+exists to stop a future change making `fetchAllRows` swallow aborts from quietly turning every Pause
+into a shortfall report. It passes with and without the check today, and says so.
+
+## Consequence that was under-stated when this shipped
+
+A chunk that used to complete silently short now FAILS, and `orchestrator.js:658` halts the whole
+run after **three consecutive failed chunks**. Before this spec those chunks completed, so `consec`
+never incremented and the run always finished. A run against a window the portal will not serve now
+stops instead of finishing with a hole in it — correct, but it is a visible change in run behaviour,
+and each failure costs three full attempts with 60s and 120s backoffs (~3½ minutes per chunk).

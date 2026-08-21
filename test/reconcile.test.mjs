@@ -116,3 +116,37 @@ test('T-294 a filtered run is not reconciled — its chunk counts are the unfilt
   await mergeFolder(ExcelJS, dir, { onStatus: (m) => log.push(m) });
   assert.ok(!log.some((m) => /INCOMPLETE|Reconciled/.test(m)), 'says nothing rather than guessing');
 });
+
+test('T-296 an incremental merge over a pre-SPEC-040 state does not cry loss', async () => {
+  // Every existing user has an eta_merge_state.json written before extraRows existed. The boundary
+  // duplicates its earlier passes deduped are unrecoverable — the files they came from are already
+  // consumed — so counting rowsRead as unique+0 under-counts and reports a healthy folder as
+  // INCOMPLETE. A false alarm on the FIRST merge after upgrading is how a real one gets ignored.
+  const dir = fakeDir();
+  const mk = (i) => ({ id: 'c' + i, label: '2025-0' + (i + 1), count: 2, fromISO: `2025-0${i + 1}-01T00:00:00Z`, toISO: `2025-0${i + 1}-28T23:59:59Z` });
+  const plan = {
+    v: 1, key: 'inc_key', source: 'invoices', year: '2025', dir: 'Sent', dateField: 'Issue',
+    statuses: ['Valid', 'Invalid', 'Rejected', 'Cancelled'], mode: 'range',
+    from: '2025-01-01', to: '2025-03-31', cap: 10000, rinFilter: [], totalRows: 6,
+    chunks: [mk(0), mk(1), mk(2)], doneIds: ['c0', 'c1', 'c2'], failedIds: [],
+  };
+  // Pass 1 consumes two chunks that SHARE U2 on their boundary — one real duplicate, recorded.
+  await putChunk(dir, chunkFile(plan, plan.chunks[0]), ['U1', 'U2']);
+  await putChunk(dir, chunkFile(plan, plan.chunks[1]), ['U2', 'U3']);
+  await writeProgress(dir, plan, 'complete');
+  await mergeFolder(ExcelJS, dir, { onStatus: () => {} });
+
+  const sn = [...dir.files.keys()].find((n) => /^eta_merge_state.*\.json$/i.test(n));
+  const st = JSON.parse(new TextDecoder().decode(dir.files.get(sn)));
+  assert.equal(st.extraRows, 1, 'pass 1 recorded the boundary duplicate');
+  delete st.extraRows;                                   // now it is a <= v0.14.2 state
+  dir.files.set(sn, new TextEncoder().encode(JSON.stringify(st)));
+
+  await putChunk(dir, chunkFile(plan, plan.chunks[2]), ['U4', 'U5']);
+  const log = [];
+  await mergeFolder(ExcelJS, dir, { onStatus: (m) => log.push(m) });
+  assert.ok(log.some((m) => /Incremental/i.test(m)), 'this really is the incremental path');
+  // Truth: 6 rows across the three files, plan says 6. Without the guard the forgotten duplicate
+  // makes it look like 5 of 6 and the merge reports a document lost that was never lost.
+  assert.ok(!log.some((m) => /INCOMPLETE/.test(m)), `no false loss report · log: ${log.join(' | ')}`);
+});

@@ -439,7 +439,11 @@ export function createOrchestrator(hooks = {}) {
             // shrink and the chunk is complete; if it still claims the planned count, documents are
             // missing and only a retry can get them. Filtered runs are exempt for the same reason as
             // above — their row counts are legitimately below the planned (unfiltered) count.
-            if (!isUuids && !sp.filterSet && !rinPred) {
+            // ...and NOT while the run is stopping. fetchAllRows returns whatever it had when the
+            // signal aborted, so a Pause/Stop mid-chunk hands this guard a legitimately partial row
+            // set. Without this check every Stop produced a false "chunk returned X of Y documents"
+            // — and burned a probe that could only fail, since it inherits the aborted signal.
+            if (!isUuids && !sp.filterSet && !rinPred && !currentCtrl.signal.aborted && !flags.paused && !flags.halted) {
               const want = Math.min(c.count | 0, SRC.cap);
               const slack = Math.max(SHORT_MIN, Math.ceil(want * SHORT_RATIO));
               if (want && rows.length < want - slack) {
