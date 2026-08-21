@@ -96,18 +96,43 @@ export async function probeCount(SRC, fromISO, toISO, dir, field, statusParam, s
   } catch (e) { if (e.code === 'NOT_FOUND') return 0; throw e; }
 }
 
-export async function fetchAllRows(SRC, chunk, dir, field, statusParam, filterSet, { onPage, signal, onRate, pagePause = 250, query } = {}) {
+// SPEC-040 — how many times to re-ask for a page that came back short while the window is still
+// short of its planned count, and how long to wait between asks (widening: 1.5s, 3s, 4.5s).
+export const SHORT_PAGE_RETRIES = 3;
+export const SHORT_PAGE_WAIT = 1500;
+
+export async function fetchAllRows(SRC, chunk, dir, field, statusParam, filterSet, { onPage, signal, onRate, pagePause = 250, query, expectFull = true, shortWait = SHORT_PAGE_WAIT, onShortPage } = {}) {
   const ps = SRC.pageSize, maxPage = Math.ceil(SRC.cap / ps) + 5;
   const expected = Math.min(chunk.count || 0, SRC.cap);
+  const getPage = async (p) => {
+    const j = await apiGet(buildUrl(SRC, chunk.fromISO, chunk.toISO, dir, field, p, ps, statusParam, chunk.subF, chunk.subT, false, query), { signal, onRate });
+    return (j && j[SRC.resultKey]) || [];
+  };
   let rows = [], page = 1;
   for (;;) {
     if (signal?.aborted) break;
-    let j;
-    try { j = await apiGet(buildUrl(SRC, chunk.fromISO, chunk.toISO, dir, field, page, ps, statusParam, chunk.subF, chunk.subT, false, query), { signal, onRate }); }
+    let r;
+    try { r = await getPage(page); }
     catch (e) { if (e.code === 'NOT_FOUND') { if (page > 1) throw e; break; } throw e; }   // 404 after real pages ≠ clean end → fail the chunk
-    const r = (j && j[SRC.resultKey]) || [];
+    // SPEC-040 — a short page normally means "no more documents", and ending here is why pagination
+    // never over-reads a stale probed count. But the portal ALSO answers 200 with a short or empty
+    // page while the window still holds documents, and that read as a clean end: 2024 Q1 lost 9,806
+    // documents that way — three chunks stopping on an exact page boundary (3 of 8,879, 5,200 of
+    // 5,847, 5,900 of 6,183), each marked done, none logged as a failure. So while we are still
+    // short of what this window was PLANNED to hold, ask for the same page again before believing
+    // it. A real end of data repeats itself; a hiccup does not. The page is REPLACED, never
+    // appended, so a retry can only add documents the first answer omitted.
+    if (expectFull && r.length < ps && rows.length + r.length < expected) {
+      for (let k = 0; k < SHORT_PAGE_RETRIES && r.length < ps && rows.length + r.length < expected; k++) {
+        await sleep(shortWait * (k + 1), signal);
+        if (signal?.aborted) break;
+        let again;
+        try { again = await getPage(page); } catch (e) { if (e.code === 'NOT_FOUND') break; throw e; }
+        if (again.length > r.length) { r = again; onShortPage?.({ page, got: r.length, ps, tries: k + 1 }); }
+      }
+    }
     rows.push(...r); onPage?.(rows.length, Math.max(expected, rows.length));
-    if (r.length < ps) break;                 // short page = definitive end; paginate to HERE, not to the (possibly stale) probed count
+    if (r.length < ps) break;
     page++; if (page > maxPage) break;         // API result cap reached
     await sleep(pagePause, signal);
   }

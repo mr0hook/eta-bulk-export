@@ -7,10 +7,11 @@
 // SPEC-012: the merge is incremental. eta_merge_state.json records what was consumed, so a merge
 // after a sync reads only the new chunk files and tops up the last part instead of rebuilding
 // everything. Every ambiguity falls back to a full rebuild — see mergestate.decideMode.
-import { listFiles, readArrayBuffer, openWrite, readLines, remove } from './fs.js';
+import { listFiles, readArrayBuffer, readText, openWrite, readLines, remove } from './fs.js';
 import * as ms from './mergestate.js';
 import { createRotator } from './mergeout.js';
-import { CHUNK_DET_RE, detailParentOf } from './store.js';   // SPEC-027: split-chunk detail parts
+import { CHUNK_DET_RE, detailParentOf, chunkFile } from './store.js';   // SPEC-027: split-chunk detail parts
+import { ALL_STATUSES } from '../api/sources.js';
 import { t } from './i18n.js';
 
 const UUID = 'الرقم الإلكترونى', SERIAL = 'مسلسل';
@@ -36,6 +37,50 @@ const addCols = (into, hdr) => { for (const h of hdr) if (h != null && h !== '' 
 const toObj = (hdr, vals) => { const o = {}; for (let i = 0; i < hdr.length; i++) { const h = hdr[i]; if (h != null && h !== '') o[h] = vals[i]; } return o; };
 // Normalize header strings so the same Arabic column in two Unicode forms (NFC/NFD) isn't unioned as two columns.
 const nfcHdr = (arr) => arr.map((h) => (typeof h === 'string' ? h.normalize('NFC') : h));
+
+// SPEC-040 — the merge's closing reconciliation: what the run PLANNED to hold vs what the chunk
+// files actually contained.
+//
+// This is the check that was missing on 2026-08-20. A merge reported "✅ Merged 69/69 files →
+// 230,545 unique" and looked perfect; the run had planned 240,351 documents, so 9,806 were simply
+// not there — no failed chunk, no failures file, nothing on screen that could have told anyone.
+// "69/69 files" only ever meant every file was READ, never that every document was IN them.
+//
+// It compares against the chunk files that are actually present, so an incomplete or partly-deleted
+// run reconciles against what it should hold today rather than crying wolf. Duplicates are fully
+// accounted for: the planner cuts on an inclusive shared boundary, so a document sitting exactly on
+// a cut is fetched by both neighbours, and the count compared here is summary ROWS READ (unique +
+// deduped), not unique — the one comparison in which boundary duplicates cannot masquerade as loss.
+async function reconcile(dir, prefix, files, rowsRead, onStatus) {
+  const present = new Set(files.map((n) => n.toLowerCase()));
+  let planned = 0, missing = 0, plans = 0;
+  for (const n of await listFiles(dir, /^eta_progress.*\.json$/i)) {
+    let p; try { p = JSON.parse((await readText(dir, n)) || ''); } catch { continue; }
+    if (!p || !Array.isArray(p.chunks) || !p.chunks.length) continue;
+    // The progress file stores the date field as `field`; chunkFile() hashes `dateField` (resume
+    // does the same remap). Without it every filename misses and the whole folder reads as lost.
+    const plan = { ...p, dateField: p.dateField || p.field, mode: p.mode || 'range' };
+    let head; try { head = chunkFile(plan, plan.chunks[0]); } catch { continue; }
+    if (!head.toLowerCase().startsWith(prefix.toLowerCase())) continue;   // another document type, or another scoped run
+    // A filtered run's chunk counts are the UNFILTERED window totals, so its files legitimately hold
+    // fewer rows. Comparing them would report loss on a healthy run — skip, exactly as the run-time
+    // shortfall guard exempts the same three cases.
+    if (plan.mode === 'uuids' || (p.rinFilter || []).length) continue;
+    if (Array.isArray(p.statuses) && p.statuses.length && p.statuses.length < ALL_STATUSES.length) continue;
+    plans++;
+    for (const c of plan.chunks) {
+      try { if (present.has(chunkFile(plan, c).toLowerCase())) planned += c.count | 0; else missing += c.count | 0; }
+      catch {}
+    }
+  }
+  if (!plans || !planned) return;   // no comparable plan in this folder — say nothing rather than guess
+  const short = Math.max(0, planned - rowsRead);
+  // Two different problems, and the user has to be able to tell them apart: `short` means the chunk
+  // files that ARE here hold fewer documents than they were planned to (silent loss — the 2024 Q1
+  // failure); `missing` means whole chunks have no file at all (an unfinished run — Resume fixes it).
+  if (short || missing) onStatus(t('merge.reconcileShort', { planned: planned + missing, got: rowsRead, short, missing }));
+  else onStatus(t('merge.reconcileOk', { planned, got: rowsRead }));
+}
 
 // `scope` (SPEC-022): merge ONE uuid run's files instead of the whole folder — { re, prefix,
 // stateFile } from store.uuidMergeScope(plan). The folder-wide default regex requires the
@@ -121,7 +166,7 @@ async function runMerge(ExcelJS, dir, { onStatus, rowCap, prefix, files, sizes, 
     for (const n of read) { if (isPart(n)) { const p = detailParentOf(n); if (!partsOf.has(p)) partsOf.set(p, []); partsOf.get(p).push(n); } }
     for (const list of partsOf.values()) list.sort();
     const parents = read.filter((n) => !isPart(n));
-    let uniq = 0, fi = 0, written = 0; const failed = [];
+    let uniq = 0, fi = 0, written = 0, extra = 0; const failed = [];
     {
       const reading = new Set(parents);
       for (const p of [...partsOf.keys()]) {
@@ -154,7 +199,10 @@ async function runMerge(ExcelJS, dir, { onStatus, rowCap, prefix, files, sizes, 
       if (s0) {
         if (!sheetNames.s0) sheetNames.s0 = s0.name;
         const hdr = nfcHdr(s0.getRow(1).values.slice(1)); const uk = uuidKeyOf(hdr); addCols(sumCols, hdr);
-        s0.eachRow((row, rn) => { if (rn === 1) return; const o = toObj(hdr, row.values.slice(1)); const u = o[uk]; if (u == null || seen.has(u)) return; seen.add(u); localSum.set(u, o); order.push(u); });
+        // `extra` = summary rows read that did NOT become a new unique row (a boundary duplicate, or
+        // a row with no UUID). unique + extra is the true number of documents these files hold, which
+        // is what reconcile() has to compare against the plan — see SPEC-040.
+        s0.eachRow((row, rn) => { if (rn === 1) return; const o = toObj(hdr, row.values.slice(1)); const u = o[uk]; if (u == null || seen.has(u)) { extra++; return; } seen.add(u); localSum.set(u, o); order.push(u); });
       }
       const eatLines = (ws) => {
         if (!sheetNames.s1 && ws.name !== sheetNames.s0) sheetNames.s1 = ws.name;
@@ -230,10 +278,14 @@ async function runMerge(ExcelJS, dir, { onStatus, rowCap, prefix, files, sizes, 
 
     // Written LAST, and only once every part has landed: a crash before this leaves the previous
     // state intact, so the next merge re-does this increment rather than silently skipping it.
+    // extraRows accumulates across incremental merges: a later pass only reads the NEW chunk files,
+    // so without carrying it the reconciliation would forget the duplicates the first pass deduped
+    // and report that gap as loss.
+    const extraRows = (base ? base.extraRows | 0 : 0) + extra;
     await ms.writeState(dir, {
       prefix, sumCols, lineCols, sheetNames, nextSerial: serial, parts, writer: 'stream-v1',
       consumed: files.filter((n) => sizes.get(n) >= 0).map((n) => ({ name: n, size: sizes.get(n) })),
-      uuids: [...seen],
+      uuids: [...seen], extraRows,
     }, stateFile);
 
     const total = base ? base.uuids.length + uniq : uniq;
@@ -241,6 +293,10 @@ async function runMerge(ExcelJS, dir, { onStatus, rowCap, prefix, files, sizes, 
     const nFiles = parts.summary.length + parts.details.length;
     const warn = failed.length ? t('merge.warnTail', { n: failed.length, names: failed.slice(0, 5).join(', ') + (failed.length > 5 ? '…' : '') }) : '';
     onStatus(t('merge.summary', { icon: failed.length ? '⚠️' : '✅', read: readN, n: read.length, uniq: total, parts: nFiles, cols: sumCols.length, warn }));
+    // Last word of the merge, and deliberately after the ✅ — the summary line above says the files
+    // were read, this one says whether they held the documents the run promised.
+    try { await reconcile(dir, prefix, files, total + extraRows, onStatus); }
+    catch (e) { onStatus(t('merge.reconcileFailed', { msg: String(e?.message || e).slice(0, 80) })); }
   } finally {
     // The .jsonl is scratch, never a deliverable — it must not outlive the merge, error or not.
     try { await sink?.close(); } catch {}

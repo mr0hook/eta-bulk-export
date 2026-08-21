@@ -171,3 +171,60 @@ test('T-275 an ordinary trickle of 403s still completes the chunk', async () => 
   assert.deepEqual(progress(dir).doneIds, ['c1'], 'and marked done');
   assert.ok([...dir.files.keys()].includes('eta_failures.jsonl'), 'the few refusals are recorded for the retry button');
 });
+
+// ---- SPEC-040: a chunk that comes back SHORT is a failed chunk, not a finished one -------------
+// The 2024 Q1 loss in full: 240,351 documents planned, 230,545 exported, zero failed chunks, no
+// failures file, nothing on screen. Three chunks had simply stopped early — 3 of 8,879, 5,200 of
+// 5,847, 5,900 of 6,183 — and the run marked every one of them done. The empty-chunk guard could
+// not see it because it only ever fires on EXACTLY zero rows.
+
+// A portal that serves `have` documents but keeps CLAIMING `claim` in metadata.totalCount — the
+// shape of the incident: pagination ends early while the window demonstrably still holds more.
+function stubShortFetch(have, claim) {
+  const rows = Array.from({ length: have }, (_, k) => ({ source: { uuid: 'U' + k, documentStatusEN: 'Valid' } }));
+  globalThis.fetch = async (url) => {
+    const u = String(url);
+    if (u.includes('/search')) {
+      const p = new URL(u).searchParams;
+      const page = parseInt(p.get('Page') || '1', 10), ps = parseInt(p.get('PageSize') || '100', 10);
+      return okResp({ result: rows.slice((page - 1) * ps, page * ps), metadata: { totalCount: claim } });
+    }
+    if (u.includes('/details')) return okResp({ ...GOOD_DETAIL, uuid: u.split('/documents/')[1].split('/details')[0] });
+    return okResp({});
+  };
+}
+
+test('T-285 a chunk short of its planned count FAILS when the portal still claims the count', async () => {
+  setToken();
+  stubShortFetch(120, 500);           // 120 served, the window still says 500 — 380 documents missing
+  const dir = fakeDir();
+  const msgs = await run(dir, mkPlan(500));
+
+  assert.ok(![...dir.files.keys()].some((n) => n.endsWith('.xlsx')), 'no short chunk file is written');
+  assert.deepEqual(progress(dir).failedIds, ['c1'], 'the chunk fails so a resume refetches it whole');
+  assert.ok(msgs.some((m) => /120 of the 500/.test(m)), 'and the log names the shortfall, not just "done"');
+});
+
+test('T-286 a chunk short only because the WINDOW shrank is accepted, with a warning', async () => {
+  // The counterweight, and the reason the guard re-probes instead of trusting the plan: the count
+  // is a probe taken at planning time. A document that leaves the status set before the fetch is
+  // not a lost document, and failing that chunk forever would make long resumes impossible.
+  setToken();
+  stubShortFetch(120, 120);           // the portal now agrees: this window really does hold 120
+  const dir = fakeDir();
+  const msgs = await run(dir, mkPlan(500));
+
+  assert.deepEqual(progress(dir).doneIds, ['c1'], 'the chunk completes');
+  assert.ok([...dir.files.keys()].some((n) => n.endsWith('.xlsx')), 'and its file is written');
+  assert.ok(msgs.some((m) => /shrank/.test(m)), 'the discrepancy is still reported, never silent');
+});
+
+test('T-287 a chunk that fetches its full planned count says nothing new', async () => {
+  setToken();
+  stubShortFetch(400, 400);
+  const dir = fakeDir();
+  const msgs = await run(dir, mkPlan(400));
+
+  assert.deepEqual(progress(dir).doneIds, ['c1']);
+  assert.ok(!msgs.some((m) => /shrank|of the 400 documents/.test(m)), 'a healthy chunk is not warned about');
+});

@@ -45,6 +45,12 @@ const BATCH_DOCS = 2000;
 // 403s is never healthy.
 const MASS_FORBIDDEN_MIN = 25;
 const MASS_FORBIDDEN_SHARE = 0.25;
+// SPEC-040: how far below its planned count a chunk may land before it is treated as short. The
+// plan's count is a probe taken at planning time and drifts a little on its own (a document leaving
+// the status set between planning and fetching is not a lost document), so a small slack is real —
+// but the losses this guard exists for were 4.6%, 11% and 99.97% of a window, orders above it.
+const SHORT_MIN = 2;
+const SHORT_RATIO = 0.005;
 // SPEC-031: the SESSION host — the origin this content script runs on, and a different host from
 // the API the run talks to. Pinned as a constant (never read from location) so the warm can only
 // ever hit the portal.
@@ -408,7 +414,9 @@ export function createOrchestrator(hooks = {}) {
             let rows = isUuids
               ? c.uuids.map((u) => ({ source: { uuid: u } }))
               : await fetchAllRows(SRC, c, plan.dir, plan.dateField, sp.statusParam, sp.filterSet,
-                { signal: currentCtrl.signal, onRate: rate, query: rinQuery, onPage: (g, tt) => { onStatus(t('orch.chunkFetch', { i: i + 1, n: plan.chunks.length, g, t: tt }), { level: 'run', kind: 'page' }); onCount(rowsFetched + g, plan.totalRows); onChunk({ i: i + 1, n: plan.chunks.length, phase: 'search', cur: g, max: tt }); } });
+                { signal: currentCtrl.signal, onRate: rate, query: rinQuery,
+                  onShortPage: ({ page, got, tries }) => onStatus(t('orch.shortPage', { i: i + 1, page, got, tries }), { level: 'warn' }),
+                  onPage: (g, tt) => { onStatus(t('orch.chunkFetch', { i: i + 1, n: plan.chunks.length, g, t: tt }), { level: 'run', kind: 'page' }); onCount(rowsFetched + g, plan.totalRows); onChunk({ i: i + 1, n: plan.chunks.length, phase: 'search', cur: g, max: tt }); } });
             // 2026-08-19 incident guard: a live run marked 192 chunks "done" with ZERO rows and no
             // files — the portal answered 200 with an empty result for every page while probes
             // (and manual requests) returned data. An unfiltered chunk was PLANNED because its
@@ -420,6 +428,26 @@ export function createOrchestrator(hooks = {}) {
               let re = '?';
               try { re = String(await probeCount(SRC, c.fromISO, c.toISO, plan.dir, plan.dateField, sp.statusParam, c.subF, c.subT, { signal: currentCtrl.signal, onRate: rate })); } catch {}
               throw new Error(t('orch.emptyChunk', { i: i + 1, count: c.count, re }));
+            }
+            // SPEC-040 — the guard above only fires on EXACTLY zero rows, so a chunk that came back
+            // PARTIALLY filled walked straight past it. 2024 Q1 lost 9,806 documents that way: three
+            // chunks holding 3 of 8,879, 5,200 of 5,847 and 5,900 of 6,183, each stopping on an exact
+            // page boundary, each marked done, none logged as a failure — 230,545 shipped where the
+            // plan said 240,351 and nothing anywhere said so. A materially short chunk is a failed
+            // chunk, not a finished one. A re-probe is the tie-breaker, because the plan's count can
+            // go stale on its own: if the portal now agrees with what we hold, the window really did
+            // shrink and the chunk is complete; if it still claims the planned count, documents are
+            // missing and only a retry can get them. Filtered runs are exempt for the same reason as
+            // above — their row counts are legitimately below the planned (unfiltered) count.
+            if (!isUuids && !sp.filterSet && !rinPred) {
+              const want = Math.min(c.count | 0, SRC.cap);
+              const slack = Math.max(SHORT_MIN, Math.ceil(want * SHORT_RATIO));
+              if (want && rows.length < want - slack) {
+                let re = null;
+                try { re = await probeCount(SRC, c.fromISO, c.toISO, plan.dir, plan.dateField, sp.statusParam, c.subF, c.subT, { signal: currentCtrl.signal, onRate: rate }); } catch {}
+                if (re == null || re > rows.length + slack) throw new Error(t('orch.shortChunk', { i: i + 1, got: rows.length, want, re: re == null ? '?' : re }));
+                onStatus(t('orch.shortChunkStale', { i: i + 1, got: rows.length, want, re }), { level: 'warn' });
+              }
             }
             if (rinPred && rows.length) {
               // If NO row in the chunk carries a recognisable counterparty id, the portal's search

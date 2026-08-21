@@ -106,7 +106,9 @@ test('fetchAllRows: paginates until a short page, then applies filterSet', async
   const page2 = { result: Array.from({ length: 20 }, (_, k) => ({ source: { uuid: 'v' + k, documentStatusEN: 'Valid' } })) };
   let p = 0; stubFetch(() => resp(200, p++ === 0 ? page1 : page2));
   const chunk = { count: 500, fromISO: 'a', toISO: 'b' };
-  const rows = await fetchAllRows(INV, chunk, 'Sent', 'Issue', null, new Set(['Valid']), { pagePause: 0 });
+  // shortWait: 0 — the chunk was probed at 500 and holds 120, so SPEC-040 re-asks for the short
+  // page before accepting it. That is the point of the guard; here it just must not change the rows.
+  const rows = await fetchAllRows(INV, chunk, 'Sent', 'Issue', null, new Set(['Valid']), { pagePause: 0, shortWait: 0 });
   assert.equal(rows.length, 80, '60 Valid on page1 + 20 Valid on page2, Cancelled filtered out');
 });
 
@@ -282,4 +284,38 @@ test('T-240 a hung request times out into the retry path — and a user abort is
   const p = apiGet(API_ORIGIN + '/a', { attempts: 3, timeoutMs: 60000, signal: ctrl.signal });
   setTimeout(() => ctrl.abort(), 10);
   await assert.rejects(() => p, (e) => e.code === 'STOPPED', 'the user pause is still STOPPED');
+});
+
+// ---- SPEC-040 — a short page is a claim about the end of the data, and the portal lies ---------
+test('T-288 a transient empty page mid-pagination no longer ends the run', async () => {
+  // Exactly how 2024 Q1 lost 9,806 documents: the portal answered 200 with an empty result while
+  // the window still held documents, `r.length < ps` read it as a clean end, and the chunk was
+  // marked done. Three chunks each stopped on an exact page boundary; nothing was ever logged.
+  const pages = [pageOf(100, 0), pageOf(100, 100), { result: [] }, pageOf(100, 200), pageOf(50, 300)];
+  let p = 0, asked = [];
+  stubFetch((url) => { asked.push(new URL(url).searchParams.get('Page')); const i = p++; return resp(200, i === 2 ? pages[2] : pages[i > 2 ? i - 1 : i]); });
+  const rows = await fetchAllRows(INV, { count: 350, fromISO: 'a', toISO: 'b' }, 'Sent', 'Issue', null, null, { pagePause: 0, shortWait: 0 });
+  assert.equal(rows.length, 350, 'the empty page is re-asked and the run continues to the real end');
+  assert.equal(new Set(rows.map((r) => r.source.uuid)).size, 350, 'and the retry replaces the page, never duplicates it');
+  assert.equal(asked[2], asked[3], 'the retry asks for the SAME page, not the next one');
+});
+
+test('T-289 a genuine end still ends — the retries stop and the rows are not duplicated', async () => {
+  // The counterweight. A window that really does hold 130 documents must not spin, and must not
+  // re-append the last page once per retry.
+  let calls = 0;
+  stubFetch(() => { calls++; return resp(200, calls === 1 ? pageOf(100, 0) : pageOf(30, 100)); });
+  const rows = await fetchAllRows(INV, { count: 500, fromISO: 'a', toISO: 'b' }, 'Sent', 'Issue', null, null, { pagePause: 0, shortWait: 0 });
+  assert.equal(rows.length, 130, 'the short page is believed once it repeats itself');
+  assert.equal(calls, 5, 'page 1, page 2, and 3 re-asks of page 2 — bounded, not a spin');
+});
+
+test('T-290 a short page is accepted immediately once the planned count is already in hand', async () => {
+  // No re-ask when there is nothing to be short of: this is the ordinary end of every chunk, and
+  // paying three extra requests plus their waits on all of them would be a heavy price for nothing.
+  let calls = 0;
+  stubFetch(() => { calls++; return resp(200, calls === 1 ? pageOf(100, 0) : pageOf(20, 100)); });
+  const rows = await fetchAllRows(INV, { count: 120, fromISO: 'a', toISO: 'b' }, 'Sent', 'Issue', null, null, { pagePause: 0, shortWait: 0 });
+  assert.equal(rows.length, 120);
+  assert.equal(calls, 2, 'two pages, no re-asks');
 });
