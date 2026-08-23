@@ -28,8 +28,9 @@ Export the signed-in user's own ETA invoice/receipt data to local spreadsheet fi
 | `host_permissions: https://api-portal.invoicing.eta.gov.eg/*` | Reads the user's own invoice/receipt data from the ETA API using the token the portal already stored. |
 | `host_permissions: https://eta-bulk-leads.omsoliman95.workers.dev/*` | The free registration/licence backend: the extension registers once, then periodically re-checks access (lock/kill/version/allowed-RIN). Data involved is disclosed in the privacy policy. |
 | content script `world: MAIN` | Needed to read the portal-origin OIDC token and call the ETA API under the page's own session — the tool cannot function otherwise. |
+| `permissions: storage` | Keeps ONE object under one pinned key (`etaBulkIdentity`: a random device id and that device's licence key) in `chrome.storage.local`. The portal clears its own localStorage when it re-authenticates, which used to destroy the device id and lock the user out of their own registration; extension-owned storage survives that. The licence key is held in the service worker so page scripts can never read it. No invoice or receipt data is stored, and `storage.sync` is not used. |
 | File System Access (no manifest permission) | Writes exports to a folder the user explicitly picks. |
-No `storage`, `downloads`, `tabs`, or broad-host permissions are requested. (The backend calls go through the background service worker, which is pinned to the exact backend origin above.)
+`storage` is the only chrome API permission requested, and it is used for the single key above. No `downloads`, `tabs`, `cookies`, `scripting`, or broad-host permissions are requested. (The backend calls go through the background service worker, which is pinned to the exact backend origin above.)
 
 ## Policy compliance
 - **Remote code:** none. Everything (app code + ExcelJS + JSZip + the ETA public code tables) is bundled

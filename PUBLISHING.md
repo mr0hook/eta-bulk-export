@@ -66,6 +66,7 @@ Dashboard → **Add new item** → upload `eta-bulk-export-v0.3.0.zip`. Then fil
   - `host_permissions invoicing.eta.gov.eg` → *Content script mounts on the ETA portal (single purpose).*
   - `host_permissions api-portal.invoicing.eta.gov.eg` → *Reads the user's own invoice/receipt data from the ETA API using the token the portal already stored.*
   - `host_permissions eta-bulk-leads.omsoliman95.workers.dev` → *Free registration/licence backend: the extension registers once, then re-checks access (lock/kill/version/allowed-RIN). See the privacy policy for the data.*
+  - `permissions: storage` → *Stores one object (`etaBulkIdentity`) in `chrome.storage.local`: a random device id and that device's licence key. The ETA portal wipes its own localStorage when it re-authenticates, which destroyed the device id and locked users out of the registration they already held; extension storage survives that. Holding the key in the service worker also keeps it out of reach of page scripts. No invoice data is stored and `storage.sync` is not used.*
   - *(If asked about the MAIN-world content script:)* *Required to read the portal-origin session token and call the ETA API under the page's own session; uses no chrome.* APIs.*
 - **Data usage:** you **do** collect registration data — declare **Personally identifiable information**
   (Name, Email, Phone; plus the **tax registration number** and a **device id** as identifiers) and
