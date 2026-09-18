@@ -35,10 +35,19 @@ const CT = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns=
 const RELS = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`;
 const WBRELS = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`;
 // s="1" is the date format; everything else uses the default style.
-const STYLES = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="1"><numFmt numFmtId="164" formatCode="yyyy\\-mm\\-dd"/></numFmts><fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts><fills count="1"><fill><patternFill patternType="none"/></fill></fills><borders count="1"><border/></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/></cellXfs></styleSheet>`;
+const STYLES = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="1"><numFmt numFmtId="164" formatCode="yyyy\\-mm\\-dd\\ hh:mm:ss"/></numFmts><fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts><fills count="1"><fill><patternFill patternType="none"/></fill></fills><borders count="1"><border/></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/></cellXfs></styleSheet>`;
 const wbXml = (sheet) => `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="${esc(sheet).slice(0, 31)}" sheetId="1" r:id="rId1"/></sheets></workbook>`;
 
-const SHEET_HEAD = (rtl) => `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView${rtl ? ' rightToLeft="1"' : ''} tabSelected="1" workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews><sheetData>`;
+// Column widths are guessed from the header text: the merge unions columns by NAME across chunk
+// files, so the base mapping's per-column widths aren't available here. With no <cols> at all Excel
+// falls back to its 8.43-char default and every date cell shows as ########.
+const DATE_HDR = /تاريخ|date/i;
+const colWidth = (h) => (DATE_HDR.test(String(h ?? '')) ? 21 : Math.min(40, Math.max(11, String(h ?? '').length + 3)));
+const colsXml = (cols) => (cols.length
+  ? '<cols>' + cols.map((h, i) => `<col min="${i + 1}" max="${i + 1}" width="${colWidth(h)}" customWidth="1"/>`).join('') + '</cols>'
+  : '');
+
+const SHEET_HEAD = (rtl, cols) => `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetViews><sheetView${rtl ? ' rightToLeft="1"' : ''} tabSelected="1" workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/><selection pane="bottomLeft" activeCell="A2" sqref="A2"/></sheetView></sheetViews>${colsXml(cols)}<sheetData>`;
 export const SHEET_TAIL = '</sheetData></worksheet>';
 
 const FLUSH_CHARS = 1 << 18;   // ~256KB of XML per compressor write
@@ -124,7 +133,7 @@ function cellXml(v, ref) {
 }
 
 // Writes one sheet into one file. addRow() takes an array of values positional to `header`.
-export async function createXlsxWriter(dir, name, { sheetName = 'Sheet1', header = [], rtl = true } = {}) {
+export async function createXlsxWriter(dir, name, { sheetName = 'Sheet1', header = [], cols = header, rtl = true } = {}) {
   const fh = await dir.getFileHandle(name, { create: true });
   const w = await fh.createWritable();
   const zip = new Zip((u8) => w.write(u8));
@@ -135,7 +144,7 @@ export async function createXlsxWriter(dir, name, { sheetName = 'Sheet1', header
   await zip.small('xl/styles.xml', STYLES);
   const sheet = await zip.stream('xl/worksheets/sheet1.xml');
 
-  let buf = SHEET_HEAD(rtl), rows = 0;
+  let buf = SHEET_HEAD(rtl, cols), rows = 0;
   const flush = async () => { if (buf) { await sheet.write(buf); buf = ''; } };
   if (header.length) { rows = 1; buf += `<row r="1">` + header.map((h, i) => cellXml(String(h ?? ''), colRef(i + 1) + '1')).join('') + '</row>'; }
 

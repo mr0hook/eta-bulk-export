@@ -39,7 +39,7 @@ export function createRotator(dir, { prefix, kind, sheetName, cols, seed = [], o
       const last = parts[parts.length - 1];
       idx = parts.length;
       working = ms.workingName(prefix, kind, idx);
-      w = await createXlsxWriter(dir, working, { sheetName, header: [] });
+      w = await createXlsxWriter(dir, working, { sheetName, header: [], cols });
       // Copy the existing rows straight from the old file's compressed sheet — never materialised.
       await copySheetBody(await readArrayBuffer(dir, last.name), (t) => w.copyChunk(t));
       w.setRows(last.rows);

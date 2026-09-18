@@ -4,6 +4,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import ExcelJS from 'exceljs';
+import JSZip from 'jszip';
 import { fakeDir } from './fakefs.mjs';
 import { createXlsxWriter, SHEET_MAX_ROWS, colRef } from '../src/export/xlsxstream.js';
 
@@ -107,4 +108,18 @@ test('T-127 many rows stay correct end-to-end and cost flat memory', async () =>
 
 test('T-128 SHEET_MAX_ROWS is the format limit, not a tuning knob', () => {
   assert.equal(SHEET_MAX_ROWS, 1048576);
+});
+
+test('T-300 columns get widths and dates keep their time — an 8.43-wide column shows ######## instead', async () => {
+  const dir = fakeDir();
+  const w = await createXlsxWriter(dir, 'out.xlsx', { sheetName: 'S', header: ['مسلسل', 'تاريخ الإصدار'] });
+  await w.addRow([1, new Date(Date.UTC(2026, 2, 15, 13, 45, 20))]);
+  await w.close();
+
+  const zip = await JSZip.loadAsync(dir.files.get('out.xlsx'));
+  const sheet = await zip.file('xl/worksheets/sheet1.xml').async('string');
+  assert.match(sheet, /<cols>.*<\/cols><sheetData>/, 'no <cols>: every date column renders as ########');
+  assert.match(sheet, /<col min="2" max="2" width="2[01]"/, 'the date column needs room for yyyy-mm-dd hh:mm:ss');
+  const styles = await zip.file('xl/styles.xml').async('string');
+  assert.match(styles, /formatCode="[^"]*hh:mm:ss"/, 'the date format dropped the time of day');
 });

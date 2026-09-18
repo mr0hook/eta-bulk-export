@@ -41,6 +41,13 @@ const toObj = (hdr, vals) => { const o = {}; for (let i = 0; i < hdr.length; i++
 // Normalize header strings so the same Arabic column in two Unicode forms (NFC/NFD) isn't unioned as two columns.
 const nfcHdr = (arr) => arr.map((h) => (typeof h === 'string' ? h.normalize('NFC') : h));
 
+// Phase 1 spools rows through a JSONL scratch file, and JSON has no date type: a plain
+// JSON.stringify turns every date cell into the TEXT "2026-03-15T13:45:20.000Z", which is what
+// Phase 2 then wrote into the merged sheet — a left-aligned string where the chunk file had a
+// real date. Tagging on the way out and reviving on the way back keeps the instant AND the type.
+const dateSafe = function (k, v) { const raw = this[k]; return raw instanceof Date ? (isNaN(raw) ? null : { __d: raw.getTime() }) : v; };
+const dateRevive = (k, v) => (v && typeof v === 'object' && typeof v.__d === 'number' ? new Date(v.__d) : v);
+
 // SPEC-040 — the merge's closing reconciliation: what the run PLANNED to hold vs what the chunk
 // files actually contained.
 //
@@ -257,7 +264,7 @@ async function runMerge(ExcelJS, dir, { onStatus, rowCap, prefix, files, sizes, 
       }
       let buf = '';
       for (const u of order) {
-        uniq++; buf += JSON.stringify({ sum: localSum.get(u), lines: localLines.get(u) || [] }) + '\n';
+        uniq++; buf += JSON.stringify({ sum: localSum.get(u), lines: localLines.get(u) || [] }, dateSafe) + '\n';
         // Named on failure (2026-08-20): a merge that died here reported only Chromium's opaque
         // "state cached in an interface object" with no hint of which step or how far in, which
         // cost an afternoon of guessing. Say what was being written and at what size.
@@ -310,7 +317,7 @@ async function runMerge(ExcelJS, dir, { onStatus, rowCap, prefix, files, sizes, 
       for (const l of lines) await detOut.addRow(lineCols.map((c) => l[c] ?? ''), day);
     };
     for (const seg of segs) {
-      for await (const line of readLines(dir, seg)) { if (line.trim()) { let rec; try { rec = JSON.parse(line); } catch {} if (rec) await emit(rec); } }
+      for await (const line of readLines(dir, seg)) { if (line.trim()) { let rec; try { rec = JSON.parse(line, dateRevive); } catch {} if (rec) await emit(rec); } }
     }
     await sumOut.close();
     await detOut.close();

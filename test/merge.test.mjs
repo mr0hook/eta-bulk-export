@@ -260,3 +260,22 @@ test('T-229 uuid-run files and the folder-wide merge are invisible to each other
   await mergeFolder(ExcelJS, dir, { onStatus: (m) => log2.push(m) });
   assert.equal((await load(dir, sumFile(dir))).actualRowCount - 1, 1, 'still only the range row');
 });
+
+test('T-299 date cells survive the merge as real dates, with the time of day intact', async () => {
+  const dir = fakeDir();
+  const U = 'الرقم الإلكترونى';
+  const D = 'تاريخ الإصدار';
+  const issued = new Date(Date.UTC(2026, 2, 15, 13, 45, 20));
+  await putXlsx(dir, 'eInvoices_2025_Sent_a.xlsx',
+    ['مسلسل', D, U], [[1, issued, 'U1']],
+    ['رقم الفاتورة', D, U], [['A-1', issued, 'U1']]);
+  await mergeFolder(ExcelJS, dir, () => {});
+
+  for (const nm of [sumFile(dir), detFile(dir)]) {
+    const ws = await load(dir, nm);
+    const hdr = ws.getRow(1).values.slice(1);
+    const v = ws.getRow(2).values.slice(1)[hdr.indexOf(D)];
+    assert.ok(v instanceof Date, `${nm}: date column came back as ${typeof v} (${v}) — not a date cell`);
+    assert.equal(v.getTime(), issued.getTime(), `${nm}: the time of day was lost`);
+  }
+});
