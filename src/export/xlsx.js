@@ -11,19 +11,15 @@ import { clean, cleanRow } from './sanitize.js';
 import { dateEg } from './dates.js';
 import { taxName, taxWidth } from './codes.js';
 import { mappingFor, ALWAYS_KEEP } from './mapping.js';
+import { fillArgb, solidFill } from './rowfill.js';
 
 export const XLSX_MIME = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const RTL = { rightToLeft: true, rtl: true, activeCell: 'A1', state: 'frozen', ySplit: 1 };
 const THIN = { top: { style: 'thin' }, left: { style: 'thin' }, bottom: { style: 'thin' }, right: { style: 'thin' } };
-const FILL = {
-  valid: solid('FFC6EFCE'), credit: solid('FFD9E1F2'), debit: solid('FFFFE699'), bad: solid('FFFFC7CE'),
-};
-function solid(argb) { return { type: 'pattern', pattern: 'solid', fgColor: { argb } }; }
 function addr(a) { a = a || {}; return `${a.buildingNumber ?? ''} ${a.street ?? ''} ${a.regionCity ?? ''} ${a.governate ?? ''}`.replace(/\s+/g, ' ').trim(); }
 const idx = (cols, key) => cols.findIndex((c) => c.key === key);
 function insertBefore(cols, beforeKey, col) { const i = idx(cols, beforeKey); cols.splice(i < 0 ? cols.length : i, 0, col); }
 function insertAfter(cols, afterKey, col) { const i = idx(cols, afterKey); cols.splice(i < 0 ? cols.length : i + 1, 0, col); }
-const BAD_STATUS = ['Invalid', 'Rejected', 'Cancelled', 'Cancellation Requested', 'Rejection Requested'];
 
 // ---------------- column definitions ----------------
 // The base [key, header, width] tuples and the two sheet names now come from mapping.js (SPEC-021).
@@ -39,10 +35,8 @@ function deriveInvStatus(o) {
   if (o.status === 'Valid' && o.rejectRequestDate != null && o.declineRejectRequestDate == null) s = 'Rejection Requested';
   return s;
 }
-function fillFor(statusEn, typeEn) {
-  if (statusEn === 'Valid') return typeEn === 'Credit Note' ? FILL.credit : typeEn === 'Debit Note' ? FILL.debit : FILL.valid;
-  return BAD_STATUS.includes(statusEn) ? FILL.bad : null;
-}
+// The palette itself lives in rowfill.js — the streaming writer needs the same one.
+const fillFor = (statusEn, typeEn) => solidFill(fillArgb(statusEn, typeEn));
 
 // ---------------- main ----------------
 // SPEC-027: row building and workbook building are separate stages, so a line-heavy chunk can

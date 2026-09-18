@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import ExcelJS from 'exceljs';
 import { mergeFolder } from '../src/core/merge.js';
+import { VALID, BAD, solidFill } from '../src/export/rowfill.js';
 
 // in-memory File System Access shim covering what fs.js/merge.js use
 function fakeDir() {
@@ -278,4 +279,29 @@ test('T-299 date cells survive the merge as real dates, with the time of day int
     assert.ok(v instanceof Date, `${nm}: date column came back as ${typeof v} (${v}) — not a date cell`);
     assert.equal(v.getTime(), issued.getTime(), `${nm}: the time of day was lost`);
   }
+});
+
+// putXlsx writes plain rows; a real chunk file colours each row by status, so colour it here too.
+async function putColoured(dir, name, headerSum, rowsSum, fills) {
+  const wb = new ExcelJS.Workbook();
+  const s0 = wb.addWorksheet('جميع الفواتير'); s0.addRow(headerSum);
+  rowsSum.forEach((r, i) => { const row = s0.addRow(r); const f = solidFill(fills[i]); if (f) row.fill = f; });
+  wb.addWorksheet('بيانات الفواتير').addRow(headerSum);
+  const buf = await wb.xlsx.writeBuffer();
+  const fh = await dir.getFileHandle(name, { create: true }); const w = await fh.createWritable(); await w.write(new Uint8Array(buf)); await w.close();
+}
+
+test('T-301 the merged sheet keeps the row colour scheme of the chunk files', async () => {
+  const dir = fakeDir();
+  const U = 'الرقم الإلكترونى';
+  await putColoured(dir, 'eInvoices_2025_Sent_a.xlsx', ['مسلسل', 'الحالة', U],
+    [[1, 'Valid', 'U1'], [2, 'Rejected', 'U2']], [VALID, BAD]);
+  await mergeFolder(ExcelJS, dir, () => {});
+
+  const ws = await load(dir, sumFile(dir));
+  const argb = (r) => ws.getRow(r).getCell(1).style?.fill?.fgColor?.argb;
+  assert.equal(argb(2), VALID, 'a valid row lost its green');
+  assert.equal(argb(3), BAD, 'a rejected row lost its red');
+  assert.equal(ws.getRow(1).getCell(1).style?.fill?.fgColor?.argb, undefined, 'the header row should stay plain');
+  assert.ok(ws.getRow(2).getCell(1).style?.border?.top, 'the thin borders went missing');
 });

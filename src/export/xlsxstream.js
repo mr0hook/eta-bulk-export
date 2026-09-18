@@ -9,6 +9,7 @@
 //
 // Only the MERGE OUTPUT uses this. Reading, and the per-chunk export, still use ExcelJS.
 import JSZip from 'jszip';
+import { ROW_FILLS } from './rowfill.js';
 
 const enc = new TextEncoder();
 
@@ -34,8 +35,24 @@ const toSerial = (d) => (d.getTime() - SERIAL_EPOCH) / 86400000;
 const CT = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"><Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/><Default Extension="xml" ContentType="application/xml"/><Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/><Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/><Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/></Types>`;
 const RELS = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/></Relationships>`;
 const WBRELS = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships"><Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/><Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/></Relationships>`;
-// s="1" is the date format; everything else uses the default style.
-const STYLES = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="1"><numFmt numFmtId="164" formatCode="yyyy\\-mm\\-dd\\ hh:mm:ss"/></numFmts><fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts><fills count="1"><fill><patternFill patternType="none"/></fill></fills><borders count="1"><border/></borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="2"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/><xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/></cellXfs></styleSheet>`;
+// The style table is FIXED and identical in every file this writer produces — a part topped up
+// later copies its predecessor's rows verbatim, s= indices and all, so the meaning of an index can
+// never shift. Index 0 is the bare default (the header row); every other index is
+//   1 + fillIndex * 2 + isDate
+// over [no fill, ...ROW_FILLS], all carrying the thin border the ExcelJS chunk export draws.
+const N_FILL = ROW_FILLS.length + 1;
+const THIN = '<border><left style="thin"/><right style="thin"/><top style="thin"/><bottom style="thin"/></border>';
+const xfs = ['<xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'];
+for (let f = 0; f < N_FILL; f++) {
+  // fillId 0 = none and 1 = gray125 are reserved by the format, so our solids start at 2.
+  const fillId = f === 0 ? 0 : f + 1;
+  const a = `fontId="0" fillId="${fillId}" borderId="1" xfId="0" applyBorder="1"${fillId ? ' applyFill="1"' : ''}`;
+  xfs.push(`<xf numFmtId="0" ${a}/>`, `<xf numFmtId="164" ${a} applyNumberFormat="1"/>`);
+}
+const STYLES = `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><numFmts count="1"><numFmt numFmtId="164" formatCode="yyyy\\-mm\\-dd\\ hh:mm:ss"/></numFmts><fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts><fills count="${N_FILL + 1}"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill>${ROW_FILLS.map((c) => `<fill><patternFill patternType="solid"><fgColor rgb="${c}"/><bgColor indexed="64"/></patternFill></fill>`).join('')}</fills><borders count="2"><border/>${THIN}</borders><cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs><cellXfs count="${xfs.length}">${xfs.join('')}</cellXfs></styleSheet>`;
+const FILL_IDX = new Map(ROW_FILLS.map((c, i) => [c.toUpperCase(), i + 1]));
+// `fill` is an ARGB string, exactly as the chunk file stores it; anything unknown means no fill.
+const styleBase = (fill) => 1 + 2 * (fill ? (FILL_IDX.get(String(fill).toUpperCase()) ?? 0) : 0);
 const wbXml = (sheet) => `<?xml version="1.0" encoding="UTF-8" standalone="yes"?><workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><sheets><sheet name="${esc(sheet).slice(0, 31)}" sheetId="1" r:id="rId1"/></sheets></workbook>`;
 
 // Column widths are guessed from the header text: the merge unions columns by NAME across chunk
@@ -119,17 +136,20 @@ class Zip {
   }
 }
 
-function cellXml(v, ref) {
-  if (v == null || v === '') return '';
-  if (v instanceof Date) return isNaN(v) ? '' : `<c r="${ref}" s="1"><v>${toSerial(v)}</v></c>`;
-  if (typeof v === 'number') return isFinite(v) ? `<c r="${ref}"><v>${v}</v></c>` : '';
-  if (typeof v === 'boolean') return `<c r="${ref}" t="b"><v>${v ? 1 : 0}</v></c>`;
+function cellXml(v, ref, sb = 0) {
+  // An empty cell still has to be emitted when the row is styled, or the fill and border stop at
+  // the last non-empty column and the row looks ragged.
+  const st = sb ? ` s="${sb}"` : '';
+  if (v == null || v === '') return st ? `<c r="${ref}"${st}/>` : '';
+  if (v instanceof Date) return isNaN(v) ? '' : `<c r="${ref}" s="${sb + 1}"><v>${toSerial(v)}</v></c>`;
+  if (typeof v === 'number') return isFinite(v) ? `<c r="${ref}"${st}><v>${v}</v></c>` : '';
+  if (typeof v === 'boolean') return `<c r="${ref}"${st} t="b"><v>${v ? 1 : 0}</v></c>`;
   // ExcelJS hands back rich text and formula/hyperlink objects for some cells; take their text.
   if (typeof v === 'object') {
     const s = Array.isArray(v.richText) ? v.richText.map((r) => r.text).join('') : (v.text ?? v.result ?? v.hyperlink ?? '');
-    return s === '' ? '' : `<c r="${ref}" t="inlineStr"><is><t xml:space="preserve">${esc(s)}</t></is></c>`;
+    return s === '' ? (st ? `<c r="${ref}"${st}/>` : '') : `<c r="${ref}"${st} t="inlineStr"><is><t xml:space="preserve">${esc(s)}</t></is></c>`;
   }
-  return `<c r="${ref}" t="inlineStr"><is><t xml:space="preserve">${esc(v)}</t></is></c>`;
+  return `<c r="${ref}"${st} t="inlineStr"><is><t xml:space="preserve">${esc(v)}</t></is></c>`;
 }
 
 // Writes one sheet into one file. addRow() takes an array of values positional to `header`.
@@ -150,10 +170,11 @@ export async function createXlsxWriter(dir, name, { sheetName = 'Sheet1', header
 
   return {
     get rows() { return rows; },
-    async addRow(vals) {
+    async addRow(vals, fill) {
       rows++;
+      const sb = styleBase(fill);
       let cells = '';
-      for (let i = 0; i < vals.length; i++) cells += cellXml(vals[i], colRef(i + 1) + rows);
+      for (let i = 0; i < vals.length; i++) cells += cellXml(vals[i], colRef(i + 1) + rows, sb);
       buf += `<row r="${rows}">${cells}</row>`;
       if (buf.length >= FLUSH_CHARS) await flush();
     },

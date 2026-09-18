@@ -240,7 +240,7 @@ async function runMerge(ExcelJS, dir, { onStatus, rowCap, prefix, files, sizes, 
       catch { failed.push(name); onStatus(t('merge.skipped', { name })); continue; }
       const s0 = wb.worksheets[0];
       const s1 = wb.worksheets[1] && wb.worksheets[1] !== s0 ? wb.worksheets[1] : null;
-      const localSum = new Map(), localLines = new Map(), order = [];
+      const localSum = new Map(), localLines = new Map(), localFill = new Map(), order = [];
       if (s0) {
         if (!sheetNames.s0) sheetNames.s0 = s0.name;
         const hdr = nfcHdr(s0.getRow(1).values.slice(1)); const uk = uuidKeyOf(hdr); addCols(sumCols, hdr);
@@ -248,7 +248,11 @@ async function runMerge(ExcelJS, dir, { onStatus, rowCap, prefix, files, sizes, 
         // a row with no UUID). unique + extra is the true number of documents these files hold, which
         // is what reconcile() has to compare against the plan — see SPEC-040.
         let fRows = 0;
-        s0.eachRow((row, rn) => { if (rn === 1) return; fRows++; const o = toObj(hdr, row.values.slice(1)); const u = o[uk]; if (u == null || seen.has(u)) { extra++; return; } seen.add(u); localSum.set(u, o); order.push(u); });
+        s0.eachRow((row, rn) => { if (rn === 1) return; fRows++; const o = toObj(hdr, row.values.slice(1)); const u = o[uk]; if (u == null || seen.has(u)) { extra++; return; } seen.add(u); localSum.set(u, o);
+          // The chunk file already carries the row colour; reading it back beats re-deriving it from
+          // status+type, which the merged sheet could not do anyway — it only has the Arabic type name.
+          const fill = row.getCell(1).style?.fill?.fgColor?.argb; if (fill) localFill.set(u, fill);
+          order.push(u); });
         fileRows[name] = fRows;
       }
       const eatLines = (ws) => {
@@ -264,7 +268,7 @@ async function runMerge(ExcelJS, dir, { onStatus, rowCap, prefix, files, sizes, 
       }
       let buf = '';
       for (const u of order) {
-        uniq++; buf += JSON.stringify({ sum: localSum.get(u), lines: localLines.get(u) || [] }, dateSafe) + '\n';
+        uniq++; buf += JSON.stringify({ sum: localSum.get(u), lines: localLines.get(u) || [], fill: localFill.get(u) || null }, dateSafe) + '\n';
         // Named on failure (2026-08-20): a merge that died here reported only Chromium's opaque
         // "state cached in an interface object" with no hint of which step or how far in, which
         // cost an afternoon of guessing. Say what was being written and at what size.
@@ -313,8 +317,8 @@ async function runMerge(ExcelJS, dir, { onStatus, rowCap, prefix, files, sizes, 
       await sumOut.ensureRoom(1, day);
       await detOut.ensureRoom(lines.length, day);
       const s = { ...rec.sum, [SERIAL]: serial++ };
-      await sumOut.addRow(sumCols.map((c) => s[c] ?? ''), day);
-      for (const l of lines) await detOut.addRow(lineCols.map((c) => l[c] ?? ''), day);
+      await sumOut.addRow(sumCols.map((c) => s[c] ?? ''), day, rec.fill);
+      for (const l of lines) await detOut.addRow(lineCols.map((c) => l[c] ?? ''), day, rec.fill);
     };
     for (const seg of segs) {
       for await (const line of readLines(dir, seg)) { if (line.trim()) { let rec; try { rec = JSON.parse(line, dateRevive); } catch {} if (rec) await emit(rec); } }

@@ -17,6 +17,7 @@
 // lines to their summary row within one file.
 import { createXlsxWriter } from './xlsxstream.js';
 import { clean } from './sanitize.js';
+import { fillArgb } from './rowfill.js';
 
 // Held in memory (plain row objects, ~tens of MB at this size) while the chunk may still be one
 // file. Crossing it is what starts a part file, NOT a batch boundary.
@@ -69,7 +70,7 @@ export function createDetailSink(dirHandle, nameOf, { inlineMax = CHUNK_LINES_IN
     for (const [a, b] of runsOf(rows)) {
       const n = b - a;
       if (!writer || (writerRows > 0 && writerRows + n > rowCap)) { if (writer) await writer.close(); await openPart(); }
-      for (let i = a; i < b; i++) await writer.addRow(writerCols.map((c) => valueOf(rows[i], c)));
+      for (let i = a; i < b; i++) await writer.addRow(writerCols.map((c) => valueOf(rows[i], c)), fillArgb(rows[i].status, rows[i].typeEn));
       writerRows += n;
     }
   };

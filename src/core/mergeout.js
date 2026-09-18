@@ -82,9 +82,9 @@ export function createRotator(dir, { prefix, kind, sheetName, cols, seed = [], o
       await seal();
       await open(false);
     },
-    async addRow(vals, day) {
+    async addRow(vals, day, fill) {
       if (!w) await open(parts.length > 0);
-      await w.addRow(vals);
+      await w.addRow(vals, fill);
       rows++; dirty = true;
       if (day) { if (!from || day < from) from = day; if (!to || day > to) to = day; }
     },
