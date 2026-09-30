@@ -79,7 +79,12 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
         const bodyHash = [...new Uint8Array(await crypto.subtle.digest('SHA-256', enc.encode(String(msg.body || ''))))].map((b) => b.toString(16).padStart(2, '0')).join('');
         const ts = String(Math.floor(Date.now() / 1000));
         const nonce = crypto.randomUUID().replace(/-/g, '');
-        const ck = await crypto.subtle.importKey('raw', enc.encode(key), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+        // The clientKey is HEX (randHex(32) on the server) and BOTH the server's verifier and the
+        // page's local fallback key it on the DECODED bytes. Keying on the hex string's own UTF-8
+        // bytes instead produced a valid-looking signature that could never verify, so every signed
+        // call the worker signed came back 401 'unauthorized' — the drawer stayed unlocked on the
+        // cached grace verdict and then "Plan failed: unauthorized". One derivation, three places.
+        const ck = await crypto.subtle.importKey('raw', Uint8Array.from(String(key).match(/.{2}/g).map((h) => parseInt(h, 16))), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
         const sigBuf = await crypto.subtle.sign('HMAC', ck, enc.encode(`${ts}\n${nonce}\nPOST\n${String(msg.path || '')}\n${bodyHash}`));
         const signature = [...new Uint8Array(sigBuf)].map((b) => b.toString(16).padStart(2, '0')).join('');
         sendResponse({ ok: true, ts, nonce, signature, deviceId: cur.deviceId || null });

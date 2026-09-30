@@ -13,7 +13,7 @@
 // same contract jobs.js keeps, so an environment deployed without the D1 binding degrades to an
 // empty portal instead of 500s. (The binding is still named JOBS: renaming it would need a
 // wrangler.toml change on every environment for no behavioural gain.)
-import { cleanRin } from './lib/util.js';
+import { cleanRin, jobStaleBefore } from './lib/util.js';
 import { rinOwnerGet } from './lib/kv.js';
 
 export const hasDb = (env) => !!(env && env.JOBS);
@@ -545,13 +545,19 @@ export async function purgeJobChunks(env, id) {
   return true;
 }
 
+/**
+ * Runs the dashboard should treat as live. Bounded by jobStaleBefore(): a job left in 'planning' or
+ * 'planned' because the tab was closed used to sit in "Running now" and in the activeJobs counter
+ * for ever, so the panel that exists to show what is happening NOW filled up with last month.
+ * After 24 hours without a checkpoint it drops out of both — the history row is untouched.
+ */
 export async function listActiveJobs(env) {
   if (!hasDb(env)) return [];
   const r = await env.JOBS.prepare(
     `SELECT id, user_email, rin, source, state, done_count, total_chunks, updated_at
-       FROM jobs WHERE state IN ('planning','planned','running','merging')
+       FROM jobs WHERE state IN ('planning','planned','running','merging') AND updated_at >= ?
       ORDER BY updated_at DESC LIMIT 50`,
-  ).all();
+  ).bind(jobStaleBefore()).all();
   return rows(r);
 }
 
@@ -562,11 +568,11 @@ export async function dashboardStats(env, { since, horizon }) {
     `SELECT (SELECT COUNT(*) FROM users) AS users,
             (SELECT COUNT(*) FROM clients WHERE voided = 0) AS clients,
             (SELECT COUNT(*) FROM devices) AS devices,
-            (SELECT COUNT(*) FROM jobs WHERE state IN ('planning','planned','running','merging')) AS active_jobs,
+            (SELECT COUNT(*) FROM jobs WHERE state IN ('planning','planned','running','merging') AND updated_at >= ?) AS active_jobs,
             (SELECT COUNT(*) FROM jobs WHERE created_at >= ?) AS jobs_today,
             (SELECT COALESCE(SUM(total_rows),0) FROM jobs WHERE created_at >= ?) AS docs_today,
             (SELECT COUNT(*) FROM users WHERE valid_until IS NOT NULL AND valid_until <> '' AND valid_until <= ?) AS expiring_soon`,
-  ).bind(since, since, horizon).first();
+  ).bind(jobStaleBefore(), since, since, horizon).first();   // bind order follows the ?s above: stale bound, since, since, horizon
   return r || {};
 }
 

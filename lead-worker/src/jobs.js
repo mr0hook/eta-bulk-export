@@ -5,6 +5,8 @@
 // Every function tolerates a missing env.JOBS by returning null/false rather than throwing, so an
 // environment deployed without the binding degrades to "planner unavailable" instead of 500s.
 
+import { jobStaleBefore } from './lib/util.js';
+
 export const hasJobs = (env) => !!(env && env.JOBS);
 
 export async function createJob(env, j) {
@@ -58,6 +60,10 @@ export async function finishPlan(env, id, chunks, probes) {
  *
  * 'done' is excluded (nothing to resume) and so is 'abandoned'. Newest first, capped: a device with
  * a long history should not push a wall of stale jobs into the drawer.
+ *
+ * And nothing older than jobStaleBefore(): an offer to resume a run the user abandoned yesterday is
+ * noise at best, and at worst it re-runs a range they already exported by hand. The row stays in the
+ * history — it just stops being offered.
  */
 export async function listResumable(env, deviceId, limit = 5) {
   if (!hasJobs(env)) return [];
@@ -66,9 +72,10 @@ export async function listResumable(env, deviceId, limit = 5) {
             done_count, failed_count, updated_at
        FROM jobs
       WHERE device_id = ? AND state IN ('planned','running','merging','paused','incomplete','halted')
+        AND updated_at >= ?
       ORDER BY updated_at DESC
       LIMIT ?`,
-  ).bind(deviceId, limit).all();
+  ).bind(deviceId, jobStaleBefore(), limit).all();
   return (r && r.results) || [];
 }
 

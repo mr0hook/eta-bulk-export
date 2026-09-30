@@ -32,6 +32,7 @@ import {
   defaultRange, defaultAdvanced, normalizeAdvanced, loadAdvanced, saveAdvanced, advancedChanges,
   buildSel, sourceOfKind, kindOf, rejectionAllowed, resumeEntry, planFromJob, finishRun, runFinished, runClean,
   registerRefusal, chunkMap, runGuarded, restoreLog, persistLog, clearedLog, folderAction, abandonCheckpoint,
+  isFsLocked,
 } from './flow.js';
 
 const CSS = `
@@ -1177,10 +1178,11 @@ export function mountUI() {
   // open in Excel. Say the actionable thing and keep the raw text after it.
   const mergeErrText = (e) => {
     const raw = String(e?.message || e || '');
-    return /state had changed|cached in an interface object|InvalidStateError|NoModificationAllowed|NotReadable/i.test(raw)
-      ? t('ft.mergeLocked') + ' — ' + raw.slice(0, 140)
-      : raw.slice(0, 200);
+    return isFsLocked(e) ? t('ft.mergeLocked') + ' — ' + raw.slice(0, 140) : raw.slice(0, 200);
   };
+  // The same translation for any other action: a locked export folder is the one failure the user
+  // can fix themselves, and it reads as gibberish until someone says "close it in Excel".
+  const actionErrText = (e) => (isFsLocked(e) ? t('ft.fileLocked') : String(e?.message || e || '').slice(0, 200));
   // Yes/no confirm in the same in-drawer modal style (window.confirm has the same suppression problem).
   function confirmModal(title, sub) {
     return new Promise((resolve) => {
@@ -1513,6 +1515,29 @@ export function mountUI() {
   setInterval(() => tokChip(orch.tokenStatus()), 30000);
   // The handle comes back in 'prompt' state; ensureFolder() re-requests it inside the next click.
   idbGet('dh_last').then((h) => { if (h) { orch.setFolder(h); setFolderName(h.name); } }).catch(() => {});
+
+  // 2026-09-20 — a rejection that escapes a drawer action does not just vanish into the console: the
+  // PORTAL's own error boundary catches it and shows "Oops! Application Error" with Chromium's raw
+  // text (the report that prompted this was a NoModificationAllowedError from a locked export file).
+  // The user is told the TAX PORTAL crashed, and its "Report this error" button sends it to the ETA
+  // rather than to us.
+  //
+  // We are injected at document_idle, so our own window 'unhandledrejection' listener is registered
+  // AFTER the SPA's and cannot suppress that dialog. The only fix is to leave no rejection unhandled.
+  // One pass over the already-wired handlers — so this holds for every control added later without
+  // anyone having to remember it.
+  for (const el of root.querySelectorAll('button, input, select')) {
+    const fn = el.onclick;
+    if (typeof fn !== 'function') continue;
+    el.onclick = async (ev) => {
+      try { return await fn.call(el, ev); }
+      catch (e) {
+        console.warn('[ETA Bulk] action failed', e);
+        logLine(t('ft.actionFailed', { msg: String(e?.message || e || '').slice(0, 200) }), { level: 'err' });
+        setFt('err', actionErrText(e));
+      }
+    };
+  }
 
   // survive SPA re-render: re-append host if the app wipes it
   const obs = new MutationObserver(() => { if (!document.getElementById('eta-bulk-host')) document.documentElement.appendChild(host); });

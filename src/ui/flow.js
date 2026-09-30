@@ -343,3 +343,16 @@ export function folderAction({ hasHandle = false, permitted = null } = {}) {
   if (permitted === false) return 'pick';
   return 'request';
 }
+
+// ── file-system errors the user can actually act on ──────────────────────────────────────────────
+// Chromium's File System Access errors read like kernel messages. Two of them mean the same real
+// thing — the folder or one of its files could not be written RIGHT NOW — and in practice that is an
+// export still open in Excel, a second ETA tab writing the same folder, or a sync client (OneDrive)
+// holding the file:
+//   NoModificationAllowedError · "An attempt was made to write to a file or directory which could
+//                                 not be modified due to the state of the underlying filesystem."
+//   InvalidStateError          · "…state cached in an interface object… had changed since it was
+//                                 read from disk."  (also seen as NotReadableError)
+// Nothing was lost in either case: the answer is always "close it and try again".
+const FS_LOCKED_RE = /state had changed|cached in an interface object|InvalidStateError|NoModificationAllowed|NotReadable/i;
+export const isFsLocked = (e) => FS_LOCKED_RE.test(String((e && (e.name + ' ' + e.message)) || e || ''));

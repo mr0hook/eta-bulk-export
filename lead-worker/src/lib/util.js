@@ -50,4 +50,12 @@ const isExpired = (validUntil, now = Date.now()) => {
   return Number.isFinite(t) && t < now;
 };
 
-export { CORS, json, EMAIL_RE, enc, nowSec, hex, sha256hex, hmacHex, randHex, cleanRin, ctEq, cmpVersion, isVersionBlocked, isExpired };
+
+// A job nobody has checkpointed in 24 hours is not "pending" any more — the user closed the tab and
+// moved on. Past this bound it stops being offered for resume and stops counting as a live run; the
+// history row itself is kept (that is what the admin timeline reads). updated_at is an ISO string,
+// so this is a plain lexicographic SQL bound.
+const JOB_STALE_MS = 24 * 3600000;
+const jobStaleBefore = (now = Date.now()) => new Date(now - JOB_STALE_MS).toISOString();
+
+export { CORS, json, EMAIL_RE, enc, nowSec, hex, sha256hex, hmacHex, randHex, cleanRin, ctEq, cmpVersion, isVersionBlocked, isExpired, JOB_STALE_MS, jobStaleBefore };

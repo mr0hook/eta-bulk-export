@@ -14,6 +14,19 @@ kv_namespaces = [
   { binding = "LEADS", id = "7d039a655c434302a5e8fcae6a5450d0" }
 ]
 
+# D1 "eta-bulk-jobs-prod" — job records (SPEC-016 / A2, per ADR-002), bound as JOBS.
+#
+# This MUST stay identical to [env.production] below, because both publish to the SAME worker name
+# ("eta-bulk-leads"). 2026-09-20: a bare `wrangler deploy` — the default target, which at the time
+# declared no D1 — replaced the live worker with a copy that had no JOBS binding. /api/dashboard
+# answered "portal unavailable — no D1 binding" and /plan/* answered 503 "planner unavailable": the
+# tool looked dead to every user, from a deploy that printed no warning at all. Environments do not
+# inherit bindings in wrangler, so the only defence is that the two lists agree.
+[[d1_databases]]
+binding = "JOBS"
+database_name = "eta-bulk-jobs-prod"
+database_id = "e8e138c0-1bd2-463b-902c-dcb9c98354f4"
+
 # A0: the dashboard and privacy pages live in src/assets/*.html and are imported as text modules
 # (`import DASH from '../assets/dash.html'`). Deliberately NOT Workers Static Assets: those are served
 # by the platform ahead of the Worker, which would change who answers `/` and `/admin`. A text module
